@@ -3,19 +3,15 @@
 import StarterKit from '@tiptap/starter-kit'
 import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
-import Table from '@tiptap/extension-table'
+import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table'
 import Image from '@tiptap/extension-image'
 import TextAlign from '@tiptap/extension-text-align'
 import Link from '@tiptap/extension-link'
 import { Color } from '@tiptap/extension-color'
 import Highlight from "@tiptap/extension-highlight"
 import FontFamily from '@tiptap/extension-font-family'
-import TextStyle from '@tiptap/extension-text-style'
+import { TextStyle } from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
-import ImageResize from "tiptap-extension-resize-image";
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
-import TableRow from '@tiptap/extension-table-row'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { useLiveblocksExtension } from "@liveblocks/react-tiptap";
 import { useStorage } from '@liveblocks/react';
@@ -78,7 +74,9 @@ export const Editor = ({ initialContent }: EditorProps) => {
     extensions: [
       liveblocks,
       StarterKit.configure({
-        history: false,
+        undoRedo: false,
+        link: false,
+        underline: false,
       }),
       LineHeightExtension,
       FontSizeExtension,
@@ -97,12 +95,13 @@ export const Editor = ({ initialContent }: EditorProps) => {
       FontFamily,
       TextStyle,
       Underline,
-      Image,
-      ImageResize,
+      Image.configure({
+        resize: { enabled: true },
+      }),
       Table,
-      TableCell,
-      TableHeader,
       TableRow,
+      TableHeader,
+      TableCell,
       TaskItem.configure({
         nested: true,
       }),

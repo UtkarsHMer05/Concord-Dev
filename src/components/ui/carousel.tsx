@@ -103,7 +103,8 @@ const Carousel = React.forwardRef<
         return
       }
 
-      setApi(api)
+      const id = requestAnimationFrame(() => setApi(api))
+      return () => cancelAnimationFrame(id)
     }, [api, setApi])
 
     React.useEffect(() => {
@@ -111,12 +112,14 @@ const Carousel = React.forwardRef<
         return
       }
 
-      onSelect(api)
+      const id = requestAnimationFrame(() => onSelect(api))
       api.on("reInit", onSelect)
       api.on("select", onSelect)
 
       return () => {
+        cancelAnimationFrame(id)
         api?.off("select", onSelect)
+        api?.off("reInit", onSelect)
       }
     }, [api, onSelect])
 

@@ -4,10 +4,21 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 
 import { api } from "../../../../convex/_generated/api";
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-const liveblocks = new Liveblocks({
-  secret: process.env.LIVEBLOCKS_SECRET_KEY!,
-});
+// Clients are created lazily so that module evaluation (and therefore the
+// production build) does not require the deployment environment to be set.
+let convex: ConvexHttpClient | null = null;
+function getConvex() {
+  convex ??= new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  return convex;
+}
+
+let liveblocks: Liveblocks | null = null;
+function getLiveblocks() {
+  liveblocks ??= new Liveblocks({
+    secret: process.env.LIVEBLOCKS_SECRET_KEY!,
+  });
+  return liveblocks;
+}
 
 export async function POST(req: Request) {
   const { sessionClaims } = await auth();
@@ -21,7 +32,7 @@ export async function POST(req: Request) {
   }
 
   const { room } = await req.json();
-  const document = await convex.query(api.documents.getById, { id: room });
+  const document = await getConvex().query(api.documents.getById, { id: room });
 
   if (!document) {
     return new Response("Unauthorized", { status: 401 });
@@ -40,7 +51,7 @@ export async function POST(req: Request) {
   const hue = Math.abs(nameToNumber) % 360;
   const color = `hsl(${hue}, 80%, 60%)`;
 
-  const session = liveblocks.prepareSession(user.id, {
+  const session = getLiveblocks().prepareSession(user.id, {
     userInfo: {
       name,
       avatar: user.imageUrl,

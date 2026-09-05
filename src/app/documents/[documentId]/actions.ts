@@ -6,10 +6,15 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+// Created lazily so module evaluation does not require the deployment env.
+let convex: ConvexHttpClient | null = null;
+function getConvex() {
+  convex ??= new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  return convex;
+}
 
 export async function getDocuments(ids: Id<"documents">[]) {
-  return await convex.query(api.documents.getByIds, { ids });
+  return await getConvex().query(api.documents.getByIds, { ids });
 };
 
 export async function getUsers() {
