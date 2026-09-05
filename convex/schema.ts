@@ -8,6 +8,10 @@ export default defineSchema({
     ownerId: v.string(),
     roomId: v.optional(v.string()),
     organizationId: v.optional(v.string()),
+    // TRANSITIONAL (Phase 0): whole-document editor content as a versioned
+    // JSON string ({ v: 1, doc: <TipTap JSON> }). Replaced by the CRDT update
+    // log in Phase 2; do not treat as the final durability design.
+    content: v.optional(v.string()),
   })
     .index("by_owner_id", ["ownerId"])
     .index("by_organization_id", ["organizationId"])

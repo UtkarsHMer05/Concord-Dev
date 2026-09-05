@@ -42,8 +42,6 @@ import {
 } from "@/components/ui/menubar";
 import { useEditorStore } from "@/store/use-editor-store";
 
-import { Inbox } from "./inbox";
-import { Avatars } from "./avatars";
 import { DocumentInput } from "./document-input";
 import { api } from "../../../../convex/_generated/api";
 import { Doc } from "../../../../convex/_generated/dataModel";
@@ -263,8 +261,6 @@ export const Navbar = ({ data }: NavbarProps) => {
         </div>
       </div>
       <div className="flex gap-3 items-center pl-6">
-        <Avatars />
-        <Inbox />
         <OrganizationSwitcher
           afterCreateOrganizationUrl="/"
           afterLeaveOrganizationUrl="/"

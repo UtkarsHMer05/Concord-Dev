@@ -3,7 +3,6 @@
 // Requires the app to be running (npm run dev) with a provisioned Convex backend.
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
-const DOC_ID = process.env.SMOKE_DOC_ID ?? "nonexistent-doc-for-auth-check";
 
 let failures = 0;
 
@@ -24,15 +23,16 @@ check(
   homeText.includes("Sign in") || homeText.includes("Docs") || homeText.includes("__next"),
 );
 
-const unauthorized = await fetch(`${BASE_URL}/api/liveblocks-auth`, {
+// The removed realtime room authorization endpoint must not come back.
+const removedEndpoint = await fetch(`${BASE_URL}/api/liveblocks-auth`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ room: DOC_ID }),
+  body: JSON.stringify({ room: "any" }),
 });
 check(
-  "liveblocks auth rejects unauthenticated requests",
-  unauthorized.status === 401 || unauthorized.status === 404,
-  `(status ${unauthorized.status})`,
+  "removed room auth endpoint stays gone",
+  removedEndpoint.status === 404,
+  `(status ${removedEndpoint.status})`,
 );
 
 if (failures > 0) {

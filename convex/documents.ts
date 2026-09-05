@@ -207,3 +207,34 @@ export const getById = query({
     return document;
   },
 });
+
+export const updateContent = mutation({
+  args: { id: v.id("documents"), content: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.auth.getUserIdentity();
+
+    if (!user) {
+      throw new ConvexError("Unauthorized");
+    }
+
+    const organizationId = (user.organization_id ?? undefined) as
+      | string
+      | undefined;
+
+    const document = await ctx.db.get(args.id);
+
+    if (!document) {
+      throw new ConvexError("Document not found");
+    }
+
+    const isOwner = document.ownerId === user.subject;
+    const isOrganizationMember =
+      !!(document.organizationId && document.organizationId === organizationId);
+
+    if (!isOwner && !isOrganizationMember) {
+      throw new ConvexError("Unauthorized");
+    }
+
+    await ctx.db.patch(args.id, { content: args.content });
+  },
+});

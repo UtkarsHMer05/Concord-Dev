@@ -2,9 +2,9 @@ import { toast } from "sonner";
 import { useRef, useState } from "react";
 import { useMutation } from "convex/react";
 import { BsCloudCheck, BsCloudSlash } from "react-icons/bs";
-import { useStatus } from "@liveblocks/react";
 
 import { useDebounce } from "@/hooks/use-debounce";
+import { useDocumentSession } from "@/lib/collaboration/provider";
 
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -16,7 +16,7 @@ interface DocumentInputProps {
 };
 
 export const DocumentInput = ({ title, id }: DocumentInputProps) => {
-  const status = useStatus();
+  const { content } = useDocumentSession();
 
   const [value, setValue] = useState(title);
   const [isPending, setIsPending] = useState(false);
@@ -55,8 +55,8 @@ export const DocumentInput = ({ title, id }: DocumentInputProps) => {
       .finally(() => setIsPending(false));
   };
 
-  const showLoader = isPending || status === "connecting" || status === "reconnecting";
-  const showError = status === "disconnected";
+  const showLoader = isPending || content.status === "saving";
+  const showError = content.status === "error";
 
   return (
     <div className="flex items-center gap-2">
