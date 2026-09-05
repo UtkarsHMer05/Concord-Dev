@@ -1,6 +1,6 @@
 // HTTP smoke checks for a running Concord dev/preview server.
 // Usage: BASE_URL=http://localhost:3000 npm run smoke
-// Requires the app to be running (npm run dev) with a provisioned Convex backend.
+// Requires the app to be running (npm run dev) with Docker PostgreSQL up.
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
 
@@ -39,3 +39,30 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log("Smoke checks passed.");
+
+// Database-backed health probe (PostgreSQL reachable from the app).
+const health = await fetch(`${BASE_URL}/api/health`);
+const healthBody = await health.json().catch(() => null);
+check(
+  "health reports database connectivity",
+  health.status === 200 && healthBody?.status === "ok" && healthBody?.db?.ok === true,
+  `(status ${health.status})`,
+);
+
+// Protected data APIs deny unauthenticated access.
+const unauthList = await fetch(`${BASE_URL}/api/documents`);
+check(
+  "unauthenticated document list denied",
+  unauthList.status === 401,
+  `(status ${unauthList.status})`,
+);
+const unauthSave = await fetch(`${BASE_URL}/api/documents/00000000-0000-4000-8000-000000000000/content`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ content: { v: 1, doc: {} }, expectedContentVersion: 1 }),
+});
+check(
+  "unauthenticated content save denied",
+  unauthSave.status === 401,
+  `(status ${unauthSave.status})`,
+);
