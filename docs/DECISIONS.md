@@ -347,3 +347,63 @@ retained and will not be removed.
   the TypeScript 7 ecosystem stabilizes.
 - **Evidence:** ESLint 10 crash reproduced during Phase 0 (`getReactVersionFromContext`).
 - **Revisit conditions:** Next.js minor releases; TypeScript 7 tooling adoption.
+
+---
+
+## Phase 1 additions (2026-09-06)
+
+## DEC-019 — PostgreSQL data stack: Drizzle ORM + node-postgres, Docker Compose local runtime
+
+- **Status:** Accepted
+- **Decision:** Concord's durable application data lives in PostgreSQL 18
+  (pinned `postgres:18.6-trixie` image), run locally via Docker Compose. The
+  typed schema is expressed with Drizzle ORM 0.45.x; schema changes ship as
+  reviewed SQL migrations generated with Drizzle Kit 0.31.x and applied by the
+  Drizzle migrator at startup/test time. The runtime driver is
+  `node-postgres` (`pg` 8.x) behind a server-only connection pool. Zod 4
+  validates environment configuration and mutation input boundaries.
+- **Context:** Phase 1 replaces temporary Convex persistence with
+  Concord-owned durable storage (DEC-004). The default stack from the Phase 1
+  plan (PostgreSQL + Drizzle + `pg` + Docker Compose) was verified compatible
+  with the modernized Next.js 16 / Node 24 repository; no compatibility
+  blocker was found.
+- **Alternatives:** Prisma (heavier abstraction; weaker fit for explicit SQL
+  review); Supabase/Neon hosted Postgres (unnecessary hosted dependency for
+  local-first development; deployment decisions deferred to Phase 7);
+  `drizzle push` as schema management (rejected: migrations must be
+  authoritative and replayable); postgres.js driver (fine, but `pg` is the
+  default pairing with Drizzle's documented node-postgres support and keeps
+  the pool explicit).
+- **Rationale:** Explicit typed SQL with reviewed migration files; mature
+  transactions/indexing; no hosted service required in Phases 1–6 (DEC-010);
+  Drizzle 1.x remains beta, so stable 0.45.x is pinned.
+- **Consequences:** Docker Compose is required for local development and
+  tests; schema changes must go through tracked migrations replayable from an
+  empty database; application-layer authorization is used (RLS considered and
+  deferred — see DEC-020).
+- **Evidence:** npm registry version checks (2026-09-06); clean install;
+  empty-database migration replay (Phase 1 gate).
+- **Revisit conditions:** Drizzle 1.x stable adoption; production hosting
+  decisions in Phase 7.
+
+## DEC-020 — Application-layer authorization now; Row Level Security deferred
+
+- **Status:** Accepted
+- **Decision:** Resource authorization (owner/organization/ACL resolution) is
+  enforced in Concord's server services against PostgreSQL data. PostgreSQL
+  Row Level Security is NOT enabled in Phase 1.
+- **Context:** The app connects through a single server-side service
+  credential pool, not per-user database roles; RLS with one shared role adds
+  complexity without adding a second enforcement layer that maps to real
+  principals.
+- **Alternatives:** RLS keyed on session variables (rejected for Phase 1: the
+  connection pool is shared; policy duplication with no per-user DB identity).
+- **Rationale:** One authoritative authorization layer, testable at the
+  service boundary; RLS can be added later as defense-in-depth without schema
+  changes if per-request database identities are introduced.
+- **Consequences:** Authorization correctness is proven by the service-level
+  test suite (unit + integration + adversarial) rather than by database
+  policy.
+- **Evidence:** Phase 1 authorization test suite.
+- **Revisit conditions:** Introduction of per-user database credentials or a
+  second service writing to the same tables.
