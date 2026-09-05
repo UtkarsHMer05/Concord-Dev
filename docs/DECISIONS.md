@@ -407,3 +407,55 @@ retained and will not be removed.
 - **Evidence:** Phase 1 authorization test suite.
 - **Revisit conditions:** Introduction of per-user database credentials or a
   second service writing to the same tables.
+
+## DEC-021 — Phase 1 authorization and audit policy choices
+
+- **Status:** Accepted
+- **Decision:** (a) Document deletion is OWNER-only — an intentional
+  tightening over the Phase 0 bootstrap where any organization member could
+  delete organization documents. (b) Rename requires effective EDITOR
+  (owner or organization member), preserving verified Phase 0 product
+  behavior. (c) Title search is case-insensitive substring matching
+  (parameterized ILIKE with escaped wildcards) — a superset of the Phase 0
+  token-prefix search. (d) Audit events cover document create/rename/delete
+  and ACL grant/update/revoke; per-save editor content writes are NOT
+  audited (per-keystroke volume would create pathological audit growth);
+  audit metadata carries titles/roles/ids, never document bodies or secrets.
+- **Context:** Phase 1 replaced function-level owner-or-org checks with a
+  role model; each parity difference and the audit scope needed an explicit,
+  testable decision.
+- **Alternatives:** Org-member delete (rejected: over-permissive); owner-only
+  rename (rejected: product regression without security benefit); auditing
+  content saves (rejected: volume); keeping token-prefix search (rejected:
+  substring is the natural Postgres primitive and a strict superset).
+- **Rationale:** Least privilege where it matters (delete, ACL management);
+  honest, bounded audit scope; user-visible behavior preserved.
+- **Consequences:** Deletion is restricted to owners (UI hides Remove for
+  non-owners and the server enforces it); search may return more matches than
+  the bootstrap for the same query (documented in the migration plan).
+- **Evidence:** tests/authorization.test.ts, tests/db/*.test.ts; migration
+  verification (docs/MIGRATION_CONVEX_TO_POSTGRES.md).
+- **Revisit conditions:** Product feedback on delete semantics; sharing UI
+  design in later phases; audit consumers requiring save-level events.
+
+## DEC-022 — Transitional optimistic concurrency for document content
+
+- **Status:** Accepted
+- **Decision:** Until the CRDT update log exists (Phase 2), editor content
+  saves and metadata renames use optimistic concurrency: clients submit the
+  version they loaded; updates apply conditionally
+  (`UPDATE ... WHERE version = expected`), increment the counter atomically,
+  and stale writers receive a typed conflict (HTTP 409 on the save route)
+  with autosave paused and an explicit reload prompt. This replaces the
+  Phase 0 last-write-wins behavior, which could silently discard edits.
+- **Context:** Phase 1 data model stores whole-document TipTap JSONB; two
+  tabs editing concurrently must not silently overwrite each other.
+- **Alternatives:** Last-write-wins (rejected: silent data loss); pessimistic
+  locking (rejected: unnecessary complexity for a transitional path).
+- **Rationale:** Data safety without premature CRDT complexity; the conflict
+  UX is honest about what happened.
+- **Consequences:** Concurrent editors see an explicit conflict instead of
+  silent loss; Phase 2's CRDT replaces this model entirely.
+- **Evidence:** tests/db/content-save.test.ts (incl. concurrent same-version
+  saves), browser two-tab verification (2026-09-06).
+- **Revisit conditions:** Superseded by the Phase 2 CRDT document model.

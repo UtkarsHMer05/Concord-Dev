@@ -41,6 +41,14 @@ transitional architecture decisions.
 
 ## Phase 1 — PostgreSQL control plane / Convex removal / authorization
 
+**Status: COMPLETE (2026-09-06).** PostgreSQL 18 (Docker Compose) with
+tracked Drizzle migrations; server-only data layer with Clerk→Concord
+principal projection; server-side authorization (OWNER/EDITOR/COMMENTER/
+VIEWER); optimistic-concurrency content persistence; audit events; Convex
+fully removed after a verified data migration; unit/integration/adversarial
+test suites green. See `docs/DATABASE.md`, `docs/AUTHORIZATION.md`,
+`docs/MIGRATION_CONVEX_TO_POSTGRES.md`, and DEC-019…DEC-021.
+
 - **Objective:** Remove Convex and establish Concord-owned durable
   foundations and authorization.
 - **Major deliverables:** PostgreSQL via Docker Compose; schema + migrations;

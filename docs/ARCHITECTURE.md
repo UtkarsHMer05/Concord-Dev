@@ -1,7 +1,7 @@
 # Concord — Architecture
 
-Status: Authoritative (Phase 0 completion version)
-Version: 1.1
+Status: Authoritative (Phase 1 completion version)
+Version: 1.2
 Last updated: 2026-09-06
 
 This document distinguishes three architecture states at all times:
@@ -15,13 +15,13 @@ Nothing in the TARGET section should be read as an implemented capability.
 
 ---
 
-## 1. CURRENT — Liveblocks-free product shell with transitional persistence (Phase 0 complete)
+## 1. CURRENT — PostgreSQL control plane with server-side authorization (Phase 1 complete)
 
-The CURRENT architecture is the result of Phase 0: the tutorial stack is fully
-modernized (Next.js 16, React 19 stable, Tailwind 4, TipTap 3, Clerk 7,
-Convex 1.45) and **Liveblocks is removed entirely**. Realtime collaboration,
-presence, comments, and notifications are intentionally deferred; the UI
-consumes the vendor-neutral collaboration seam.
+The CURRENT architecture is the result of Phases 0–1: the tutorial stack is
+fully modernized (Next.js 16, React 19 stable, Tailwind 4, TipTap 3, Clerk 7),
+**Liveblocks and Convex are both removed entirely**, and all durable
+application data lives in PostgreSQL behind a server-only data layer with
+explicit authorization (OWNER / EDITOR / COMMENTER / VIEWER).
 
 ```mermaid
 flowchart TD
@@ -33,17 +33,28 @@ flowchart TD
         LS[("localStorage<br/>margins (transitional)")] --> SEAM
     end
 
-    subgraph Server["Convex backend (temporary)"]
-        CONVEX["documents table<br/>metadata + content envelope"]
+    subgraph Server["Next.js server (server-only)"]
+        ACTOR["ActorContext<br/>(verified Clerk identity)"]
+        POLICY["Authorization policy<br/>OWNER/EDITOR/COMMENTER/VIEWER"]
+        REPO["Repositories / services"]
+        ACTIONS["Server actions +<br/>content-save route"]
+        ACTOR --> POLICY --> REPO
     end
 
-    subgraph SaaS["Hosted identity"]
+    subgraph Data["Durable state"]
+        PG[("PostgreSQL 18<br/>users · organizations · memberships<br/>documents · ACLs · audit events")]
+    end
+
+    subgraph Identity["Hosted identity"]
         CLERK["Clerk (identity only)"]
     end
 
-    SEAM -- "debounced content saves (versioned JSON)" --> CONVEX
-    UI -- "queries/mutations (owner/org checked)" --> CONVEX
+    SEAM -- "debounced content saves (versioned JSON, optimistic concurrency)" --> ACTIONS
+    UI -- "server actions / route handlers" --> ACTIONS
+    ACTIONS --> ACTOR
+    REPO --> PG
     UI -- "identity" --> CLERK
+    ACTOR -- "verified claims" --> CLERK
 ```
 
 ### 1.1 Current components and responsibilities
@@ -51,24 +62,36 @@ flowchart TD
 | Component | Responsibility |
 |---|---|
 | `src/lib/collaboration/types.ts` | Vendor-neutral session contract; realtime/presence/threads/inbox are explicit `unavailable` states |
-| `src/lib/collaboration/provider.tsx` | Document session: debounced Convex content saves (status/error surfaced), transitional localStorage margins |
+| `src/lib/collaboration/provider.tsx` | Document session: debounced content saves via `/api/documents/[id]/content` with content-version tracking and 409 conflict handling; transitional localStorage margins |
 | `src/lib/collaboration/content.ts` | Versioned content envelope (`{v:1, doc}`) serialize/parse |
-| `src/app/documents/[documentId]/editor.tsx` | TipTap 3 with local history; consumes the session interface only |
-| `convex/documents.ts` | CRUD + search + content mutation; all access owner-or-organization checked |
+| `src/app/documents/[documentId]/editor.tsx` | TipTap 3 with local history; editable only for OWNER/EDITOR |
+| `src/server/db/*` | Drizzle schema, server-only `pg` pool |
+| `src/server/repositories/*` | SQL persistence (users, organizations, documents, permissions, audit) |
+| `src/server/services/*` | Business policy + authorization orchestration |
+| `src/server/auth/*` | ActorContext projection; centralized capability policy |
+| `src/app/actions/*`, `src/app/api/*` | Server actions (create/rename/delete) and route handlers (content save, listing, health) |
 | `src/proxy.ts` | Clerk middleware (Next 16 proxy convention) |
 
 ### 1.2 Current trust boundaries
 
 - Browser → Next.js: Clerk session; route protection via proxy.
-- Browser → Convex: Clerk-issued JWT (template `convex`, audience `convex`);
-  every query/mutation enforces identity + owner-or-organization membership.
-- No third-party collaboration service receives document content.
+- Every server action / route handler builds an `ActorContext` from verified
+  Clerk server APIs and reauthorizes the operation against Concord-owned
+  data (docs/AUTHORIZATION.md). Client-supplied owner/org/role fields are
+  never trusted.
+- Server → PostgreSQL through a single server-only pool (`server-only`
+  import guard keeps it out of client bundles).
+- No third-party collaboration or data service receives document content.
 
 ### 1.3 Known transitional limitations (honest state)
 
 - Realtime, presence, comments, inbox: unavailable by design (DEC-016).
-- Content persistence is whole-document, last-write-wins (DEC-017).
+- Content persistence is whole-document JSONB with optimistic concurrency —
+  a stale writer gets a typed conflict instead of overwriting (DEC-022);
+  the CRDT update log (Phase 2) replaces this path.
 - Margins are per-browser (localStorage), not shared (DEC-017).
+- Sharing UI does not exist yet; the ACL service is implemented and tested
+  (foundation for the later sharing surface).
 
 ---
 
@@ -86,109 +109,15 @@ Phase 0. See git history for details.
 The fully modernized stack with Liveblocks still present, verified end-to-end
 (all 20 verification-matrix items) and frozen at the tag before extraction.
 
----
+### 2.3 Phase 0 completion state (`phase-0-complete`, historical)
 
-```mermaid
-flowchart TD
-    subgraph Browser["Browser (client)"]
-        UI["Next.js / React UI<br/>(App Router)"]
-        TIPTAP["TipTap editor"]
-        LBEXT["Liveblocks TipTap extension<br/>(Yjs-based, experimental offline)"]
-        UI --> TIPTAP --> LBEXT
-    end
-
-    subgraph Server["Next.js server"]
-        MW["clerkMiddleware()"]
-        AUTHROUTE["POST /api/liveblocks-auth"]
-        ACTIONS["Server actions<br/>(getUsers, getDocuments)"]
-        MW --> AUTHROUTE
-    end
-
-    subgraph SaaS["Hosted services"]
-        CLERK["Clerk<br/>(identity)"]
-        CONVEX["Convex<br/>(documents table + queries)"]
-        LIVEBLOCKS["Liveblocks Cloud<br/>(rooms, storage, threads, presence)"]
-    end
-
-    LBEXT -- "HTTPS session auth" --> AUTHROUTE
-    AUTHROUTE -- "identity + owner/org check" --> CLERK
-    AUTHROUTE -- "document lookup" --> CONVEX
-    AUTHROUTE -- "room token (FULL_ACCESS)" --> LIVEBLOCKS
-    LBEXT -- "realtime updates/presence/threads" --> LIVEBLOCKS
-    UI -- "queries/mutations" --> CONVEX
-    UI -- "sign-in/org switch" --> CLERK
-    Server --> CLERK
-```
-
-#### Components and responsibilities (historical)
-
-| Component | Responsibility |
-|---|---|
-| `src/app/(home)/*` | Document listing (paginated), title search, templates gallery, rename/remove dialogs |
-| `src/app/documents/[documentId]/page.tsx` | Server component: Clerk token → Convex `preloadQuery(getById)` |
-| `room.tsx` | `LiveblocksProvider` (throttle 16 ms), custom auth endpoint, user/mention/room-info resolvers |
-| `editor.tsx` | TipTap instance; extension set; margins via Liveblocks Storage; `offlineSupport_experimental` |
-| `toolbar.tsx` / `navbar.tsx` | Formatting commands (via Zustand editor store), export (JSON/HTML/TXT/print), document ops |
-| `ruler.tsx` | Draggable page margins stored in Liveblocks room Storage |
-| `threads.tsx`, `inbox.tsx`, `avatars.tsx` | Comments, notifications, presence UI |
-| `convex/documents.ts` | CRUD + search + auth checks (owner or same-organization member) |
-| `api/liveblocks-auth/route.ts` | Issues Liveblocks room sessions after Clerk identity + document-access check |
-| `src/middleware.ts` | Clerk middleware on all app routes |
-
-### 2.3.1 Data flow (edit path, historical)
-
-1. Keystroke → TipTap → Liveblocks extension applies the update to the local
-   Yjs document and sends it to Liveblocks Cloud over WebSocket.
-2. Liveblocks fans the update out to other room members; their extensions
-   apply it remotely.
-3. Room Storage (margins) and Threads (comments) follow the same room
-   transport; document *metadata* (title) goes through Convex mutations.
-4. The initial document content is fetched from Convex once at page load and
-   handed to the editor as `initialContent`.
-
-#### Trust boundaries (historical)
-
-- Browser → Next.js: Clerk session cookie; middleware gates routes.
-- Browser → Liveblocks: session token minted by `/api/liveblocks-auth` after
-  a server-side owner-or-organization check.
-- Next.js → Convex: Clerk JWT (template `convex`) or server key.
-- Authorization granularity today: binary (owner/org member ⇒ `FULL_ACCESS`).
-  There are no EDITOR/COMMENTER/VIEWER distinctions, and `documents.getById`
-  performs no ownership check.
-
-#### Known weaknesses (historical, resolved or tracked)
-
-- Authorization gaps and binary access model (see PRD R4, DEC-005).
-- Environment-specific configuration committed in code (Clerk dev domain in
-  `convex/auth.config.ts`).
-- No tests, no CI, no toolchain pinning.
-- Collaboration, presence, comments, and persistence are externally owned and
-  not inspectable or measurable (the reason for this project).
+Liveblocks-free product shell with Convex as transitional persistence:
+documents table with owner-or-organization function-level checks, versioned
+JSON content envelope, debounced Convex saves. Superseded by Phase 1.
 
 ---
 
-## 3. NEXT TRANSITIONAL state (Phase 1): Convex removal
-
-Document metadata, ACLs, memberships, and durable application data move to
-PostgreSQL behind a repository/data layer; Convex is fully removed.
-
-```mermaid
-flowchart LR
-    UI["Next.js UI + TipTap"] --> SEAM["Collaboration seam"]
-    SEAM --> PERSIST["Concord data layer"]
-    PERSIST --> PG[("PostgreSQL")]
-    UI -- "identity" --> CLERK["Clerk"]
-    PERSIST -- "server-side authz" --> ACL["RBAC: OWNER/EDITOR/COMMENTER/VIEWER"]
-```
-
-- Server-side authorization against PostgreSQL ACL data becomes the single
-  access-decision point (DEC-005).
-- Liveblocks-era features (threads/inbox) remain degraded or locally
-  implemented until the Concord collaboration stack lands (Phases 2–3).
-
----
-
-## 4. TARGET — Concord architecture (planned)
+## 3. TARGET — Concord architecture (planned)
 
 ```mermaid
 flowchart TD
@@ -218,7 +147,7 @@ flowchart TD
     GW1 & GW2 & GW3 --- NATS
 ```
 
-### 4.1 Language responsibilities (fixed)
+### 3.1 Language responsibilities (fixed)
 
 | Language | Owns | Does not own |
 |---|---|---|
@@ -228,7 +157,7 @@ flowchart TD
 | SQL (PostgreSQL) | Durable truth: metadata, ACLs, update log, snapshots metadata, history, audit | Ephemeral presence |
 | Redis | Ephemeral presence/caches/counters only | Anything whose loss is unacceptable |
 
-### 4.2 Durable vs ephemeral state
+### 3.2 Durable vs ephemeral state
 
 - **Durable (PostgreSQL):** document/organization metadata, memberships, ACLs,
   append-only update log, snapshot metadata, version history, audit events.
@@ -236,7 +165,7 @@ flowchart TD
   rate-limit counters, temporary room state. Loss is acceptable and tested.
 - **Browser-local (IndexedDB):** offline replica state; reconciled via CRDT.
 
-### 4.3 Consistency model (per data class)
+### 3.3 Consistency model (per data class)
 
 | Data class | Guarantee |
 |---|---|
@@ -247,7 +176,7 @@ flowchart TD
 No distributed locks for normal text editing. Leases are reserved for
 single-owner maintenance operations (e.g., compaction) if the design needs one.
 
-### 4.4 Delivery model
+### 3.4 Delivery model
 
 At-least-once transport with idempotent handlers and deduplication at the
 CRDT identity level (`replica id` + monotonic sequence or equivalent).
@@ -255,7 +184,7 @@ Duplicate packets never corrupt document state. Durable edits and cursor
 motion have different delivery priorities (P0 vs P3 classes per the
 backpressure model).
 
-### 4.5 Control plane vs data plane
+### 3.5 Control plane vs data plane
 
 - **Data plane:** client↔gateway WebSocket updates, gateway→storage log
   appends, cross-gateway document fanout.
@@ -263,7 +192,7 @@ backpressure model).
   decisions, membership/ACL changes, maintenance (snapshot/compaction
   scheduling), health/telemetry aggregation.
 
-### 4.6 Trust boundaries (target)
+### 3.6 Trust boundaries (target)
 
 1. Browser ↔ Gateway: authenticated session (Clerk identity), per-document
    authorization enforced inside the gateway against durable ACL data.
@@ -272,7 +201,7 @@ backpressure model).
    Redis; NATS carries events, never authorization decisions.
 4. Client authorization state is advisory UI only.
 
-### 4.7 Failure assumptions (target direction)
+### 3.7 Failure assumptions (target direction)
 
 - Any single gateway may crash or be drained at any time; clients reconnect.
 - PostgreSQL may restart; acknowledged durable updates survive.
@@ -281,7 +210,7 @@ backpressure model).
 - Redis data may vanish; presence/metrics degrade; documents are unaffected.
 - Clients may be offline for arbitrary periods; convergence on reconnect.
 
-### 4.8 Deployment direction
+### 3.8 Deployment direction
 
 Local development is Docker Compose (PostgreSQL, Redis, NATS, observability
 stack as phases introduce them). Production deployment — hosting, TLS,
@@ -290,7 +219,7 @@ Phase 7 based on the final architecture (DEC-010).
 
 ---
 
-## 5. Document lifecycle (target view)
+## 4. Document lifecycle (target view)
 
 1. **Create** — metadata row + ACL (PostgreSQL); document opens locally.
 2. **Edit offline** — updates applied to local CRDT replica (WASM), persisted
@@ -301,9 +230,9 @@ Phase 7 based on the final architecture (DEC-010).
    tail replays shrink; recovery time stays bounded (Phase 5).
 5. **History/restore** — reconstruct revisions from log + snapshots.
 
-## 6. Reading guide
+## 5. Reading guide
 
 - Implemented behavior: Section 1 (CURRENT).
 - Temporary, scheduled states: Section 2 (each is gated by a phase).
-- Planned behavior: Sections 3–4 — never presented as existing.
+- Planned behavior: Section 3 — never presented as existing.
 - Decisions behind this structure: [DECISIONS.md](DECISIONS.md).

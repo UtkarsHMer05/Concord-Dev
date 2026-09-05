@@ -96,8 +96,17 @@ the pre-migration data. No dual-write architecture is used; after cutover,
 PostgreSQL is the single source of truth (the export is a snapshot, not a
 live system).
 
-## 6. Outcome
+## 6. Outcome (executed 2026-09-06)
 
-Recorded in the Phase 1 completion report: rows found / exported / imported,
-verification method, and confirmation that no Convex runtime dependency
-remains.
+- Convex local deployment contained **4 documents** (all personal scope, one
+  Clerk principal); all 4 were exported, imported, and verified — row counts,
+  per-row title/owner/organization/initialContent equality, canonical-JSON
+  content envelope deep-equality, and creation timestamps within 2 ms.
+- The import was re-run to prove idempotency (0 new rows, 4 updated, all
+  checks pass again).
+- The `roomId` field (a Liveblocks leftover, never read by Phase 0 runtime
+  code) was deliberately not migrated.
+- Convex runtime dependencies, the `convex/` backend directory, generated
+  bindings, and configuration were removed after the parity checkpoint; only
+  historical documentation and the `documents.legacy_convex_id`
+  traceability column reference Convex.

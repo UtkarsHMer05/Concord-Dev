@@ -67,6 +67,7 @@ erDiagram
         text title "1..200 chars"
         uuid owner_user_id FK "authoritative owner"
         uuid organization_id FK "null = personal"
+        text initial_content "transitional template HTML"
         jsonb content "TRANSITIONAL TipTap envelope"
         int content_version "optimistic concurrency"
         int metadata_version "optimistic concurrency"
@@ -118,6 +119,10 @@ EDITOR — see [AUTHORIZATION.md](AUTHORIZATION.md) §3).
 - `owner_user_id` is the authoritative owner; there is no owner row in the
   ACL table.
 - `organization_id` NULL = personal document; NOT NULL = organization-scoped.
+- `initial_content` (text) preserves the template's origin HTML for documents
+  created from a template and not yet saved in the editor (transitional
+  parity with the Phase 0 bootstrap; the editor falls back to it until the
+  first content save produces the envelope).
 - `content` (JSONB) is **transitional** pre-CRDT persistence: the versioned
   TipTap envelope `{ "v": 1, "doc": <TipTap JSON> }`, capped at 2 MiB on
   write. It is NOT the future collaboration data model (Phases 2–3 replace it

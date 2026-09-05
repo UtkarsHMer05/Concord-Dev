@@ -297,10 +297,9 @@ the engineering depth is for technical evaluators.
 
 - Product shell: Next.js, React, TipTap, Radix/shadcn UI, Tailwind.
 - Identity: Clerk (authentication only).
-- To be removed: Liveblocks (Phase 0), Convex (Phase 1).
-- Planned infrastructure: PostgreSQL (durable truth), Rust/Tokio gateway,
-  C++20/23 CRDT core (native + WASM), Redis (ephemeral only), NATS JetStream
-  (multi-gateway), OpenTelemetry/Prometheus/Grafana, Docker Compose.
+- Removed: Liveblocks (Phase 0), Convex (Phase 1).
+- Infrastructure: PostgreSQL 18 (durable truth, via Docker Compose locally),
+  Drizzle ORM + tracked SQL migrations.
 - External services: Clerk (identity); object storage if needed (Phase 7).
 
 ## 25. Phase mapping
