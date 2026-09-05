@@ -17,7 +17,12 @@ not its milestones.
 
 ## Phase 0 — Bootstrap, modernization, original baseline, Liveblocks extraction
 
-- **Objective:** Turn the aging tutorial repository into a clean, modern,
+**Status: COMPLETE (2026-09-06).** Verified modernized baseline tagged
+`phase-0-modernized-baseline`; Liveblocks fully removed; `phase-0-complete`
+tag at the phase gate. See `docs/DECISIONS.md` DEC-016/017/018 for the
+transitional architecture decisions.
+
+- **Objective: Turn the aging tutorial repository into a clean, modern,
   verified working foundation — without starting Concord's distributed
   backend.
 - **Major deliverables:** Repository and dependency audit; deliberate

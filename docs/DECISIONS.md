@@ -280,3 +280,70 @@ rebuilds exist and are themselves largely unlicensed). This is tracked as risk
 R1 in the PRD and must be resolved (audit terms, attribution, or rewriting of
 derived material) before public release or deployment. In-repo attribution is
 retained and will not be removed.
+
+---
+
+## Phase 0 additions (2026-09-06)
+
+## DEC-016 — Collaboration seam and honest deferred capabilities
+
+- **Status:** Accepted
+- **Decision:** After Liveblocks removal, the product UI consumes a
+  vendor-neutral document session interface
+  (`src/lib/collaboration/types.ts`, `provider.tsx`). Realtime collaboration,
+  presence, comments/threads, and notifications report an explicit
+  `unavailable` state instead of being faked or partially simulated.
+- **Context:** Phase 0 required removing Liveblocks while the Concord CRDT
+  core (Phase 2) and sync gateway (Phase 3) do not exist yet.
+- **Alternatives:** Keeping a hosted SaaS layer (contradicts the project
+  thesis); simulating realtime locally (dishonest UI, misleading
+  verification); tightly coupling UI to future implementation details
+  (re-coupling risk).
+- **Rationale:** A clean seam lets later phases land capabilities without UI
+  rewrites and keeps every visible behavior truthful.
+- **Consequences:** Liveblocks-era features (presence avatars, anchored
+  comments, inbox notifications) are absent from the UI until Phases 2–3.
+- **Evidence:** Phase 0 verification matrix; zero-reference audit (2026-09-06).
+- **Revisit conditions:** Phase 2 may reshape the interface when the CRDT
+  document model lands; changes require a superseding decision.
+
+## DEC-017 — Transitional whole-document Convex persistence
+
+- **Status:** Accepted
+- **Decision:** Until the CRDT update log exists (Phase 2), durable editor
+  content is stored in Convex as a versioned TipTap JSON envelope
+  (`{ v: 1, doc }`) on the `documents` table, saved with debounced
+  whole-document writes (last write wins, single active editor per document
+  assumed), plus per-browser localStorage for page margins.
+- **Context:** The editor must remain genuinely usable after Liveblocks
+  removal; Convex is itself transitional until Phase 1.
+- **Alternatives:** Local-only persistence (loses durability across machines);
+  building the final CRDT log early (violates phase isolation).
+- **Rationale:** Simplest durable path that preserves single-user workflows;
+  explicitly marked TRANSITIONAL in code and docs to prevent it becoming the
+  final design.
+- **Consequences:** Concurrent multi-client editing is unsupported in this
+  state (last write wins); margins are per-browser, not shared. Content
+  previously held in Liveblocks room storage is not migrated.
+- **Evidence:** Persistence verified end-to-end (create → edit → save →
+  reload) on 2026-09-06.
+- **Revisit conditions:** Superseded by the Phase 2 update log; the envelope
+  helper is the only allowed touchpoint.
+
+## DEC-018 — Dependency holds recorded at Phase 0 completion
+
+- **Status:** Accepted
+- **Decision:** TypeScript is held at 5.9.x (TypeScript 7 native compiler is
+  new; ecosystem verification pending) and ESLint at 9.x
+  (`eslint-config-next@16`'s bundled `eslint-plugin-react` crashes under
+  ESLint 10). react-color (unmaintained) is retained only through the
+  transitional toolbar with replacement scheduled during Phase 7 polish.
+- **Context:** Phase 0 modernization policy requires documented holds with
+  evidence.
+- **Alternatives:** Forcing latest majors (build/lint breakage, no benefit
+  within this phase).
+- **Rationale:** Reproducibility over version vanity.
+- **Consequences:** Revisit when `eslint-config-next` supports ESLint 10 and
+  the TypeScript 7 ecosystem stabilizes.
+- **Evidence:** ESLint 10 crash reproduced during Phase 0 (`getReactVersionFromContext`).
+- **Revisit conditions:** Next.js minor releases; TypeScript 7 tooling adoption.

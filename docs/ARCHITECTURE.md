@@ -1,8 +1,8 @@
 # Concord — Architecture
 
-Status: Authoritative (bootstrap version)
-Version: 1.0
-Last updated: 2026-09-05
+Status: Authoritative (Phase 0 completion version)
+Version: 1.1
+Last updated: 2026-09-06
 
 This document distinguishes three architecture states at all times:
 
@@ -15,12 +15,78 @@ Nothing in the TARGET section should be read as an implemented capability.
 
 ---
 
-## 1. CURRENT — bootstrap architecture (tutorial baseline)
+## 1. CURRENT — Liveblocks-free product shell with transitional persistence (Phase 0 complete)
 
-The repository currently runs the original tutorial product: a Next.js
-document editor whose realtime collaboration, presence, comments, and
-notifications are provided by Liveblocks, whose persistence is Convex, and
-whose authentication is Clerk.
+The CURRENT architecture is the result of Phase 0: the tutorial stack is fully
+modernized (Next.js 16, React 19 stable, Tailwind 4, TipTap 3, Clerk 7,
+Convex 1.45) and **Liveblocks is removed entirely**. Realtime collaboration,
+presence, comments, and notifications are intentionally deferred; the UI
+consumes the vendor-neutral collaboration seam.
+
+```mermaid
+flowchart TD
+    subgraph Browser["Browser (client)"]
+        UI["Next.js 16 / React 19 UI"]
+        TIPTAP["TipTap 3 editor<br/>(local undo/redo)"]
+        SEAM["Collaboration seam<br/>DocumentSessionProvider"]
+        UI --> TIPTAP --> SEAM
+        LS[("localStorage<br/>margins (transitional)")] --> SEAM
+    end
+
+    subgraph Server["Convex backend (temporary)"]
+        CONVEX["documents table<br/>metadata + content envelope"]
+    end
+
+    subgraph SaaS["Hosted identity"]
+        CLERK["Clerk (identity only)"]
+    end
+
+    SEAM -- "debounced content saves (versioned JSON)" --> CONVEX
+    UI -- "queries/mutations (owner/org checked)" --> CONVEX
+    UI -- "identity" --> CLERK
+```
+
+### 1.1 Current components and responsibilities
+
+| Component | Responsibility |
+|---|---|
+| `src/lib/collaboration/types.ts` | Vendor-neutral session contract; realtime/presence/threads/inbox are explicit `unavailable` states |
+| `src/lib/collaboration/provider.tsx` | Document session: debounced Convex content saves (status/error surfaced), transitional localStorage margins |
+| `src/lib/collaboration/content.ts` | Versioned content envelope (`{v:1, doc}`) serialize/parse |
+| `src/app/documents/[documentId]/editor.tsx` | TipTap 3 with local history; consumes the session interface only |
+| `convex/documents.ts` | CRUD + search + content mutation; all access owner-or-organization checked |
+| `src/proxy.ts` | Clerk middleware (Next 16 proxy convention) |
+
+### 1.2 Current trust boundaries
+
+- Browser → Next.js: Clerk session; route protection via proxy.
+- Browser → Convex: Clerk-issued JWT (template `convex`, audience `convex`);
+  every query/mutation enforces identity + owner-or-organization membership.
+- No third-party collaboration service receives document content.
+
+### 1.3 Known transitional limitations (honest state)
+
+- Realtime, presence, comments, inbox: unavailable by design (DEC-016).
+- Content persistence is whole-document, last-write-wins (DEC-017).
+- Margins are per-browser (localStorage), not shared (DEC-017).
+
+---
+
+## 2. HISTORICAL states
+
+### 2.1 Tutorial baseline (`antonio-original-baseline`, historical)
+
+The imported tutorial product: Next.js 15 + React 19 RC, Convex persistence,
+Liveblocks realtime/presence/comments/inbox, binary owner-or-org Liveblocks
+authorization with `FULL_ACCESS` grants. Preserved at the tag; superseded by
+Phase 0. See git history for details.
+
+### 2.2 Modernized baseline (`phase-0-modernized-baseline`, historical)
+
+The fully modernized stack with Liveblocks still present, verified end-to-end
+(all 20 verification-matrix items) and frozen at the tag before extraction.
+
+---
 
 ```mermaid
 flowchart TD
@@ -54,7 +120,7 @@ flowchart TD
     Server --> CLERK
 ```
 
-### 1.1 Components and responsibilities
+#### Components and responsibilities (historical)
 
 | Component | Responsibility |
 |---|---|
@@ -69,7 +135,7 @@ flowchart TD
 | `api/liveblocks-auth/route.ts` | Issues Liveblocks room sessions after Clerk identity + document-access check |
 | `src/middleware.ts` | Clerk middleware on all app routes |
 
-### 1.2 Current data flow (edit path)
+### 2.3.1 Data flow (edit path, historical)
 
 1. Keystroke → TipTap → Liveblocks extension applies the update to the local
    Yjs document and sends it to Liveblocks Cloud over WebSocket.
@@ -80,7 +146,7 @@ flowchart TD
 4. The initial document content is fetched from Convex once at page load and
    handed to the editor as `initialContent`.
 
-### 1.3 Current trust boundaries
+#### Trust boundaries (historical)
 
 - Browser → Next.js: Clerk session cookie; middleware gates routes.
 - Browser → Liveblocks: session token minted by `/api/liveblocks-auth` after
@@ -90,7 +156,7 @@ flowchart TD
   There are no EDITOR/COMMENTER/VIEWER distinctions, and `documents.getById`
   performs no ownership check.
 
-### 1.4 Known weaknesses in the current state
+#### Known weaknesses (historical, resolved or tracked)
 
 - Authorization gaps and binary access model (see PRD R4, DEC-005).
 - Environment-specific configuration committed in code (Clerk dev domain in
@@ -101,30 +167,7 @@ flowchart TD
 
 ---
 
-## 2. TRANSITIONAL states (scheduled, bounded)
-
-### 2.1 After Liveblocks removal (end of Phase 0)
-
-Liveblocks is removed once the modernized original baseline is verified.
-Editing remains functional through a **collaboration seam** — a UI-facing
-interface decoupling the editor from any specific collaboration backend — and
-**transitional persistence** (documented as temporary).
-
-```mermaid
-flowchart LR
-    UI["Next.js UI + TipTap"] -- "collaboration seam<br/>(interface)" --> SEAM["Concord collaboration abstraction"]
-    SEAM -- "transitional persistence<br/>(temporary, marked)" --> STORE["Local/temporary store"]
-    UI -- "documents metadata" --> CONVEX["Convex (temporary)"]
-    UI -- "identity" --> CLERK["Clerk"]
-```
-
-- Interface surface includes connect/disconnect, apply local update,
-  subscribe remote updates, connection state, presence (illustrative names;
-  Phase 0 defines the actual contract).
-- Transitional persistence exists only to keep single-user editing durable and
-  is clearly marked in code and docs; it must not become the final design.
-
-### 2.2 After Convex removal (end of Phase 1)
+## 3. NEXT TRANSITIONAL state (Phase 1): Convex removal
 
 Document metadata, ACLs, memberships, and durable application data move to
 PostgreSQL behind a repository/data layer; Convex is fully removed.
@@ -145,7 +188,7 @@ flowchart LR
 
 ---
 
-## 3. TARGET — Concord architecture (planned)
+## 4. TARGET — Concord architecture (planned)
 
 ```mermaid
 flowchart TD
@@ -175,7 +218,7 @@ flowchart TD
     GW1 & GW2 & GW3 --- NATS
 ```
 
-### 3.1 Language responsibilities (fixed)
+### 4.1 Language responsibilities (fixed)
 
 | Language | Owns | Does not own |
 |---|---|---|
@@ -185,7 +228,7 @@ flowchart TD
 | SQL (PostgreSQL) | Durable truth: metadata, ACLs, update log, snapshots metadata, history, audit | Ephemeral presence |
 | Redis | Ephemeral presence/caches/counters only | Anything whose loss is unacceptable |
 
-### 3.2 Durable vs ephemeral state
+### 4.2 Durable vs ephemeral state
 
 - **Durable (PostgreSQL):** document/organization metadata, memberships, ACLs,
   append-only update log, snapshot metadata, version history, audit events.
@@ -193,7 +236,7 @@ flowchart TD
   rate-limit counters, temporary room state. Loss is acceptable and tested.
 - **Browser-local (IndexedDB):** offline replica state; reconciled via CRDT.
 
-### 3.3 Consistency model (per data class)
+### 4.3 Consistency model (per data class)
 
 | Data class | Guarantee |
 |---|---|
@@ -204,7 +247,7 @@ flowchart TD
 No distributed locks for normal text editing. Leases are reserved for
 single-owner maintenance operations (e.g., compaction) if the design needs one.
 
-### 3.4 Delivery model
+### 4.4 Delivery model
 
 At-least-once transport with idempotent handlers and deduplication at the
 CRDT identity level (`replica id` + monotonic sequence or equivalent).
@@ -212,7 +255,7 @@ Duplicate packets never corrupt document state. Durable edits and cursor
 motion have different delivery priorities (P0 vs P3 classes per the
 backpressure model).
 
-### 3.5 Control plane vs data plane
+### 4.5 Control plane vs data plane
 
 - **Data plane:** client↔gateway WebSocket updates, gateway→storage log
   appends, cross-gateway document fanout.
@@ -220,7 +263,7 @@ backpressure model).
   decisions, membership/ACL changes, maintenance (snapshot/compaction
   scheduling), health/telemetry aggregation.
 
-### 3.6 Trust boundaries (target)
+### 4.6 Trust boundaries (target)
 
 1. Browser ↔ Gateway: authenticated session (Clerk identity), per-document
    authorization enforced inside the gateway against durable ACL data.
@@ -229,7 +272,7 @@ backpressure model).
    Redis; NATS carries events, never authorization decisions.
 4. Client authorization state is advisory UI only.
 
-### 3.7 Failure assumptions (target direction)
+### 4.7 Failure assumptions (target direction)
 
 - Any single gateway may crash or be drained at any time; clients reconnect.
 - PostgreSQL may restart; acknowledged durable updates survive.
@@ -238,7 +281,7 @@ backpressure model).
 - Redis data may vanish; presence/metrics degrade; documents are unaffected.
 - Clients may be offline for arbitrary periods; convergence on reconnect.
 
-### 3.8 Deployment direction
+### 4.8 Deployment direction
 
 Local development is Docker Compose (PostgreSQL, Redis, NATS, observability
 stack as phases introduce them). Production deployment — hosting, TLS,
@@ -247,7 +290,7 @@ Phase 7 based on the final architecture (DEC-010).
 
 ---
 
-## 4. Document lifecycle (target view)
+## 5. Document lifecycle (target view)
 
 1. **Create** — metadata row + ACL (PostgreSQL); document opens locally.
 2. **Edit offline** — updates applied to local CRDT replica (WASM), persisted
@@ -258,7 +301,7 @@ Phase 7 based on the final architecture (DEC-010).
    tail replays shrink; recovery time stays bounded (Phase 5).
 5. **History/restore** — reconstruct revisions from log + snapshots.
 
-## 5. Reading guide
+## 6. Reading guide
 
 - Implemented behavior: Section 1 (CURRENT).
 - Temporary, scheduled states: Section 2 (each is gated by a phase).

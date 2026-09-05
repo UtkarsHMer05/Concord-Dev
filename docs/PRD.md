@@ -1,8 +1,8 @@
 # Concord — Product Requirements Document
 
-Status: Authoritative (bootstrap version)
-Version: 1.0
-Last updated: 2026-09-05
+Status: Authoritative (Phase 0 completion)
+Version: 1.1
+Last updated: 2026-09-06
 
 Concord is a distributed, local-first collaborative document/workspace platform
 backed by a self-engineered synchronization stack: CRDT-based reconciliation,
@@ -285,10 +285,10 @@ the engineering depth is for technical evaluators.
 | ID | Risk | Class | Mitigation |
 |----|------|-------|------------|
 | R1 | Upstream tutorial provenance: no official upstream repo/license identified; tutorial is a commercial product. Legal review required before public release/deployment. | Legal (BLOCKING for public release only) | Recorded in DECISIONS/ATTRIBUTION; attribution retained; audit before publication; rewrite/replace derived assets if required. |
-| R2 | Baseline pins React 19 RC → permanent `--legacy-peer-deps` installs. | Technical | Phase 0 modernization to stable React; document any residual exceptions. |
-| R3 | Liveblocks removal (Phase 0) must preserve collaboration, presence, comments, offline behavior without regressions. | Technical | Verify original baseline first; collaboration seam abstraction; transitional persistence documented as temporary. |
-| R4 | Baseline `getById` lacks ownership check (authorization gap inherited from bootstrap). | Security | Fix during Phase 0 modernization; server-side authorization enforced from Phase 1 onward. |
-| R5 | Environment-specific config committed in code (hardcoded Clerk dev domain in Convex auth config). | Security/Hygiene | Move to environment configuration during Phase 0. |
+| R2 | ~~Baseline pins React 19 RC → permanent `--legacy-peer-deps` installs.~~ RESOLVED in Phase 0: React 19.2 stable; `npm ci` clean without compatibility flags. | Technical | — |
+| R3 | ~~Liveblocks removal regressions~~ RESOLVED in Phase 0: verified baseline frozen at `phase-0-modernized-baseline` before removal; removal verified (features intentionally deferred per DEC-016). | Technical | — |
+| R4 | ~~Baseline `getById` lacks ownership check~~ RESOLVED in Phase 0: `getById`/`getByIds` enforce identity + owner-or-organization checks; full RBAC lands in Phase 1. | Security | — |
+| R5 | ~~Hardcoded Clerk dev domain in Convex auth config~~ RESOLVED in Phase 0: auth config reads `CLERK_JWT_ISSUER_DOMAIN` from the deployment environment. | Security/Hygiene | — |
 | R6 | Large dependency majors outstanding (Next 15→16, TipTap 2→3, Tailwind 3→4, Liveblocks 2→3). | Technical | Phase 0 upgrades in compatibility groups with official migration docs. |
 | R7 | Node version drift (22 active vs 24 expected). | Process | Pin via `.nvmrc` in Phase 0 after confirming supported LTS. |
 | R8 | WASM/C++ toolchain learning curve; deterministic sim complexity. | Execution | Small measured experiments before committing designs (Section 64 rules). |
