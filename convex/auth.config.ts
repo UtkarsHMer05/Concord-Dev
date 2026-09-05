@@ -1,8 +1,11 @@
-export default {
+const authConfig = {
   providers: [
     {
-      domain: "https://equipped-kid-12.clerk.accounts.dev",
+      // Clerk Frontend API URL, provided via environment (dev + prod deployments).
+      domain: process.env.CLERK_JWT_ISSUER_DOMAIN!,
       applicationID: "convex",
-    }
-  ]
-}
+    },
+  ],
+};
+
+export default authConfig;

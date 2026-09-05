@@ -45,3 +45,8 @@ next-env.d.ts
 *AGENT_MASTER_PROMPT*.md
 *PHASE_*_MASTER_PROMPT*.md
 *PHASE-*_MASTER_PROMPT*.md
+
+# Convex CLI-generated local agent tooling — never commit
+.agents/
+.claude/
+skills-lock.json
