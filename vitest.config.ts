@@ -11,12 +11,29 @@ try {
 
 export default defineConfig({
   test: {
-    include: ["tests/**/*.test.ts"],
     environment: "node",
-    // DB integration tests prepare the test database once per run.
     globalSetup: process.env.DATABASE_TEST_URL
       ? ["tests/db/global-setup.ts"]
       : undefined,
+    projects: [
+      {
+        test: {
+          name: "unit",
+          include: ["tests/**/*.test.ts"],
+          exclude: ["tests/db/**"],
+        },
+      },
+      {
+        test: {
+          name: "db",
+          include: ["tests/db/**/*.test.ts"],
+          setupFiles: ["tests/db/setup-env.ts"],
+          // One shared test database: test files must not run concurrently
+          // or they would truncate each other's fixture data.
+          fileParallelism: false,
+        },
+      },
+    ],
   },
   resolve: {
     alias: {
