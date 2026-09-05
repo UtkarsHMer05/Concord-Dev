@@ -17,16 +17,14 @@ import { getTestPool, truncateAll } from "./helpers";
 
 async function seed(): Promise<{
   owner: ActorContext;
-  member: ActorContext;
   memberUserId: string;
   docId: string;
 }> {
   const userO = await usersRepository.findOrCreateByClerkUserId("acl_owner");
   const userM = await usersRepository.findOrCreateByClerkUserId("acl_member");
   const owner: ActorContext = { userId: userO.id, clerkUserId: "acl_owner", organization: null };
-  const member: ActorContext = { userId: userM.id, clerkUserId: "acl_member", organization: null };
   const doc = await documentsService.createDocument(owner, { title: "ACL Doc" });
-  return { owner, member, memberUserId: userM.id, docId: doc.id };
+  return { owner, memberUserId: userM.id, docId: doc.id };
 }
 
 describe("ACL management service", () => {
@@ -45,7 +43,7 @@ describe("ACL management service", () => {
   });
 
   it("owner grants, updates, and revokes direct roles; audit events written", async () => {
-    const { owner, member, memberUserId, docId } = await seed();
+    const { owner, memberUserId, docId } = await seed();
 
     const granted = await permissionsService.grantPermission(owner, docId, {
       targetUserId: memberUserId,
@@ -75,11 +73,13 @@ describe("ACL management service", () => {
   });
 
   it("grantee gains exactly the granted capability (COMMENTER: read yes, edit no)", async () => {
-    const { owner, member, memberUserId, docId } = await seed();
+    const { owner, memberUserId, docId } = await seed();
     await permissionsService.grantPermission(owner, docId, {
       targetUserId: memberUserId,
       role: "COMMENTER",
     });
+    const memberUser = await usersRepository.findById(memberUserId);
+    const member: ActorContext = { userId: memberUser!.id, clerkUserId: "acl_member", organization: null };
     const detail = await documentsService.getDocument(member, docId);
     expect(detail.effectiveRole).toBe("COMMENTER");
     await expect(
@@ -93,7 +93,9 @@ describe("ACL management service", () => {
   });
 
   it("non-owners cannot manage ACLs (masked not-found)", async () => {
-    const { owner, member, memberUserId, docId } = await seed();
+    const { owner, memberUserId, docId } = await seed();
+    const memberUser = await usersRepository.findById(memberUserId);
+    const member: ActorContext = { userId: memberUser!.id, clerkUserId: "acl_member", organization: null };
     await expect(
       permissionsService.grantPermission(member, docId, {
         targetUserId: memberUserId,
@@ -160,7 +162,9 @@ describe("ACL management service", () => {
   });
 
   it("a granted EDITOR still cannot manage ACLs or delete (escalation attempt fails)", async () => {
-    const { owner, member, memberUserId, docId } = await seed();
+    const { owner, memberUserId, docId } = await seed();
+    const memberUser = await usersRepository.findById(memberUserId);
+    const member: ActorContext = { userId: memberUser!.id, clerkUserId: "acl_member", organization: null };
     await permissionsService.grantPermission(owner, docId, {
       targetUserId: memberUserId,
       role: "EDITOR",

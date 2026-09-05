@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { useMutation } from "convex/react";
+import { useRouter } from "next/navigation";
 
 import {
   Dialog,
@@ -15,33 +15,47 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
-import { api } from "../../convex/_generated/api";
-import { Id } from "../../convex/_generated/dataModel";
+import { renameDocumentAction } from "@/app/actions/documents";
 
 interface RenameDialogProps {
-  documentId: Id<"documents">;
+  documentId: string;
   initialTitle: string;
+  /** Version the caller last saw, for server-side conflict detection. */
+  expectedMetadataVersion: number;
   children: React.ReactNode;
 };
 
-export const RenameDialog = ({ documentId, initialTitle, children }: RenameDialogProps) => {
-  const update = useMutation(api.documents.updateById);
+export const RenameDialog = ({
+  documentId,
+  initialTitle,
+  expectedMetadataVersion,
+  children,
+}: RenameDialogProps) => {
+  const router = useRouter();
   const [isUpdating, setIsUpdating] = useState(false);
 
   const [title, setTitle] = useState(initialTitle);
   const [open, setOpen] = useState(false);
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsUpdating(true);
 
-    update({ id: documentId, title: title.trim() || "Untitled" })
-      .catch(() => toast.error("Something went wrong"))
-      .then(() => toast.success("Document updated"))
-      .finally(() => {
-        setIsUpdating(false);
-        setOpen(false);
-      });
+    const result = await renameDocumentAction({
+      documentId,
+      title: title.trim() || "Untitled",
+      expectedMetadataVersion,
+    });
+    if (result.ok) {
+      toast.success("Document updated");
+      router.refresh();
+    } else if (result.error.type === "conflict") {
+      toast.error("Document was modified elsewhere. Refresh and try again.");
+    } else {
+      toast.error("Something went wrong");
+    }
+    setIsUpdating(false);
+    setOpen(false);
   };
 
   return (

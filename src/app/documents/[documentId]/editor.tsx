@@ -22,13 +22,15 @@ import { LineHeightExtension } from '@/extensions/line-height';
 import { Ruler } from './ruler';
 
 export const Editor = () => {
-  const { editorContent, content, settings } = useDocumentSession();
+  const { editorContent, content, settings, canEditContent } = useDocumentSession();
 
   const { setEditor } = useEditorStore();
 
   const editor = useEditor({
     autofocus: true,
     immediatelyRender: false,
+    // VIEWER/COMMENTER roles get a read-only editor (server enforces anyway).
+    editable: canEditContent,
     // null content keeps the editor empty until the session content loads;
     // TipTap JSON or template HTML are both accepted.
     content: editorContent ?? undefined,

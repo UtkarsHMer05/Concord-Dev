@@ -1,5 +1,5 @@
 /**
- * TRANSITIONAL Concord collaboration contracts (Phase 0).
+ * TRANSITIONAL Concord collaboration contracts (Phase 1).
  *
  * These types define the seam between the React product layer and the future
  * Concord-owned collaboration stack. UI components must depend on this
@@ -11,12 +11,17 @@
  * (Phase 2+). They must never be faked.
  */
 
-export type SaveStatus = "idle" | "saving" | "error";
+export type SaveStatus = "idle" | "saving" | "error" | "conflict";
 
 export interface DocumentContentSession {
   /** Transitional persistence state for the editor content. */
   status: SaveStatus;
   saveError: string | null;
+  /**
+   * True when the server rejected a stale write (another tab saved newer
+   * content). Autosave is paused; the document must be reloaded.
+   */
+  hasConflict: boolean;
   /** Schedule a (debounced) durable save of the document content. */
   saveContent: (json: unknown) => void;
   /** Flush any pending save immediately (used on navigation/unmount). */
@@ -32,14 +37,16 @@ export interface DocumentSettingsSession {
 
 export interface DocumentSession {
   documentId: string;
+  /** Whether the verified effective role may write content (OWNER/EDITOR). */
+  canEditContent: boolean;
   content: DocumentContentSession;
   settings: DocumentSettingsSession;
-  /** Realtime collaboration with other clients. Unavailable in Phase 0. */
+  /** Realtime collaboration with other clients. Unavailable until Phase 2–3. */
   realtime: { state: "unavailable" };
-  /** Remote collaborator presence. Unavailable in Phase 0. */
+  /** Remote collaborator presence. Unavailable until Phase 2–3. */
   presence: { state: "unavailable" };
-  /** Comments/threads. Unavailable in Phase 0. */
+  /** Comments/threads. Unavailable until Phase 2–3. */
   threads: { state: "unavailable" };
-  /** Comment/thread notifications. Unavailable in Phase 0. */
+  /** Comment/thread notifications. Unavailable until Phase 2–3. */
   inbox: { state: "unavailable" };
 }

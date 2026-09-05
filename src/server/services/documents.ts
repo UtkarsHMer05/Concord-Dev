@@ -47,6 +47,7 @@ export interface DocumentSummaryDto {
   id: string;
   title: string;
   organizationId: string | null;
+  metadataVersion: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -141,6 +142,7 @@ function toSummaryDto(row: DocumentRow): DocumentSummaryDto {
     id: row.id,
     title: row.title,
     organizationId: row.organizationId,
+    metadataVersion: row.metadataVersion,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

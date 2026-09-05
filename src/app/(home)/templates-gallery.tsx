@@ -2,7 +2,6 @@
 
 import { toast } from "sonner";
 import { useState } from "react";
-import { useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
@@ -15,24 +14,22 @@ import {
 } from "@/components/ui/carousel";
 import { templates } from "@/constants/templates";
 
-import { api } from "../../../convex/_generated/api";
+import { createDocumentAction } from "@/app/actions/documents";
 
 export const TemplatesGallery = () => {
   const router = useRouter();
-  const create = useMutation(api.documents.create);
   const [isCreating, setIsCreating] = useState(false);
 
-  const onTemplateClick = (title: string, initialContent: string) => {
+  const onTemplateClick = async (title: string, initialContent: string) => {
     setIsCreating(true);
-    create({ title, initialContent })
-      .catch(() => toast.error("Something went wrong"))
-      .then((documentId) => {
-        toast.success("Document created")
-        router.push(`/documents/${documentId}`);
-      })
-      .finally(() => {
-        setIsCreating(false);
-      });
+    const result = await createDocumentAction({ title, initialContent });
+    if (result.ok) {
+      toast.success("Document created");
+      router.push(`/documents/${result.data.id}`);
+    } else {
+      toast.error("Something went wrong");
+    }
+    setIsCreating(false);
   };
 
   return (
@@ -54,7 +51,7 @@ export const TemplatesGallery = () => {
                 >
                   <button
                     disabled={isCreating}
-                    onClick={() => onTemplateClick(template.label, template.initialContent)}
+                    onClick={() => void onTemplateClick(template.label, template.initialContent)}
                     style={{
                       backgroundImage: `url(${template.imageUrl})`,
                       backgroundSize: "cover",

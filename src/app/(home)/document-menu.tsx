@@ -1,3 +1,5 @@
+"use client";
+
 import { ExternalLinkIcon, FilePenIcon, MoreVertical, TrashIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -10,15 +12,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import { Id } from "../../../convex/_generated/dataModel";
-
 interface DocumentMenuProps {
-  documentId: Id<"documents">;
+  documentId: string;
   title: string;
-  onNewTab: (id: Id<"documents">) => void;
+  metadataVersion: number;
+  onNewTab: (id: string) => void;
+  onRemoved: (documentId: string) => void;
 };
 
-export const DocumentMenu = ({ documentId, title, onNewTab }: DocumentMenuProps) => {
+export const DocumentMenu = ({ documentId, title, metadataVersion, onNewTab, onRemoved }: DocumentMenuProps) => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -27,7 +29,11 @@ export const DocumentMenu = ({ documentId, title, onNewTab }: DocumentMenuProps)
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent>
-        <RenameDialog documentId={documentId} initialTitle={title}>
+        <RenameDialog
+          documentId={documentId}
+          initialTitle={title}
+          expectedMetadataVersion={metadataVersion}
+        >
           <DropdownMenuItem
             onSelect={(e) => e.preventDefault()}
             onClick={(e) => e.stopPropagation()}
@@ -36,7 +42,7 @@ export const DocumentMenu = ({ documentId, title, onNewTab }: DocumentMenuProps)
             Rename
           </DropdownMenuItem>
         </RenameDialog>
-        <RemoveDialog documentId={documentId}>
+        <RemoveDialog documentId={documentId} onRemoved={onRemoved}>
           <DropdownMenuItem
             onSelect={(e) => e.preventDefault()}
             onClick={(e) => e.stopPropagation()}

@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * TRANSITIONAL document session provider (Phase 0).
+ * TRANSITIONAL document session provider (Phase 1).
  *
  * Replaces the realtime room provider while Concord's own collaboration stack
  * is being built. It owns:
- * - durable content persistence for the editor (transitional Convex-backed
- *   whole-document saves, debounced);
+ * - durable content persistence for the editor (transitional PostgreSQL-backed
+ *   whole-document saves via /api/documents/[id]/content, debounced, with
+ *   optimistic concurrency: a stale writer conflicts instead of overwriting);
  * - per-document layout settings (transitional localStorage-backed margins);
  * - honest "unavailable" capability states for realtime, presence, threads,
  *   and inbox.
@@ -16,7 +17,6 @@
  * let this implementation become the final design.
  */
 
-import { useMutation } from "convex/react";
 import {
   createContext,
   useCallback,
@@ -29,9 +29,8 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { api } from "../../../convex/_generated/api";
-import { Id } from "../../../convex/_generated/dataModel";
 import type { DocumentSession, SaveStatus } from "./types";
+import { serializeDocumentContent } from "./content";
 
 const SAVE_DEBOUNCE_MS = 500;
 const MARGINS_KEY_PREFIX = "concord.doc.";
@@ -40,7 +39,11 @@ const LEFT_MARGIN_DEFAULT = 56;
 const RIGHT_MARGIN_DEFAULT = 56;
 
 interface DocumentSessionProviderProps {
-  documentId: Id<"documents">;
+  documentId: string;
+  /** Content version observed at page load; advanced by each successful save. */
+  initialContentVersion: number;
+  /** Whether the effective role may write content (OWNER/EDITOR). */
+  canEditContent: boolean;
   /** Loaded document content (TipTap JSON or HTML string) for the editor. */
   editorContent: unknown;
   children: ReactNode;
@@ -54,14 +57,16 @@ const DocumentSessionContext = createContext<SessionContextValue | null>(null);
 
 export function DocumentSessionProvider({
   documentId,
+  initialContentVersion,
+  canEditContent,
   editorContent,
   children,
 }: DocumentSessionProviderProps) {
-  const updateContent = useMutation(api.documents.updateContent);
-
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const hasConflictRef = useRef(false);
 
+  const contentVersionRef = useRef(initialContentVersion);
   const pendingContentRef = useRef<unknown>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -70,29 +75,72 @@ export function DocumentSessionProvider({
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    // A conflict pauses autosave: further blind retries would either loop or
+    // overwrite. Recovery requires a reload (Phase 2 replaces this path).
+    if (hasConflictRef.current) {
+      return;
+    }
     const payload = pendingContentRef.current;
     if (payload === null || payload === undefined) {
       return;
     }
     try {
-      await updateContent({
-        id: documentId,
-        content: JSON.stringify({ v: 1, doc: payload }),
+      const response = await fetch(`/api/documents/${documentId}/content`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: JSON.parse(serializeDocumentContent(payload)),
+          expectedContentVersion: contentVersionRef.current,
+        }),
       });
-      pendingContentRef.current = null;
-      setSaveError(null);
-      setStatus((s) => (s === "error" ? "idle" : s));
-    } catch (error) {
+      if (response.ok) {
+        const data = (await response.json()) as { contentVersion: number };
+        contentVersionRef.current = data.contentVersion;
+        pendingContentRef.current = null;
+        setSaveError(null);
+        setStatus((s) => (s === "saving" || s === "error" ? "idle" : s));
+        return;
+      }
+      if (response.status === 409) {
+        hasConflictRef.current = true;
+        pendingContentRef.current = null;
+        setStatus("conflict");
+        setSaveError("This document was modified in another tab.");
+        toast.error("Modified in another tab — reload to get the latest version.", {
+          duration: Infinity,
+          action: {
+            label: "Reload",
+            onClick: () => window.location.reload(),
+          },
+        });
+        return;
+      }
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        hasConflictRef.current = true;
+        pendingContentRef.current = null;
+        setStatus("error");
+        setSaveError("You no longer have permission to edit this document.");
+        toast.error("You no longer have permission to edit this document.");
+        return;
+      }
+      // Transient/server error: keep pending content, allow bounded retries
+      // through the normal debounce cycle.
       setStatus("error");
-      setSaveError(error instanceof Error ? error.message : "Save failed");
-      toast.error("Failed to save document");
+      setSaveError("Save failed. Retrying…");
+    } catch {
+      // Network failure: keep pending content for the next flush attempt.
+      setStatus("error");
+      setSaveError("Save failed. Retrying…");
     }
-  }, [documentId, updateContent]);
+  }, [documentId]);
 
   const saveContent = useCallback(
     (json: unknown) => {
+      if (!canEditContent || hasConflictRef.current) {
+        return;
+      }
       pendingContentRef.current = json;
-      setStatus("saving");
+      setStatus((s) => (s === "conflict" ? s : "saving"));
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -103,7 +151,7 @@ export function DocumentSessionProvider({
         });
       }, SAVE_DEBOUNCE_MS);
     },
-    [flush],
+    [canEditContent, flush],
   );
 
   // Flush pending saves when navigating away/unmounting (best effort).
@@ -194,7 +242,14 @@ export function DocumentSessionProvider({
     () => ({
       documentId,
       editorContent,
-      content: { status, saveError, saveContent, flush },
+      canEditContent,
+      content: {
+        status,
+        saveError,
+        hasConflict: status === "conflict",
+        saveContent,
+        flush,
+      },
       settings: {
         leftMargin: margins.left,
         rightMargin: margins.right,
@@ -209,6 +264,7 @@ export function DocumentSessionProvider({
     [
       documentId,
       editorContent,
+      canEditContent,
       status,
       saveError,
       saveContent,

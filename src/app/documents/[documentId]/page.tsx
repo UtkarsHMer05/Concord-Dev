@@ -1,31 +1,33 @@
-import { auth } from "@clerk/nextjs/server";
-import { preloadQuery } from "convex/nextjs";
+import { notFound, redirect } from "next/navigation";
+
+import { buildActorContext } from "@/server/auth/actor-context";
+import { UnauthenticatedError } from "@/server/errors";
+import { documentsService } from "@/server/services/documents";
+import type { DocumentDetailDto } from "@/server/services/documents";
 
 import { Document } from "./document";
-import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
 
 interface DocumentIdPageProps {
-  params: Promise<{ documentId: Id<"documents"> }>;
+  params: Promise<{ documentId: string }>;
 };
 
 const DocumentIdPage = async ({ params }: DocumentIdPageProps) => {
   const { documentId } = await params;
 
-  const { getToken } = await auth();
-  const token = await getToken({ template: "convex" }) ?? undefined;
-
-  if (!token) {
-    throw new Error("Unauthorized");
+  let document: DocumentDetailDto;
+  try {
+    const actor = await buildActorContext();
+    document = await documentsService.getDocument(actor, documentId);
+  } catch (error) {
+    // Validation failures (malformed ids) and denials are indistinguishable
+    // from missing documents — render the 404 page without leaking why.
+    if (error instanceof UnauthenticatedError) {
+      redirect("/");
+    }
+    notFound();
   }
 
-  const preloadedDocument = await preloadQuery(
-    api.documents.getById,
-    { id: documentId },
-    { token }
-  );
+  return <Document document={document} />;
+};
 
-  return <Document preloadedDocument={preloadedDocument} />;
-}
- 
 export default DocumentIdPage;

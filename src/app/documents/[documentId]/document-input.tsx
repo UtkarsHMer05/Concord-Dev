@@ -1,62 +1,92 @@
+"use client";
+
 import { toast } from "sonner";
 import { useRef, useState } from "react";
-import { useMutation } from "convex/react";
 import { BsCloudCheck, BsCloudSlash } from "react-icons/bs";
+import { useRouter } from "next/navigation";
 
 import { useDebounce } from "@/hooks/use-debounce";
 import { useDocumentSession } from "@/lib/collaboration/provider";
+import { renameDocumentAction } from "@/app/actions/documents";
 
-import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
 import { LoaderIcon } from "lucide-react";
 
 interface DocumentInputProps {
   title: string;
-  id: Id<"documents">;
+  id: string;
+  metadataVersion: number;
+  canRename: boolean;
 };
 
-export const DocumentInput = ({ title, id }: DocumentInputProps) => {
+export const DocumentInput = ({ title, id, metadataVersion, canRename }: DocumentInputProps) => {
   const { content } = useDocumentSession();
+  const router = useRouter();
 
   const [value, setValue] = useState(title);
   const [isPending, setIsPending] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
+  // Local view of the server metadata version for conflict detection.
+  const versionRef = useRef(metadataVersion);
+
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const mutate = useMutation(api.documents.updateById);
-
-  const debouncedUpdate = useDebounce((newValue: string) => {
+  const debouncedUpdate = useDebounce(async (newValue: string) => {
     if (newValue === title) return;
 
     setIsPending(true);
-    mutate({ id, title: newValue })
-      .then(() => toast.success("Document updated"))
-      .catch(() => toast.error("Something went wrong"))
-      .finally(() => setIsPending(false));
+    const result = await renameDocumentAction({
+      documentId: id,
+      title: newValue,
+      expectedMetadataVersion: versionRef.current,
+    });
+    if (result.ok) {
+      versionRef.current = result.data.metadataVersion;
+      router.refresh();
+    } else if (result.error.type === "conflict") {
+      toast.error("Modified in another tab — reload before renaming.");
+    } else {
+      toast.error("Something went wrong");
+    }
+    setIsPending(false);
   });
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
     setValue(newValue);
-    debouncedUpdate(newValue);
+    if (canRename) {
+      debouncedUpdate(newValue);
+    }
   };
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!canRename) {
+      setIsEditing(false);
+      return;
+    }
 
     setIsPending(true);
-    mutate({ id, title: value })
-      .then(() => {
-        toast.success("Document updated");
-        setIsEditing(false);
-      })
-      .catch(() => toast.error("Something went wrong"))
-      .finally(() => setIsPending(false));
+    const result = await renameDocumentAction({
+      documentId: id,
+      title: value,
+      expectedMetadataVersion: versionRef.current,
+    });
+    if (result.ok) {
+      toast.success("Document updated");
+      versionRef.current = result.data.metadataVersion;
+      setIsEditing(false);
+      router.refresh();
+    } else if (result.error.type === "conflict") {
+      toast.error("Modified in another tab — reload before renaming.");
+    } else {
+      toast.error("Something went wrong");
+    }
+    setIsPending(false);
   };
 
   const showLoader = isPending || content.status === "saving";
-  const showError = content.status === "error";
+  const showError = content.status === "error" || content.status === "conflict";
 
   return (
     <div className="flex items-center gap-2">
@@ -74,14 +104,15 @@ export const DocumentInput = ({ title, id }: DocumentInputProps) => {
           />
         </form>
       ) : (
-        <span 
+        <span
           onClick={() => {
+            if (!canRename) return;
             setIsEditing(true);
             setTimeout(() => {
               inputRef.current?.focus();
             }, 0);
           }}
-          className="text-lg px-1.5 cursor-pointer truncate">
+          className={`text-lg px-1.5 truncate ${canRename ? "cursor-pointer" : "cursor-default"}`}>
           {title}
         </span>
       )}

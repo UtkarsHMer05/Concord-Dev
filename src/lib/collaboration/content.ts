@@ -1,9 +1,10 @@
 /**
- * TRANSITIONAL (Phase 0) content envelope helpers.
+ * TRANSITIONAL (Phase 1) content envelope helpers.
  *
- * Durable editor content is stored as a versioned JSON string
- * (`{ v: 1, doc: <TipTap JSON> }`). Documents created before a first save may
- * only carry the template's initial HTML content.
+ * Durable editor content is stored in PostgreSQL as a versioned JSONB
+ * envelope (`{ v: 1, doc: <TipTap JSON> }`). Documents created before a first
+ * save may only carry the template's initial HTML content. Historical
+ * string-encoded envelopes (Phase 0, Convex) are still parsed for parity.
  */
 
 export interface StoredContentEnvelope {
@@ -15,20 +16,37 @@ export function serializeDocumentContent(doc: unknown): string {
   return JSON.stringify({ v: 1, doc });
 }
 
+function isEnvelope(value: unknown): value is StoredContentEnvelope {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "v" in value &&
+    "doc" in value &&
+    (value as { v: unknown }).v === 1
+  );
+}
+
 export function parseDocumentContent(
-  raw: string | undefined | null,
+  raw: unknown,
   fallback: unknown = null,
 ): unknown {
-  if (!raw) {
+  if (raw === null || raw === undefined) {
     return fallback;
   }
-  try {
-    const parsed = JSON.parse(raw) as Partial<StoredContentEnvelope>;
-    if (parsed && parsed.v === 1 && "doc" in parsed) {
-      return parsed.doc;
+  // JSONB rows arrive as objects.
+  if (typeof raw === "object") {
+    return isEnvelope(raw) ? raw.doc : fallback;
+  }
+  // Legacy string-encoded envelope (Phase 0 rows), kept for parity.
+  if (typeof raw === "string") {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (isEnvelope(parsed)) {
+        return parsed.doc;
+      }
+    } catch {
+      // Not JSON — fall through.
     }
-    return fallback;
-  } catch {
-    return fallback;
   }
+  return fallback;
 }
