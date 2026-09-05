@@ -20,7 +20,7 @@ Companion documents: [AUTHORIZATION.md](AUTHORIZATION.md),
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Database engine | PostgreSQL 18 | Pinned image `postgres:18.6-trixie`, run via Docker Compose |
+| Database engine | PostgreSQL 18 | Pinned image `postgres:18.6-alpine`, run via Docker Compose |
 | Schema definition | Drizzle ORM (TypeScript) | Single source for typed schema |
 | Migrations | Drizzle Kit → reviewed SQL files | Applied in order; replayable from empty DB |
 | Runtime driver | `node-postgres` (`pg`) | Server-only connection pool |

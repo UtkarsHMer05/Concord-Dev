@@ -356,7 +356,7 @@ retained and will not be removed.
 
 - **Status:** Accepted
 - **Decision:** Concord's durable application data lives in PostgreSQL 18
-  (pinned `postgres:18.6-trixie` image), run locally via Docker Compose. The
+  (pinned `postgres:18.6-alpine` image), run locally via Docker Compose. The
   typed schema is expressed with Drizzle ORM 0.45.x; schema changes ship as
   reviewed SQL migrations generated with Drizzle Kit 0.31.x and applied by the
   Drizzle migrator at startup/test time. The runtime driver is
