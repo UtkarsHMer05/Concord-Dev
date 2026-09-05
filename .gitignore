@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Private local agent orchestration — never commit
+.agent/
+*AGENT_MASTER_PROMPT*.md
+*PHASE_*_MASTER_PROMPT*.md
+*PHASE-*_MASTER_PROMPT*.md

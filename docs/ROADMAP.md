@@ -1,0 +1,153 @@
+# Concord — Roadmap
+
+Status: Authoritative (bootstrap version)
+Version: 1.0
+Last updated: 2026-09-05
+
+Concord is delivered through exactly eight high-level phases. Work never
+spans phases: no milestone from a future phase is implemented while an earlier
+phase is open (see DEC-013).
+
+**Detailed milestone definitions are authoritative only when supplied by the
+corresponding phase master prompt.** This roadmap records each phase's
+objective, deliverables, prerequisites, forbidden work, and completion gate —
+not its milestones.
+
+---
+
+## Phase 0 — Bootstrap, modernization, original baseline, Liveblocks extraction
+
+- **Objective:** Turn the aging tutorial repository into a clean, modern,
+  verified working foundation — without starting Concord's distributed
+  backend.
+- **Major deliverables:** Repository and dependency audit; deliberate
+  dependency modernization (stable React, supported Next, pinned Node via
+  `.nvmrc`); local Convex + Clerk + Liveblocks configuration; verified
+  original application behavior (auth, documents, editing, collaboration,
+  presence, comments); modernized-baseline checkpoint; Liveblocks removal with
+  a clean collaboration seam; transitional persistence if required; verified
+  core document UI.
+- **Prerequisites:** This governance bootstrap; `.env.local` secrets present.
+- **Forbidden:** PostgreSQL migration; CRDT core; Rust gateway; NATS; Redis;
+  production deployment.
+- **Completion gate:** Clean build + app verification on the modernized
+  baseline; Liveblocks fully absent with UI still functional on the seam;
+  clean Git state; phase report + tag.
+
+## Phase 1 — PostgreSQL control plane / Convex removal / authorization
+
+- **Objective:** Remove Convex and establish Concord-owned durable
+  foundations and authorization.
+- **Major deliverables:** PostgreSQL via Docker Compose; schema + migrations;
+  documents/users/organizations/memberships; document ACLs with
+  OWNER/EDITOR/COMMENTER/VIEWER enforced server-side; repository/data layer;
+  Clerk identity integration; audit events; Convex migration with CRUD/search
+  parity; security tests.
+- **Prerequisites:** Phase 0 gate.
+- **Forbidden:** CRDT/WASM work; gateway work; multi-node anything.
+- **Completion gate:** Convex fully absent; authorization tests green;
+  migrations verified; app feature-parity on the new backend.
+
+## Phase 2 — C++ CRDT core + WASM + local-first client
+
+- **Objective:** Build the collaboration algorithm foundation.
+- **Major deliverables:** C++20/23 library (CMake/Ninja); deterministic CRDT
+  representation (replicas, operations, dedup, merge, clock/vector concepts);
+  serialization + state hashing; native tests incl. property/randomized and
+  sanitizer-clean builds; Emscripten/WASM build; TypeScript bindings; TipTap
+  integration; IndexedDB persistence; Web Worker where justified; offline
+  single-client correctness; deterministic tests.
+- **Prerequisites:** Phase 1 gate.
+- **Forbidden:** Multi-gateway complexity; server-side sync logic.
+- **Completion gate:** WASM core passes convergence/determinism suites;
+  browser client edits offline and persists locally; full builds green.
+
+## Phase 3 — Rust realtime sync gateway + custom protocol + basic durability
+
+- **Objective:** Multiple browsers synchronize through a self-hosted backend.
+- **Major deliverables:** Rust/Tokio service (Axum or justified equivalent);
+  WebSocket protocol with framing; authentication + ACL authorization;
+  connection lifecycle; bounded queues/backpressure foundations;
+  heartbeat/reconnect; update deduplication; durable update persistence;
+  multi-client + offline-reconnect synchronization; graceful shutdown;
+  protocol tests.
+- **Prerequisites:** Phase 2 gate.
+- **Forbidden:** NATS/Redis; multi-node routing; production deployment.
+- **Completion gate:** Multi-browser convergence through the gateway across
+  restarts; protocol + concurrency tests green; no unbounded queues in
+  critical paths.
+
+## Phase 4 — Distributed multi-gateway architecture
+
+- **Objective:** Move from one sync process to distributed service operation.
+- **Major deliverables:** Multiple gateways; NATS JetStream; Redis for
+  justified ephemeral state; cross-gateway collaboration; document routing /
+  sharding (consistent hashing if justified); presence separation; load
+  balancing; slow consumers; backpressure; rate limiting; retry/backoff with
+  reconnect jitter; thundering-herd handling; load shedding; failure
+  isolation; service health.
+- **Prerequisites:** Phase 3 gate.
+- **Forbidden:** Scalability claims without benchmarks.
+- **Completion gate:** Cross-gateway convergence verified; chaos-grade
+  interruption tests (broker, gateway loss) green with durable-update
+  integrity.
+
+## Phase 5 — Recovery, snapshots, compaction, history, performance workers
+
+- **Objective:** Build the serious persistence/recovery side.
+- **Major deliverables:** Append-only update lifecycle; snapshot policy;
+  recovery path; compaction; version history with revision reconstruction and
+  restore; native C++ workers/worker pools where justified; checksums; storage
+  consistency; concurrent maintenance jobs; large-document handling;
+  profiling; recovery benchmarks.
+- **Prerequisites:** Phase 4 gate.
+- **Forbidden:** Public metric claims without reproducible evidence.
+- **Completion gate:** Snapshot+tail recovery demonstrated and measured
+  (recorded in the private ledger first); history/restore functional;
+  benchmarks reproducible.
+
+## Phase 6 — Verification, security, observability, chaos, CI/CD, benchmarking
+
+- **Objective:** Prove the system rather than claim it works.
+- **Major deliverables:** Deterministic distributed simulator (seeded,
+  reproducible faults); randomized/property/convergence tests; fuzzing;
+  ASan/UBSan/TSan; Rust fmt/clippy/test gates; protocol fuzzing;
+  authorization/security tests (malformed frames, replay, rate limits);
+  chaos scenarios (partitions, duplication, reordering, gateway crashes,
+  dependency failures, PostgreSQL restart, NATS interruption, Redis loss);
+  OpenTelemetry/Prometheus/Grafana observability; structured logs/tracing;
+  CI (PR + nightly chaos/fuzz/bench + sanitizer matrices); performance
+  regression gates; release artifacts; supply-chain scanning.
+- **Prerequisites:** Phase 5 gate.
+- **Forbidden:** Feature growth; deployment.
+- **Completion gate:** Hard evidence produced: simulator + chaos + security
+  suites green; CI enforced; observability live; benchmark gates wired.
+
+## Phase 7 — Product polish, productionization, deployment, final metrics
+
+- **Objective:** Turn the verified system into a polished deployable product.
+- **Major deliverables:** UX polish, accessibility, responsive/browser
+  compatibility; documentation; staging → production; production Docker
+  images; cloud/platform + managed PostgreSQL decisions; secrets management;
+  TLS; health checks; rolling/blue-green deployment; graceful WebSocket
+  draining; backward-compatible migrations; rollback; smoke tests; production
+  telemetry; deployment runbook; final benchmark reruns; final four headline
+  metrics; final architecture diagrams; public README; attribution/licensing
+  resolution; demo script; interviewer deep-dive material.
+- **Prerequisites:** Phase 6 gate.
+- **Forbidden:** Claiming unmeasured performance; skipping the licensing
+  audit.
+- **Completion gate:** Deployed, observable, documented product with
+  reproducible final metrics and clean provenance.
+
+---
+
+## Cross-phase standing rules
+
+- Verification tiers: Level A (targeted), Level B (milestone), Level C (phase
+  gate — never skipped).
+- Every phase ends with a completion report (milestones, tests, benchmarks,
+  decisions changed, branch/tag, memory/state updates) before the next begins.
+- Tags such as `phase-0-complete` are created only after their gates pass.
+- The `antonio-original-baseline` tag is immutable (DEC-015).
+- Deployment decisions stay out of Phases 0–6 (DEC-010).
