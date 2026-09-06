@@ -20,7 +20,7 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["tests/**/*.test.ts"],
-          exclude: ["tests/db/**"],
+          exclude: ["tests/db/**", "tests/realtime/**"],
         },
       },
       {

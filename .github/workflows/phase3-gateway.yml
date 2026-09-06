@@ -1,0 +1,72 @@
+# Phase 3 gateway gate: Rust fmt/clippy/unit, Postgres migrations +
+# operation-log tests, protocol golden parity (Rust⇄TS), WebSocket
+# integration + security suites, web typecheck/unit. The full E2E (real
+# gateway binary) runs locally in verify-gateway.sh; CI covers the
+# deterministic layers (documented in docs/TESTING.md).
+name: phase3-gateway
+on:
+  push:
+    branches: [main, "phase/**"]
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: concord
+          POSTGRES_PASSWORD: concord_local_dev
+          POSTGRES_DB: concord
+        ports: ["5433:5432"]
+        # Wait for postgres readiness before tests.
+        options: >-
+          --health-cmd "pg_isready -U concord -d concord"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      GATEWAY_DATABASE_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+      GATEWAY_CLERK_ISSUER: https://ci-placeholder.clerk.accounts.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Create the test database
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test" || true
+      - name: fmt
+        run: cargo fmt --all --check
+        working-directory: rust
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: rust
+      - name: Unit tests (incl. protocol golden)
+        run: cargo test --lib
+        working-directory: rust
+      - name: DB integration tests (migrations + op-log + authz)
+        run: cargo test --test db_integration -- --test-threads=1
+        working-directory: rust
+      - name: WebSocket integration + security suites
+        run: cargo test --test ws_integration -- --test-threads=1
+        working-directory: rust
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Typecheck + lint + unit tests (incl. TS protocol golden parity)
+        run: |
+          npm run typecheck
+          npm run lint
+          npx vitest run --project unit

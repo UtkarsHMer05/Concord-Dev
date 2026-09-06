@@ -386,7 +386,9 @@ async fn main() {
         handshake(&mut ws, &user_clerk).await;
         join_and_ready(&mut ws, doc).await;
         ws.send(WsMessage::Text(
-            r#"{"v":1,"type":"sync_request","payload":{"cursor":"0"}}"#.to_owned().into(),
+            r#"{"v":1,"type":"sync_request","payload":{"cursor":"0"}}"#
+                .to_owned()
+                .into(),
         ))
         .await
         .expect("sync req");
