@@ -190,22 +190,21 @@ export class ConcordEngine {
         internals: EngineInternals,
         invoke: (ptr: number, cap: number) => number,
     ): Uint8Array {
+        // Sizing probe (out=null, cap=0) returns the required length as a
+        // POSITIVE value; negative values are reserved for error codes. The
+        // previous "-required" probe encoding collided with the error range
+        // for outputs >= ~900 bytes — every real document — and misread
+        // successful sizing as failures (DEC-027).
         const probe = invoke(0, 0);
-        if (is_error_status(probe)) {
+        if (probe < 0) {
             throw decode_error(probe, "engine call failed");
         }
         if (probe === 0) {
             return new Uint8Array(0);
         }
-        if (probe > 0) {
-            // Non-empty output cannot be produced with a zero-length probe;
-            // defensive only.
-            return new Uint8Array(0);
-        }
-        const required = -probe;
-        this.ensureBuffer(internals, required);
+        this.ensureBuffer(internals, probe);
         const status = invoke(internals.outBuffer, internals.outCapacity);
-        if (is_error_status(status)) {
+        if (status < 0) {
             throw decode_error(status, "engine call failed");
         }
         return this.copyOut(internals, status);

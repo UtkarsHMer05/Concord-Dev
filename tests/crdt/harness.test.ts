@@ -14,7 +14,6 @@ import { describe, expect, it } from "vitest";
 
 import { CrdtWorkerCore } from "@/lib/crdt/worker/core";
 import type { PersistenceAdapter, LocalState } from "@/lib/crdt/worker/idb";
-import type { WorkerRequest, WorkerResultPayload } from "@/lib/crdt/worker/protocol";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const wasmDist = path.join(repoRoot, "wasm/dist");

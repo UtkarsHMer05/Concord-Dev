@@ -15,18 +15,36 @@ declare const self: WorkerGlobal;
 
 async function loadFactory(): Promise<ConcordModule> {
     // The generated glue is a static public asset (staged by wasm:build),
-    // intentionally hidden from the bundler and fetched at runtime; the .wasm
-    // sits beside it under /wasm/.
-    const importGenerated = new Function(
-        "specifier",
-        "return import(specifier);",
-    ) as (specifier: string) => Promise<{ default?: unknown }>;
-    const generated = await importGenerated("/wasm/concord-crdt.js");
-    const factory = (generated.default ?? generated) as (
+    // fetched as text and evaluated inside the worker: dynamic import of an
+    // absolute URL is disallowed inside module workers in some engines, and
+    // the bundler must not follow the generated file. The factory's
+    // instantiateWasm hook instantiates the binary fetched from /wasm/.
+    const response = await fetch("/wasm/concord-crdt.js");
+    if (!response.ok) {
+        throw new Error(`wasm glue fetch failed: ${response.status}`);
+    }
+    const source = await response.text();
+    const evaluate = new Function(
+        `${source}\n; return loadConcordCrdt;`,
+    ) as () => (
         options?: Record<string, unknown>,
     ) => Promise<ConcordModule>;
+    const factory = evaluate();
+    const binaryResponse = await fetch("/wasm/concord-crdt.wasm");
+    if (!binaryResponse.ok) {
+        throw new Error(`wasm binary fetch failed: ${binaryResponse.status}`);
+    }
+    const wasmBinary = await binaryResponse.arrayBuffer();
     return factory({
-        locateFile: (file: string) => `/wasm/${file}`,
+        instantiateWasm(
+            info: WebAssembly.Imports,
+            receiveInstance: (instance: WebAssembly.Instance) => void,
+        ) {
+            void WebAssembly.instantiate(wasmBinary, info).then((result) =>
+                receiveInstance(result.instance),
+            );
+            return {} as WebAssembly.WebAssemblyInstantiatedSource;
+        },
     });
 }
 

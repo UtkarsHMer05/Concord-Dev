@@ -49,10 +49,17 @@ struct OutBuffer {
     std::uint8_t* out;
     std::int32_t cap;
 
-    // Writes `bytes`; returns bytes written, or -(required) when the caller
-    // provided too little room.
+    // Sizing probe (out == nullptr): returns the required length as a
+    // POSITIVE value. Negative values are reserved for error codes
+    // (-1000 - ErrorCode), so large outputs (>= ~900 bytes — i.e. every real
+    // document) can never be misread as failures by the caller.
+    // Real call (out != nullptr): returns bytes written, or -(required)
+    // when the buffer is too small (generating-call recovery convention).
     std::int32_t write(const std::string& bytes) const {
         const auto needed = static_cast<std::int32_t>(bytes.size());
+        if (out == nullptr) {
+            return needed;
+        }
         if (cap < 0 || static_cast<std::size_t>(cap) < bytes.size()) {
             return -needed;
         }

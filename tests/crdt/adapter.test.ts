@@ -223,3 +223,105 @@ describe("remote → editor direction (M040)", () => {
         }
     });
 });
+
+describe("batch regression (final gate): seeds, pastes, tombstones", () => {
+    it("seeds multi-block server content into an empty replica (browser parity)", async () => {
+        const engine = await ConcordEngine.create(1n, loadFactory);
+        try {
+            // The product seed path: an empty local replica diffed against
+            // multi-block server content. This previously inverted the block
+            // order — the delimiter for block 2 was anchored at the ORIGINAL
+            // stream end (0) instead of the post-insert position.
+            const seed = [textBlock("paragraph", "hello world"), textBlock("paragraph", "second")];
+            const ops = reconcile([textBlock("paragraph", "")], seed, await streamOf(engine));
+            await applyReconcileOps(engine, ops);
+            const blocks = JSON.parse(engine.visibleJson()).blocks;
+            expect(blocks).toHaveLength(2);
+            expect(blocks[0].runs[0].t).toBe("hello world");
+            expect(blocks[1].runs[0].t).toBe("second");
+
+            // The post-seed state is a stable baseline: re-reconciling the
+            // same content is a no-op (no drift, no duplicate ops).
+            expect(reconcile(seed, seed, await streamOf(engine))).toHaveLength(0);
+        } finally {
+            engine.free();
+        }
+    });
+
+    it("keeps order when pasting blocks before the suffix region", async () => {
+        const engine = await ConcordEngine.create(1n, loadFactory);
+        try {
+            const ab = [textBlock("paragraph", "first"), textBlock("paragraph", "last")];
+            await applyReconcileOps(engine, reconcile([textBlock("paragraph", "")], ab, await streamOf(engine)));
+
+            const pasted = [
+                textBlock("paragraph", "first"),
+                textBlock("paragraph", "mid-one"),
+                textBlock("paragraph", "mid-two"),
+                textBlock("paragraph", "last"),
+            ];
+            await applyReconcileOps(engine, reconcile(ab, pasted, await streamOf(engine)));
+            const blocks = JSON.parse(engine.visibleJson()).blocks;
+            expect(blocks.map((b: { runs: { t: string }[] }) => b.runs[0]?.t)).toEqual([
+                "first",
+                "mid-one",
+                "mid-two",
+                "last",
+            ]);
+        } finally {
+            engine.free();
+        }
+    });
+
+    it("maps visible deletes onto tombstone-shifted stream positions", async () => {
+        const engine = await ConcordEngine.create(1n, loadFactory);
+        try {
+            const seed = [textBlock("paragraph", "abcdef")];
+            await applyReconcileOps(engine, reconcile([textBlock("paragraph", "")], seed, await streamOf(engine)));
+
+            // Delete 'c': leaves a tombstone INSIDE the block.
+            const withoutC = [textBlock("paragraph", "abdef")];
+            await applyReconcileOps(engine, reconcile(seed, withoutC, await streamOf(engine)));
+
+            // Delete 'd' — its stream slot sits AFTER the tombstone; a visible
+            // offset would have targeted the tombstone and silently no-op'd.
+            const withoutD = [textBlock("paragraph", "abef")];
+            await applyReconcileOps(engine, reconcile(withoutC, withoutD, await streamOf(engine)));
+            let blocks = JSON.parse(engine.visibleJson()).blocks;
+            expect(blocks[0].runs[0].t).toBe("abef");
+
+            // Delete the first char — target precedes the tombstone.
+            const withoutA = [textBlock("paragraph", "bef")];
+            await applyReconcileOps(engine, reconcile(withoutD, withoutA, await streamOf(engine)));
+            blocks = JSON.parse(engine.visibleJson()).blocks;
+            expect(blocks[0].runs[0].t).toBe("bef");
+        } finally {
+            engine.free();
+        }
+    });
+
+    it("accepts lineHeight on block delimiters (registry parity with the C++ core)", async () => {
+        const engine = await ConcordEngine.create(1n, loadFactory);
+        try {
+            // lineHeight completed the delimiter attr registry (DEC-027) —
+            // previously the engine threw UnknownAttributeName here, which
+            // degraded every line-height document to the fallback path.
+            const seed = [
+                textBlock("paragraph", "intro"),
+                {
+                    type: "heading-1",
+                    attrs: { type: "heading-1", lineHeight: "1.5" },
+                    chars: [..."Title"].map((scalar) => ({ scalar, marks: {} })),
+                },
+            ];
+            await applyReconcileOps(engine, reconcile([textBlock("paragraph", "")], seed, await streamOf(engine)));
+            const json = engine.visibleJson();
+            const blocks = JSON.parse(json).blocks;
+            expect(blocks[1].type).toBe("heading-1");
+            expect(json).toContain("lineHeight");
+            expect(blocks[1].runs[0].t).toBe("Title");
+        } finally {
+            engine.free();
+        }
+    });
+});

@@ -20,7 +20,7 @@
 import type { Editor } from "@tiptap/react";
 
 import { blocksToPmDoc, pmDocToBlocks, type CanonicalBlock, type PmNode } from "./pm-model";
-import { reconcile, type StreamEntryJson } from "./adapter";
+import { reconcile, type ReconcileOp, type StreamEntryJson } from "./adapter";
 import type { CrdtClient } from "./worker/client";
 
 export type BridgeState =
@@ -73,11 +73,31 @@ function replicaIdForDocument(documentId: string): bigint {
 export class CrdtEditorBridge {
     private state: BridgeState = { mode: "idle" };
     private reconciling = false;
+    /** Transactions that arrived while start() was still in flight. */
+    private startPromise: Promise<void> | null = null;
 
     constructor(private readonly init: BridgeInit) {}
 
     getState(): BridgeState {
         return this.state;
+    }
+
+    /** Engine visible-JSON (runs) → adapter canonical blocks (chars). */
+    private static toCanonicalBlocks(json: string): CanonicalBlock[] {
+        const raw = (JSON.parse(json) as {
+            blocks: Array<{
+                type: string;
+                attrs: Record<string, string>;
+                runs: Array<{ t: string; m: Record<string, string> }>;
+            }>;
+        }).blocks;
+        return raw.map((block) => ({
+            type: block.type,
+            attrs: block.attrs,
+            chars: block.runs.flatMap((run) =>
+                [...run.t].map((scalar) => ({ scalar, marks: run.m })),
+            ),
+        }));
     }
 
     /**
@@ -87,10 +107,26 @@ export class CrdtEditorBridge {
      */
     async start(): Promise<BridgeState> {
         const { editor, client, documentId, seedPmDoc } = this.init;
+        // Serialize: no transaction may reconcile while the seed/restore is
+        // mid-flight (concurrent start + typing produced out-of-range stream
+        // indices in the double-mounted dev mode - the bug this guards).
+        const run = this.runStart(editor, client, documentId, seedPmDoc);
+        this.startPromise = run;
+        await run;
+        return this.state;
+    }
+
+    private async runStart(
+        editor: Editor,
+        client: CrdtClient,
+        documentId: string,
+        seedPmDoc: PmNode | null,
+    ): Promise<void> {
         try {
             await client.init(documentId, replicaIdForDocument(documentId));
-            const json = await client.visibleJson();
-            const crdtBlocks = (JSON.parse(json) as { blocks: unknown }).blocks as CanonicalBlock[];
+            const crdtBlocks = CrdtEditorBridge.toCanonicalBlocks(
+                await client.visibleJson(),
+            );
             const crdtIsEmpty =
                 crdtBlocks.length <= 1 && (crdtBlocks[0]?.chars.length ?? 0) === 0;
 
@@ -107,7 +143,7 @@ export class CrdtEditorBridge {
                         reason: `unsupported: ${parsed.support.unsupportedTypes.join(", ")}`,
                     };
                     this.init.onStatusChange?.(this.state);
-                    return this.state;
+                    return;
                 }
                 seedBlocks = parsed.blocks;
                 seedIsNew = true;
@@ -116,28 +152,44 @@ export class CrdtEditorBridge {
                 seedIsNew = true;
             }
 
-            // Seed the editor: emitUpdate=false — this is not a local
+            // Seed the editor: emitUpdate=false - this is not a local
             // transaction, so the op pipeline is never re-entered (M038).
             editor.commands.setContent(blocksToPmDoc(seedBlocks), {
                 emitUpdate: false,
             });
             this.state = { mode: "crdt", lastBlocks: seedBlocks };
 
-            if (seedIsNew && !crdtIsEmpty) {
+            if (seedIsNew) {
                 // First open: emit the seed content into the durable CRDT
-                // replica through the normal reconciliation path.
-                await this.onLocalTransaction(editor);
+                // replica. Inline reconcile (NOT via onLocalTransaction —
+                // that would await this.startPromise, which is the very
+                // runStart promise executing here: self-deadlock).
+                // NOTE: the guard MUST be `seedIsNew` alone — seedIsNew is
+                // only ever true when the replica was empty, so the old
+                // `seedIsNew && !crdtIsEmpty` was dead code and the seed
+                // never reached the engine.
+                const stream = (await this.init.client.exportStream()) as StreamEntryJson[];
+                const ops = reconcile(
+                    [{ type: "paragraph", attrs: { type: "paragraph" }, chars: [] }],
+                    seedBlocks,
+                    stream,
+                );
+                await this.applyOps(ops);
+                this.state = { mode: "crdt", lastBlocks: seedBlocks };
             }
             this.init.onStatusChange?.(this.state);
-            return this.state;
         } catch (error) {
-            // Surface worker/persistence failures honestly (fallback).
+            // Surface worker/persistence failures honestly (fallback). The
+            // reason is logged for diagnosis; it never contains secrets.
+            console.error(
+                "[concord-crdt] bridge start failed:",
+                error instanceof Error ? error.message : error,
+            );
             this.state = {
                 mode: "fallback",
                 reason: error instanceof Error ? error.message : "worker init failed",
             };
             this.init.onStatusChange?.(this.state);
-            return this.state;
         }
     }
 
@@ -146,6 +198,18 @@ export class CrdtEditorBridge {
      * PM document against the CRDT canonical state and emits operations.
      */
     async onLocalTransaction(editor: Editor): Promise<void> {
+        // Wait for start() (seed/restore) to finish before reconciling. The
+        // seed emission inside start() calls reconcileTransaction() DIRECTLY
+        // (not this method): awaiting startPromise from within start() itself
+        // would deadlock.
+        if (this.startPromise !== null) {
+            await this.startPromise;
+        }
+        await this.reconcileTransaction(editor);
+    }
+
+    /** Shared reconciliation core — no start() coordination (re-entrant). */
+    private async reconcileTransaction(editor: Editor): Promise<void> {
         if (this.reconciling) {
             return;
         }
@@ -168,28 +232,32 @@ export class CrdtEditorBridge {
         try {
             const stream = (await this.streamEntries()) as StreamEntryJson[];
             const ops = reconcile(this.state.lastBlocks, parsed.blocks, stream);
-            if (ops.length === 0) {
-                return;
-            }
-            for (const op of ops) {
-                switch (op.kind) {
-                    case "insertText":
-                        await this.init.client.localInsertText(op.streamIndex, op.codepoint ?? 0x20);
-                        break;
-                    case "insertDelimiter":
-                        await this.init.client.localInsertDelimiter(op.streamIndex, op.blockType ?? "paragraph");
-                        break;
-                    case "delete":
-                        await this.init.client.localDelete(op.streamIndex);
-                        break;
-                    case "setAttr":
-                        await this.init.client.localSetAttr(op.streamIndex, op.name ?? "", op.value ?? null);
-                        break;
-                }
+            if (ops.length > 0) {
+                await this.applyOps(ops);
             }
             this.state = { mode: "crdt", lastBlocks: parsed.blocks };
         } finally {
             this.reconciling = false;
+        }
+    }
+
+    /** Applies reconcile ops through the worker in order. */
+    private async applyOps(ops: ReconcileOp[]): Promise<void> {
+        for (const op of ops) {
+            switch (op.kind) {
+                case "insertText":
+                    await this.init.client.localInsertText(op.streamIndex, op.codepoint ?? 0x20);
+                    break;
+                case "insertDelimiter":
+                    await this.init.client.localInsertDelimiter(op.streamIndex, op.blockType ?? "paragraph");
+                    break;
+                case "delete":
+                    await this.init.client.localDelete(op.streamIndex);
+                    break;
+                case "setAttr":
+                    await this.init.client.localSetAttr(op.streamIndex, op.name ?? "", op.value ?? null);
+                    break;
+            }
         }
     }
 
@@ -201,8 +269,9 @@ export class CrdtEditorBridge {
         if (this.state.mode !== "crdt") {
             return;
         }
-        const json = await this.init.client.visibleJson();
-        const blocks = (JSON.parse(json) as { blocks: CanonicalBlock[] }).blocks;
+        const blocks = CrdtEditorBridge.toCanonicalBlocks(
+            await this.init.client.visibleJson(),
+        );
         this.state = { mode: "crdt", lastBlocks: blocks };
         this.init.editor.commands.setContent(blocksToPmDoc(blocks), {
             emitUpdate: false,

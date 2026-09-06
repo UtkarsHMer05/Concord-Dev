@@ -15,4 +15,8 @@ execSync("cmake --build build/wasm", { stdio: "inherit" });
 mkdirSync(path.join(root, "wasm/dist"), { recursive: true });
 cpSync(path.join(buildDir, "concord-crdt.js"), path.join(root, "wasm/dist/concord-crdt.js"));
 cpSync(path.join(buildDir, "concord-crdt.wasm"), path.join(root, "wasm/dist/concord-crdt.wasm"));
-console.log("WASM artifacts staged in wasm/dist/");
+// Serve path: the worker fetches the module as a static asset from /wasm/.
+mkdirSync(path.join(root, "public/wasm"), { recursive: true });
+cpSync(path.join(buildDir, "concord-crdt.js"), path.join(root, "public/wasm/concord-crdt.js"));
+cpSync(path.join(buildDir, "concord-crdt.wasm"), path.join(root, "public/wasm/concord-crdt.wasm"));
+console.log("WASM artifacts staged in wasm/dist/ and public/wasm/");

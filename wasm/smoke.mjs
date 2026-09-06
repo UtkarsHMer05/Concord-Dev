@@ -41,10 +41,11 @@ const size = factory._concord_stream_size(handle);
 check("empty stream", size === 0);
 
 // Local insert: 'h' at position 0. Generation stashes the op; sizing probes
-// never create extra ops. First call with cap=0 returns -(required length).
+// never create extra ops. Probe call with out=null returns the required
+// length as a POSITIVE value (negative values are reserved for error codes).
 const required = factory._concord_local_insert_text(handle, 0, 0x68, null, 0);
-check("size probe returns negative required", required < 0);
-const needed = -required;
+check("size probe returns positive required", required > 0);
+const needed = required;
 const outPtr = factory._concord_alloc(needed);
 const written = factory._concord_last_op(handle, outPtr, needed);
 check("op serialized", written === needed);
@@ -55,7 +56,7 @@ check("duplicate delivery ignored", duplicate === 0);
 
 // Visible state reflects the insert.
 const jsonRequired = factory._concord_visible_json(handle, null, 0);
-const jsonLen = -jsonRequired;
+const jsonLen = jsonRequired;
 const jsonPtr = factory._concord_alloc(jsonLen);
 factory._concord_visible_json(handle, jsonPtr, jsonLen);
 const json = new TextDecoder().decode(factory.HEAPU8.slice(jsonPtr, jsonPtr + jsonLen));

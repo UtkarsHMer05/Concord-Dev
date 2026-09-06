@@ -119,3 +119,45 @@ CONCORD_TEST(empty_document_snapshot) {
     CHECK(restored.stream_size() == 0);
     CHECK(restored.canonical_digest() == doc.canonical_digest());
 }
+
+CONCORD_TEST(snapshot_import_rejects_attr_outside_registry) {
+    // SA-SEC3 F2: snapshot import is a hostile-input path — attribute
+    // names/values must satisfy the same registry that ops are validated
+    // against (fail closed, MalformedFrame).
+    Doc doc = build_sample(ReplicaId{1});
+    const std::string good = doc.export_snapshot();
+
+    // Unknown attr NAME (same byte length keeps the framing valid).
+    const auto name_pos = good.find("bold");
+    CHECK(name_pos != std::string::npos);
+    std::string bad_name = good;
+    bad_name.replace(name_pos, 4, "font");
+    CHECK_THROW(Doc::import_snapshot(ReplicaId{2}, bad_name), CrdtError);
+
+    // Known name, VALUE outside the registry ("heading-1" → "heading-9").
+    const auto value_pos = good.find("heading-1");
+    CHECK(value_pos != std::string::npos);
+    std::string bad_value = good;
+    bad_value.replace(value_pos, 9, "heading-9");
+    CHECK_THROW(Doc::import_snapshot(ReplicaId{2}, bad_value), CrdtError);
+}
+
+CONCORD_TEST(snapshot_round_trip_with_line_height) {
+    // lineHeight completes the delimiter attr registry to match the product
+    // editor (LineHeightExtension) and the TypeScript adapter (pm-model.ts);
+    // it must be accepted locally and survive a snapshot round trip.
+    Doc doc(ReplicaId{1});
+    (void)doc.local_insert_delimiter(doc.stream_size(), "paragraph");
+    (void)doc.local_insert_text(doc.stream_size(), U'x');
+    (void)doc.local_set_attr(0, "lineHeight", std::string{"1.5"});
+
+    const std::string snapshot = doc.export_snapshot();
+    Doc restored = Doc::import_snapshot(ReplicaId{2}, snapshot);
+    CHECK(restored.visible_document() == doc.visible_document());
+    CHECK(restored.canonical_digest() == doc.canonical_digest());
+
+    // Values outside the fixed product set are rejected on local generation.
+    CHECK_THROW(
+        (void)doc.local_set_attr(0, "lineHeight", std::string{"3.7"}),
+        CrdtError);
+}

@@ -613,3 +613,62 @@ retained and will not be removed.
 - **Revisit conditions:** If TipTap mapping cannot represent a required
   product feature (e.g., collaborative tables) the tree-CRDT alternative is
   revisited in a later phase with its own decision.
+
+## DEC-027 — Phase 2 final-gate corrections: seed emission, attr registry, snapshot import validation, ABI sizing probe
+
+- **Status:** Accepted
+- **Decision:** Four final-gate corrections to the Phase 2 collaboration
+  runtime, each pinned by a regression test:
+  1. **Seed emission (editor bridge).** The first open of a document with
+     server content must emit the seed into the durable CRDT replica. The
+     original guard (`seedIsNew && !crdtIsEmpty`) was dead code — `seedIsNew`
+     is only ever true when the replica was empty — so the engine stayed
+     empty while the editor displayed content, and later diffs emitted
+     out-of-range operations (browser `InvalidArgument` failures). The
+     reconciliation baseline is the replica's ACTUAL canonical state, never
+     the seed. Start/transaction coordination serializes against seed
+     restore without self-deadlock: the seed emission reconciles directly,
+     not through the awaiting public entry point.
+  2. **Attribute registry completion (`lineHeight`).** The product editor's
+     line-height control (fixed set: `normal`, `1`, `1.15`, `1.5`, `2`) is
+     part of the canonical block-attribute registry on both sides (C++
+     `AllowedAttrs`, TypeScript `pm-model`); documents using it no longer
+     fail with `UnknownAttributeName` and degrade to the Phase 1 fallback.
+  3. **Snapshot import re-validation.** Snapshot attribute names/values are
+     re-validated against the same registry ops are validated against
+     (SA-SEC3 finding F2); hostile or corrupt IndexedDB snapshots fail
+     closed with `MalformedFrame` instead of restoring unregistered attrs.
+  4. **ABI sizing-probe encoding.** Read-call sizing probes returned
+     `-(required)` — colliding with the negative error-code range for any
+     output ≥ ~900 bytes, i.e. every real document, misreading successful
+     sizing as engine failures (`streamJson`/`visibleJson`/`exportSnapshot`
+     threw on real content). Probes (null out-pointer) now return the
+     required length as a POSITIVE value; negative values are exclusively
+     errors. Generating-call recovery (real buffer, `-required`) is
+     unchanged; single operations never approach the collision range.
+- **Context:** Final-gate browser verification (P2-M048/M049) surfaced the
+  seed and sizing defects; the security review flagged F2 for closure before
+  Phase 3 exposes snapshot import to remote input.
+- **Alternatives:** Silently dropping block-0 attributes (rejected:
+  dishonest); tolerating the ABI collision behind a size threshold
+  (rejected: ordinary documents cross it); separating the bridge baseline
+  from the seed differently (rejected: the diff must describe the replica's
+  real state).
+- **Rationale:** One attribute registry on both sides of the ABI; untrusted
+  input validated at the boundary; the content the editor displays must be
+  the state the replica durably holds.
+- **Consequences:** `streamJson`/`visibleJson`/`exportSnapshot` work for
+  real documents; the WASM ABI probe convention changed (consumers: runtime
+  wrapper + smoke harness, updated together). Block 0 — the implicit root
+  block without a stored delimiter — still cannot carry block attributes;
+  documents requiring them degrade loudly (logged, fallback) rather than
+  silently corrupting.
+- **Evidence:** `tests/crdt/bridge.test.ts` (seed emission, no-deadlock,
+  stable baseline, typing, reload); `tests/crdt/adapter.test.ts` batch
+  regressions (multi-block seed order, mid-document paste,
+  tombstone-shifted stream mapping, lineHeight registry parity);
+  `cpp/crdt/tests/test_snapshot.cpp` (registry rejection + lineHeight round
+  trip); updated WASM smoke (positive probe convention).
+- **Revisit conditions:** Phase 3 transport must keep snapshot import
+  validation for remote input; block-0 attribute support if the product
+  requires attributes on the first paragraph.

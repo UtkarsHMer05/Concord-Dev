@@ -34,7 +34,8 @@ The document is a single ordered sequence of **items**. Each item is one of:
 - **Text item** — one Unicode scalar value plus a mark set
   (`bold`, `italic`, `underline`, `strikethrough`: boolean registers).
 - **Block-delimiter item** — starts a new block; carries block attributes
-  (`type`: `paragraph` | `heading-1` … `heading-6`; `align`: left/center/right/justify).
+  (`type`: `paragraph` | `heading-1` … `heading-6`; `align`: left/center/right/justify;
+  `lineHeight`: `normal` | `1` | `1.15` | `1.5` | `2` — the fixed product set).
 
 Derived structure:
 

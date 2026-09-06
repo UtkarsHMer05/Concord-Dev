@@ -54,6 +54,7 @@ skills-lock.json
 # Phase 2 native/WASM build output (never commit build artifacts)
 build/
 wasm/dist/
+public/wasm/
 *.wasm
 *.wasm.map
 .emcache/

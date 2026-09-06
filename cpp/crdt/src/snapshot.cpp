@@ -59,7 +59,7 @@ void put_attr_map(std::string& out, const AttrMap& attrs) {
     }
 }
 
-bool read_attr_map(const std::string& bytes, std::size_t& offset, AttrMap& out) {
+bool read_attr_map(ItemKind kind, const std::string& bytes, std::size_t& offset, AttrMap& out) {
     std::uint32_t count = 0;
     if (!get_u32_le(bytes, offset, count)) {
         return false;
@@ -99,6 +99,15 @@ bool read_attr_map(const std::string& bytes, std::size_t& offset, AttrMap& out) 
         }
         reg.lamport = Lamport{lamport};
         reg.writer = ReplicaId{writer};
+        // Import re-validation (SA-SEC3 F2): a snapshot is untrusted input —
+        // attribute names/values must satisfy the same registry that local
+        // and remote ops are validated against (fail closed).
+        if (!AllowedAttrs::is_allowed(kind, name)) {
+            return false;
+        }
+        if (reg.value.has_value() && !AllowedAttrs::is_allowed_value(kind, name, *reg.value)) {
+            return false;
+        }
         out.emplace(std::move(name), std::move(reg));
     }
     return true;
@@ -216,7 +225,7 @@ Doc Doc::import_snapshot(ReplicaId self, const std::string& bytes) {
             }
             offset += scalar_length;
         }
-        if (!read_attr_map(bytes, offset, item.attrs)) {
+        if (!read_attr_map(item.kind, bytes, offset, item.attrs)) {
             throw CrdtError(ErrorCode::MalformedFrame, "bad attributes in snapshot");
         }
         const std::int64_t idx = static_cast<std::int64_t>(doc.items_.size());

@@ -101,9 +101,9 @@ smoke sessions do **not** prove exhaustive security.
 ## 6. WASM / browser (Phase 2)
 
 ```bash
-npm run wasm:build     # Emscripten build + stage artifacts (wasm/dist, git-ignored)
+npm run wasm:build     # Emscripten build + stage artifacts (wasm/dist, public/wasm; git-ignored)
 node wasm/smoke.mjs    # module instantiation + engine round trip
-npx vitest run tests/crdt   # full CRDT suite (parity, worker, adapter, harness)
+npx vitest run tests/crdt   # full CRDT suite (parity, worker, adapter, bridge, harness)
 ```
 
 CRDT test files (`tests/crdt/`):
@@ -115,7 +115,14 @@ CRDT test files (`tests/crdt/`):
   tail, corrupted-entry rejection), duplicate accounting
 - `adapter.test.ts` — TipTap JSON ⇄ canonical blocks (including
   unsupported-content detection), reconciliation (typing, multi-char
-  deletes, splits, heading changes, marks), remote→editor direction
+  deletes, splits, heading changes, marks), remote→editor direction, and
+  the final-gate batch regressions (multi-block seed order, mid-document
+  paste before the suffix region, tombstone-shifted stream mapping,
+  lineHeight registry parity)
+- `bridge.test.ts` — the product seed path end to end: `start()` emits the
+  server seed into the durable replica (dead-guard regression), no
+  start/transaction self-deadlock, stable post-seed baseline, typing, and
+  reload restoration
 - `harness.test.ts` — multi-replica convergence through the in-memory
   transport (duplication/reorder) and the offline-first flow (offline
   edit → reload → reconnect → converge)

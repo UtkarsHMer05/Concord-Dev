@@ -62,8 +62,11 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
       // PostgreSQL roughly in sync for the home list and other devices.
       content.saveContent(editor.getJSON())
       // Phase 2 local-first path: diff against the CRDT canonical state and
-      // emit durable operations through the worker.
-      void bridgeRef.current?.onLocalTransaction(editor)
+      // emit durable operations through the worker. Failures degrade the
+      // session to the Phase-1 mirror (logged, never unhandled).
+      bridgeRef.current?.onLocalTransaction(editor).catch((error: unknown) => {
+        console.error("[concord-crdt] local transaction failed:", error)
+      })
     },
     onSelectionUpdate({ editor }) {
       setEditor(editor)

@@ -11,9 +11,12 @@
 // data-flow direction per update — no transaction can loop.
 //
 // Reconciliation emits ops in STREAM space (tombstone-inclusive positions):
-// deletes use stable per-item stream indices (reverse order), insert runs use
-// a forward cursor (each inserted char occupies the slot the next insert
-// targets). Unsupported content is detected by the pm-model layer and falls
+// deletes use exact per-char stream indices via a visible→stream map
+// (tombstone-safe), insert runs use a forward cursor, and every index derived
+// from the original stream snapshot is corrected by the running insert shift
+// of the batch — so multi-op batches (seeding several blocks into an empty
+// replica, mid-document pastes) land exactly where the editor placed them.
+// Unsupported content is detected by the pm-model layer and falls
 // back to the Phase 1 persistence path — never silently corrupted.
 //
 // Multi-replica convergence is exercised in the deterministic harness
@@ -87,19 +90,55 @@ function blockAttrAnchor(live: LiveIndex, blockIdx: number): number {
 }
 
 function firstLiveOfBlock(live: LiveIndex, blockIdx: number): number {
+    // Stream index (tombstone-inclusive space) of the block's first live item.
     const start = live.blockStarts[blockIdx];
     if (start === null || start === undefined) {
         return 0;
     }
     if (start < live.streamToLive.length && live.streamToLive[start] >= 0) {
-        return live.streamToLive[start];
+        return start; // the item at `start` is live — its stream index IS start
     }
     for (let i = start + 1; i < live.streamToLive.length; ++i) {
         if (live.streamToLive[i] >= 0) {
-            return live.streamToLive[i];
+            return i;
         }
     }
-    return live.liveToStream.length;
+    return live.streamToLive.length;
+}
+
+/**
+ * Stream indices of a block's live (visible) chars, in visible order.
+ * The diff works in visible space and must map back onto tombstone-shifted
+ * stream positions — visible offset ≠ stream offset once tombstones exist.
+ */
+function blockLiveStreamIndices(live: LiveIndex, blockIdx: number): number[] {
+    const start = live.blockStarts[blockIdx];
+    const end = endOfBlock(live, blockIdx);
+    const hasLiveDelimiter =
+        start !== null &&
+        start !== undefined &&
+        start < live.streamToLive.length &&
+        live.streamToLive[start] >= 0;
+    const from = hasLiveDelimiter ? (start as number) + 1 : firstLiveOfBlock(live, blockIdx);
+    const to = end === null ? live.streamToLive.length : end;
+    const indices: number[] = [];
+    for (let i = from; i < to; ++i) {
+        if (i >= 0 && i < live.streamToLive.length && live.streamToLive[i] >= 0) {
+            indices.push(i);
+        }
+    }
+    return indices;
+}
+
+/**
+ * Mutable batch state: every item inserted by an earlier op of this batch
+ * shifts the stream tail by one — the engine's local insert at index i
+ * occupies position i and moves the previous tail right. All indices derived
+ * from the ORIGINAL stream snapshot must therefore add `shift`.
+ */
+interface BatchCtx {
+    /** Items inserted by earlier ops of this batch. */
+    shift: number;
 }
 
 /**
@@ -113,6 +152,7 @@ export function reconcile(
 ): ReconcileOp[] {
     const ops: ReconcileOp[] = [];
     const live = buildLiveIndex(stream);
+    const ctx: BatchCtx = { shift: 0 };
 
     const blockEq = (a: CanonicalBlock, b: CanonicalBlock) =>
         a.type === b.type && a.attrs["type"] === b.attrs["type"];
@@ -131,8 +171,8 @@ export function reconcile(
 
     // 1. Prefix-matched blocks: reconcile chars + attrs.
     for (let b = 0; b < prefix; ++b) {
-        reconcileBlockChars(ops, live, before[b], after[b], b);
-        reconcileBlockAttrs(ops, live, before[b], after[b], b);
+        reconcileBlockChars(ops, live, before[b], after[b], b, ctx);
+        reconcileBlockAttrs(ops, live, before[b], after[b], b, ctx);
     }
 
     // 2. Removed middle blocks: delete their items (reverse stream order).
@@ -143,22 +183,31 @@ export function reconcile(
         const to = end === null ? live.streamToLive.length : end;
         for (let i = to - 1; i >= from; --i) {
             if (i < live.streamToLive.length && live.streamToLive[i] >= 0) {
-                ops.push({ kind: "delete", streamIndex: i });
+                ops.push({ kind: "delete", streamIndex: i + ctx.shift });
             }
         }
     }
 
-    // 3. Added middle blocks: insert delimiter + chars.
+    // 3. Added middle blocks: insert delimiter + chars before the suffix
+    //    region (or at the stream end when no suffix remains). Consecutive
+    //    added blocks chain off the running cursor so they keep their order.
+    let insertCursor: number | null = null;
     for (let b = prefix; b < after.length - suffix; ++b) {
-        insertWholeBlock(ops, live, after[b], b);
+        if (insertCursor === null) {
+            insertCursor =
+                suffix > 0
+                    ? firstLiveOfBlock(live, before.length - suffix) + ctx.shift
+                    : live.streamToLive.length + ctx.shift;
+        }
+        insertCursor = insertWholeBlock(ops, after[b], insertCursor, ctx);
     }
 
     // 4. Suffix-matched blocks: reconcile chars + attrs.
     for (let s = 0; s < suffix; ++s) {
         const beforeIdx = before.length - suffix + s;
         const afterIdx = after.length - suffix + s;
-        reconcileBlockChars(ops, live, before[beforeIdx], after[afterIdx], beforeIdx);
-        reconcileBlockAttrs(ops, live, before[beforeIdx], after[afterIdx], beforeIdx);
+        reconcileBlockChars(ops, live, before[beforeIdx], after[afterIdx], beforeIdx, ctx);
+        reconcileBlockAttrs(ops, live, before[beforeIdx], after[afterIdx], beforeIdx, ctx);
     }
 
     return ops;
@@ -170,6 +219,7 @@ function reconcileBlockAttrs(
     beforeBlock: CanonicalBlock,
     afterBlock: CanonicalBlock,
     blockIdx: number,
+    ctx: BatchCtx,
 ): void {
     for (const name of new Set([...Object.keys(beforeBlock.attrs), ...Object.keys(afterBlock.attrs)])) {
         if (name === "type") {
@@ -178,7 +228,7 @@ function reconcileBlockAttrs(
         if (beforeBlock.attrs[name] !== afterBlock.attrs[name]) {
             ops.push({
                 kind: "setAttr",
-                streamIndex: blockAttrAnchor(live, blockIdx),
+                streamIndex: blockAttrAnchor(live, blockIdx) + ctx.shift,
                 name,
                 value: afterBlock.attrs[name] ?? null,
             });
@@ -192,6 +242,7 @@ function reconcileBlockChars(
     beforeBlock: CanonicalBlock,
     afterBlock: CanonicalBlock,
     blockIdx: number,
+    ctx: BatchCtx,
 ): void {
     const bc = beforeBlock.chars;
     const ac = afterBlock.chars;
@@ -210,26 +261,38 @@ function reconcileBlockChars(
         ++s;
     }
 
-    // Stream index of the block's first char.
+    // Exact visible→stream mapping for this block's chars (tombstone-safe).
+    const liveIndices = blockLiveStreamIndices(live, blockIdx);
     const start = live.blockStarts[blockIdx];
     const hasLiveDelimiter =
         start !== null &&
         start !== undefined &&
         start < live.streamToLive.length &&
         live.streamToLive[start] >= 0;
-    const firstCharStream = hasLiveDelimiter
+    const contentStart = hasLiveDelimiter
         ? (start as number) + 1
         : firstLiveOfBlock(live, blockIdx);
 
-    // Deletes: reverse order; indices are stream-stable (tombstones stay).
+    // Deletes: reverse visible order; tombstones keep stream indices stable,
+    // but earlier batch inserts shift them right by ctx.shift.
     for (let c = bc.length - 1 - s; c >= p; --c) {
-        ops.push({ kind: "delete", streamIndex: firstCharStream + c });
+        if (c < liveIndices.length) {
+            ops.push({ kind: "delete", streamIndex: liveIndices[c] + ctx.shift });
+        }
+        // c beyond the stream's live chars: state drift — nothing to delete.
     }
 
-    // Inserts: forward cursor — the first insert goes before the stream item
-    // currently at firstCharStream + p; each inserted char shifts the tail,
-    // so char k targets firstCharStream + p + k.
-    let cursor = firstCharStream + p;
+    // Inserts: forward cursor starting at the current stream position of the
+    // first changed char (or the block's content end for pure appends); each
+    // inserted char shifts the tail, advancing both cursor and ctx.shift.
+    let cursor: number;
+    if (p < liveIndices.length) {
+        cursor = liveIndices[p] + ctx.shift;
+    } else if (liveIndices.length > 0) {
+        cursor = liveIndices[liveIndices.length - 1] + 1 + ctx.shift;
+    } else {
+        cursor = contentStart + ctx.shift;
+    }
     for (let c = p; c < ac.length - s; ++c) {
         const ch = ac[c];
         ops.push({
@@ -241,46 +304,45 @@ function reconcileBlockChars(
             ops.push({ kind: "setAttr", streamIndex: cursor, name, value });
         }
         cursor += 1;
+        ctx.shift += 1;
     }
 }
 
 function insertWholeBlock(
     ops: ReconcileOp[],
-    live: LiveIndex,
     block: CanonicalBlock,
-    blockIdx: number,
-): void {
-    // Insert position: before the next block's first live item, or stream end.
-    const next = live.blockStarts[blockIdx + 1];
-    const anchor =
-        next === null || next === undefined
-            ? live.liveToStream.length
-            : live.streamToLive[next] >= 0
-              ? next
-              : live.liveToStream.length;
-
+    cursor: number,
+    ctx: BatchCtx,
+): number {
+    // `cursor` is the CURRENT stream insertion point (already shift-adjusted
+    // by the caller): the delimiter goes there, chars follow contiguously.
+    // Returns the next block's insertion point (current stream end of the
+    // inserted content).
     ops.push({
         kind: "insertDelimiter",
-        streamIndex: anchor,
+        streamIndex: cursor,
         blockType: block.attrs["type"] ?? "paragraph",
     });
-    let cursor = anchor + 1;
+    ctx.shift += 1;
+    let charCursor = cursor + 1;
     for (const ch of block.chars) {
         ops.push({
             kind: "insertText",
-            streamIndex: cursor,
+            streamIndex: charCursor,
             codepoint: ch.scalar.codePointAt(0) ?? 0x20,
         });
         for (const [name, value] of Object.entries(ch.marks)) {
-            ops.push({ kind: "setAttr", streamIndex: cursor, name, value });
+            ops.push({ kind: "setAttr", streamIndex: charCursor, name, value });
         }
-        cursor += 1;
+        charCursor += 1;
+        ctx.shift += 1;
     }
     for (const [name, value] of Object.entries(block.attrs)) {
         if (name !== "type") {
-            ops.push({ kind: "setAttr", streamIndex: anchor, name, value });
+            ops.push({ kind: "setAttr", streamIndex: cursor, name, value });
         }
     }
+    return charCursor;
 }
 
 function endOfBlock(live: LiveIndex, blockIdx: number): number | null {

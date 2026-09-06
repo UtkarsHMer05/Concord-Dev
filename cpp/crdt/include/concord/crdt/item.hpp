@@ -26,7 +26,9 @@ struct AllowedAttrs {
             return name == "bold" || name == "italic" || name == "underline" ||
                    name == "strikethrough";
         }
-        return name == "type" || name == "align";
+        // `lineHeight` completes the registry to match the product editor and
+        // the TypeScript adapter (pm-model.ts) — values are a fixed set.
+        return name == "type" || name == "align" || name == "lineHeight";
     }
 
     static bool is_allowed_value(ItemKind kind, const std::string& name,
@@ -42,6 +44,11 @@ struct AllowedAttrs {
         if (name == "align") {
             return value == "left" || value == "center" || value == "right" ||
                    value == "justify";
+        }
+        if (name == "lineHeight") {
+            // The product toolbar's fixed value set (toolbar.tsx lineHeights).
+            return value == "normal" || value == "1" || value == "1.15" ||
+                   value == "1.5" || value == "2";
         }
         return false;
     }
