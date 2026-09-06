@@ -37,5 +37,6 @@ export interface ConcordModule {
 
     _concord_export_snapshot(handle: number, out: number, cap: number): number;
     _concord_create_from_snapshot(replicaId: bigint, bytes: number, len: number): number;
+    _concord_restore_allocation(handle: number, nextCounter: bigint, lamport: bigint): void;
     _concord_import_snapshot(handle: number, bytes: number, len: number): number;
 }

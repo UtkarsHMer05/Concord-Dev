@@ -108,12 +108,12 @@ export class ConcordEngine {
         replicaId: bigint,
         loadFactory: LoadConcordCrdtFactory,
     ): Promise<ConcordEngine> {
-        const module = await loadFactory();
-        const handle = module._concord_create(replicaId);
+        const loaded = await loadFactory();
+        const handle = loaded._concord_create(replicaId);
         if (handle === 0) {
             throw new CrdtError("Unknown", "engine creation failed");
         }
-        return new ConcordEngine({ handle, module, outBuffer: 0, outCapacity: 0 });
+        return new ConcordEngine({ handle, module: loaded, outBuffer: 0, outCapacity: 0 });
     }
 
     /** Restores an engine from a snapshot produced by exportSnapshot(). */
@@ -122,15 +122,15 @@ export class ConcordEngine {
         snapshot: Uint8Array,
         loadFactory: LoadConcordCrdtFactory,
     ): Promise<ConcordEngine> {
-        const module = await loadFactory();
-        const pointer = module._concord_alloc(snapshot.length);
-        module.HEAPU8.set(snapshot, pointer);
-        const handle = module._concord_create_from_snapshot(replicaId, pointer, snapshot.length);
-        module._concord_free(pointer);
+        const loaded = await loadFactory();
+        const pointer = loaded._concord_alloc(snapshot.length);
+        loaded.HEAPU8.set(snapshot, pointer);
+        const handle = loaded._concord_create_from_snapshot(replicaId, pointer, snapshot.length);
+        loaded._concord_free(pointer);
         if (handle === 0) {
             throw new CrdtError("SnapshotVersionUnsupported", "snapshot import failed");
         }
-        return new ConcordEngine({ handle, module, outBuffer: 0, outCapacity: 0 });
+        return new ConcordEngine({ handle, module: loaded, outBuffer: 0, outCapacity: 0 });
     }
 
     /** Releases the engine. The instance must not be used afterwards. */
@@ -349,6 +349,15 @@ export class ConcordEngine {
     pendingCount(): number {
         const internals = this.assertLive();
         return internals.module._concord_pending_count(internals.handle);
+    }
+
+    /**
+     * Restores the generator allocation state after a durable-log replay
+     * (counters/lamport are per-replica monotonic — M037).
+     */
+    restoreAllocationState(nextCounter: bigint, lamport: bigint): void {
+        const internals = this.assertLive();
+        internals.module._concord_restore_allocation(internals.handle, nextCounter, lamport);
     }
 
     exportSnapshot(): Uint8Array {

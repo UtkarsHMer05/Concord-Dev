@@ -51,6 +51,7 @@ set(EXPORTED_FUNCTIONS
   _concord_export_snapshot
   _concord_import_snapshot
   _concord_create_from_snapshot
+  _concord_restore_allocation
 )
 
 list(JOIN EXPORTED_FUNCTIONS "," EXPORTED_FUNCTIONSJoined)

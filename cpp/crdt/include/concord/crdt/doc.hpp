@@ -103,6 +103,15 @@ public:
     // The visible document: blocks partitioned at delimiters (PROTOCOL §2).
     [[nodiscard]] std::vector<VisibleBlock> visible_document() const;
 
+    /**
+     * Restores the replica's generator allocation state after a log replay
+     * (M037): counters and lamport clocks are per-replica monotonic, so a
+     * replica that replayed its own history must advance past everything it
+     * has ever generated — even though replay does not go through the
+     * generator. Values below the current state are ignored (monotonic).
+     */
+    void restore_allocation_state(std::uint64_t next_counter_value, std::uint64_t lamport_value);
+
     [[nodiscard]] StateSummary state_summary() const;
     [[nodiscard]] DocDiagnostics diagnostics() const;
 

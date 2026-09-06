@@ -251,6 +251,14 @@ void* concord_create_from_snapshot(std::uint64_t replica_id, const std::uint8_t*
     }
 }
 
+// Restores the replica's generator allocation state after log replay
+// (counters/lamport are monotonic per replica — see Doc::restore_allocation_state).
+EMSCRIPTEN_KEEPALIVE void concord_restore_allocation(void* handle, std::uint64_t next_counter,
+                                                     std::uint64_t lamport) {
+    auto* doc = static_cast<Doc*>(handle);
+    doc->restore_allocation_state(next_counter, lamport);
+}
+
 // ---- Diagnostics -----------------------------------------------------------
 
 EMSCRIPTEN_KEEPALIVE std::int64_t concord_next_counter(void* handle) {

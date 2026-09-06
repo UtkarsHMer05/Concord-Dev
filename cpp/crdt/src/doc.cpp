@@ -519,6 +519,16 @@ std::vector<VisibleBlock> Doc::visible_document() const {
     return blocks;
 }
 
+void Doc::restore_allocation_state(std::uint64_t next_counter_value,
+                                   std::uint64_t lamport_value) {
+    if (Counter::is_valid(next_counter_value) && next_counter_value > next_counter_.value()) {
+        next_counter_ = Counter{next_counter_value};
+    }
+    if (lamport_value <= Lamport::kMax && lamport_value > lamport_.value()) {
+        lamport_ = Lamport{lamport_value};
+    }
+}
+
 StateSummary Doc::state_summary() const {
     StateSummary summary;
     for (const auto& [replica_key, counter_value] : contiguous_) {
