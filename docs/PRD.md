@@ -104,15 +104,17 @@ the engineering depth is for technical evaluators.
   (JSON, HTML, TXT, print-to-PDF).
 - FR-4 Collaboration: concurrent multi-client editing of the same document with
   convergence; presence (avatars); comments/threads anchored to content;
-  comment notifications. STATUS (Phase 2): the CRDT convergence core is
-  implemented and proven by deterministic multi-replica testing; the realtime
-  transport arrives in Phase 3.
+  comment notifications. STATUS (Phase 3): the CRDT convergence core AND the
+  realtime transport are implemented — two-client live collaboration,
+  offline/reconnect reconciliation, and duplicate/retry safety are proven
+  against the self-hosted Rust gateway (E2E). Presence/comments remain
+  `unavailable` until later phases.
 - FR-5 Offline: document editing works with no network connection; state is
-  persisted locally; reconnection replays/converges. STATUS (Phase 2):
-  implemented for the collaborative content subset (paragraphs, headings,
-  basic text marks) via IndexedDB-backed local replicas; documents with
-  unsupported content (tables, images, lists) continue via the server-mirror
-  path until later phases extend the model.
+  persisted locally; reconnection replays/converges. STATUS (Phase 3):
+  implemented for the collaborative content subset with durable ACK
+  tracking (pending → sent → durably_acked) and identity-stable resends
+  through the gateway; documents with unsupported content continue via the
+  server-mirror path until later phases extend the model.
 - FR-6 Sharing/authorization: document-level roles OWNER / EDITOR / COMMENTER /
   VIEWER; role changes take effect for active sessions.
 - FR-7 History: durable update log enables revision reconstruction, viewing,

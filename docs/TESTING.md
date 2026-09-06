@@ -1,8 +1,8 @@
 # Concord — Testing
 
 Status: Authoritative
-Version: 1.1 (Phase 2)
-Last updated: 2026-09-06
+Version: 1.2 (Phase 3)
+Last updated: 2026-09-07
 
 This document records how every layer of Concord is tested, with exact
 commands. All commands run from the repository root.
@@ -145,3 +145,75 @@ scripts/verify-wasm.sh            # WASM build + smoke + CRDT tests
 CI (`.github/workflows/phase2-core.yml`) runs the native job and the web
 job (typecheck/lint/unit/wasm-smoke/build) on PRs; heavy fuzz/sanitizer
 workloads stay local per §4–§5.
+
+
+---
+
+## Phase 3 — Rust gateway + realtime synchronization
+
+### Toolchain additions
+
+| Tool | Version | Notes |
+|---|---|---|
+| Rust | 1.98.1 (pinned, `rust/rust-toolchain.toml`) | rustup-managed |
+| cargo fmt/clippy | toolchain components | `-D warnings` in every gate |
+| tokio-tungstenite | 0.30 | WS test client (dev-dependency) |
+
+### Commands (from the repository root)
+
+```bash
+# Rust unit + protocol golden fixtures (41 tests)
+cd rust && cargo test --lib
+
+# DB integration: migrations, op-log idempotency, authz matrix,
+# catch-up pagination (9 tests; serialized — shared concord_test DB)
+cargo test --test db_integration -- --test-threads=1
+
+# WebSocket integration + security suites (15 tests incl. adversarial)
+cargo test --test ws_integration -- --test-threads=1
+
+# Web: typecheck + unit incl. TS golden parity (98 tests)
+npm run typecheck && npx vitest run --project unit
+
+# Realtime E2E: REAL gateway binary, two clients, offline/reconnect,
+# role downgrade, duplicate resend, gateway restart, graceful drain
+# (requires: docker compose up -d db; release build current)
+cargo build --release
+npm run test:realtime
+
+# Benchmark baseline (P3-M043; records → private metrics ledger)
+cd rust && cargo run --release --example bench
+
+# EVERYTHING (the Phase 3 gate): fmt, clippy, all suites, E2E, benchmarks
+./scripts/verify-gateway.sh
+```
+
+### What each suite proves
+
+- **Rust unit**: protocol codecs round-trip + hostile-input rejection;
+  envelope validation mirrors the C++ rules; JWKS rotation; authz
+  precedence table; session state machine; registry lifecycle + bounded
+  fanout (slow-consumer marking).
+- **db_integration**: migration idempotence from empty + Phase 1 state;
+  UNIQUE identity enforcement incl. a concurrent duplicate race; the
+  effective-role matrix (OWNER/EDITOR/COMMENTER/VIEWER/no-access/org);
+  bounded deterministic catch-up paging.
+- **ws_integration**: full socket flows — handshake/auth/join/catch-up;
+  durable ACK after commit; fanout to peers; state-machine rejections;
+  malformed/oversized frames; forged tokens; heartbeat; slow consumers;
+  DB-outage readiness.
+- **realtime E2E** (`tests/realtime/e2e.test.ts`): two independent
+  clients through the release binary — collaboration convergence,
+  offline-edit reconciliation with one-row-per-identity guarantees, live
+  permission downgrade, verbatim duplicate resends, kill -9 restart
+  recovery from PostgreSQL, SIGTERM drain with exit 0.
+- **Benchmarks**: honest single-gateway baselines (see
+  docs/BENCHMARKS.md).
+
+### CI
+
+`.github/workflows/phase3-gateway.yml` runs the rust job (fmt, clippy,
+unit+golden, db_integration against a Postgres service, ws_integration)
+and the web job (typecheck, lint, unit incl. golden parity) on every
+push/PR. The realtime E2E + benchmarks run locally via
+`scripts/verify-gateway.sh` (documented; deterministic layers in CI).

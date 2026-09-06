@@ -1,8 +1,8 @@
 # Concord — Architecture
 
-Status: Authoritative (Phase 2 completion version)
-Version: 1.3
-Last updated: 2026-09-06
+Status: Authoritative (Phase 3 completion version)
+Version: 1.4
+Last updated: 2026-09-07
 
 This document distinguishes three architecture states at all times:
 
@@ -15,7 +15,89 @@ Nothing in the TARGET section should be read as an implemented capability.
 
 ---
 
-## 1. CURRENT — Local-first CRDT client on the PostgreSQL control plane (Phase 2 complete)
+## 1. CURRENT — Single-gateway realtime synchronization (Phase 3 complete)
+
+The CURRENT architecture adds the Phase 3 realtime plane to the Phase 2
+stack: browsers synchronize through a **single self-hosted Rust sync
+gateway** over a versioned WebSocket protocol, with a durable
+append-only operation log in PostgreSQL. The C++/WASM CRDT remains the
+collaboration-correctness core (the gateway transports, validates
+structurally, authorizes, persists, and fans out — it never computes CRDT
+order). Editing remains offline-first; the gateway is the durability and
+fanout point.
+
+```mermaid
+flowchart TD
+    subgraph BrowserA["Browser A"]
+        TIPTAP_A["TipTap 3 editor"] <--> BRIDGE_A["Editor bridge"]
+        BRIDGE_A <--> WORKER_A["Web Worker (CRDT WASM + IndexedDB)"]
+        SESSION_A["SyncSession<br/>(transport + outbox)"]
+        WORKER_A <--> SESSION_A
+    end
+    subgraph BrowserB["Browser B"]
+        TIPTAP_B["TipTap 3 editor"] <--> BRIDGE_B["Editor bridge"]
+        BRIDGE_B <--> WORKER_B["Web Worker (CRDT WASM + IndexedDB)"]
+        SESSION_B["SyncSession"]
+        WORKER_B <--> SESSION_B
+    end
+    SESSION_A <-->|"WebSocket: JSON control frames<br/>+ binary op frames (v1)"| GW
+    SESSION_B <-->|"WebSocket"| GW
+    subgraph GW["Rust Sync Gateway (single process, Tokio/Axum)"]
+        AUTHN["Clerk RS256 verification<br/>(JWKS cache + rotation)"]
+        AUTHZ["Authz policy<br/>(owner > ACL > org-EDITOR)"]
+        STATEM["Session state machine"]
+        ROOMS["In-process room registry<br/>(bounded per-conn queues)"]
+        INGEST["Idempotent ingestion<br/>(INSERT ON CONFLICT)"]
+        AUTHN --> STATEM --> ROOMS
+        AUTHZ --> INGEST
+    end
+    GW <-->|"crdt_operations (append-only)"| PG[("PostgreSQL 18<br/>documents · ACLs · op log")]
+```
+
+### 1.1 Phase 3 components
+
+| Component | Responsibility |
+|---|---|
+| `rust/sync-gateway` | Tokio/Axum service: `/api/v1/sync` WebSocket endpoint, health/live+ready, metrics; fail-fast DB startup + embedded migrations |
+| `rust/.../protocol` | Wire protocol v1 codecs: typed JSON control frames + binary op frames; envelope validation + identity extraction; golden fixtures shared with TS |
+| `rust/.../auth` | Clerk session-token verification (RS256/JWKS, alg pinning, rotation refresh); FileJwks dev/E2E source |
+| `rust/.../db` | Bounded deadpool pool; ONE authz policy layer (SQL join mirrors Phase 1 precedence); `crdt_operations` op-log repo (idempotent ingest, catch-up pagination) |
+| `rust/.../sessions` | Connection state machine (§9.13); in-process room registry — the Phase 4 broker seam; bounded fanout |
+| `src/lib/sync` | Browser side: protocol mirror, SyncTransport (backoff+jitter reconnect), PendingOpStore (pending→sent→durably_acked outbox), SyncSession orchestration |
+| `tests/realtime` | Two-client E2E against the release binary: live collaboration, offline/reconnect, roles + downgrade, duplicate resend, gateway restart, graceful drain |
+
+### 1.2 Phase 3 delivery semantics (implemented + tested)
+
+- **ACK_DURABLE** = authenticated + authorized + validated + committed to
+  PostgreSQL under stable identity `(document_id, operation_id)`; atomic
+  batches (FAILURE_MODEL §1). Never "exactly once" — at-least-once with
+  idempotent handlers and DB-enforced dedup.
+- Reconnect: hello → authenticate → join (state summary) → catch-up
+  (server-seq cursor, bounded pages) → resend unacked ops (same
+  identities) → converge.
+- Fanout: in-process registry, bounded per-connection queues; slow
+  consumers are disconnected (never silently dropped, never blocking the
+  persistence path) and recover via catch-up.
+- Write authorization is RECHECKED on every batch inside the ingestion
+  transaction (live-downgrade proven in E2E).
+- Graceful drain: SIGTERM → stop writes → notify connections → bounded
+  grace → exit 0.
+
+### 1.3 Known transitional limitations (honest state)
+
+- Single gateway process (Phase 4 distributes via NATS; the room registry
+  is an explicit seam, no hidden multi-node code).
+- Rate limiting is a protocol vocabulary placeholder (`rate_limited`
+  reserved; enforcement is Phase 4 edge work).
+- The Phase 1 whole-document content mirror still runs alongside the op
+  log (the product UI migrates to the sync session in later phases; the
+  sync layer ships and is proven by the E2E suites in this phase).
+- Presence/comments/threads remain `unavailable` (DEC-016) — Phase 3
+  delivers the durable operation plane, not the social features.
+
+## 2. CURRENT (Phase 2 state — superseded by §1, kept for context)
+
+Local-first CRDT client on the PostgreSQL control plane.
 
 The CURRENT architecture is the result of Phases 0–2: the modernized product
 (Next.js 16, React 19, TipTap 3, Clerk 7) runs on the Phase 1 PostgreSQL
@@ -119,7 +201,7 @@ flowchart TD
 
 ---
 
-## 2. HISTORICAL states
+## 3. HISTORICAL states
 
 ### 2.1 Tutorial baseline (`antonio-original-baseline`, historical)
 
@@ -148,7 +230,7 @@ JSON content envelope, debounced Convex saves. Superseded by Phase 1.
 
 ---
 
-## 3. TARGET — Concord architecture (planned)
+## 4. TARGET — Concord architecture (planned; NOTHING here is implemented)
 
 ```mermaid
 flowchart TD
@@ -250,7 +332,7 @@ Phase 7 based on the final architecture (DEC-010).
 
 ---
 
-## 4. Document lifecycle (target view)
+## 5. Document lifecycle (target view)
 
 1. **Create** — metadata row + ACL (PostgreSQL); document opens locally.
 2. **Edit offline** — updates applied to local CRDT replica (WASM), persisted
@@ -261,9 +343,9 @@ Phase 7 based on the final architecture (DEC-010).
    tail replays shrink; recovery time stays bounded (Phase 5).
 5. **History/restore** — reconstruct revisions from log + snapshots.
 
-## 5. Reading guide
+## 6. Reading guide
 
-- Implemented behavior: Section 1 (CURRENT).
+- Implemented behavior: Sections 1–2 (CURRENT).
 - Temporary, scheduled states: Section 2 (each is gated by a phase).
 - Planned behavior: Section 3 — never presented as existing.
 - Decisions behind this structure: [DECISIONS.md](DECISIONS.md).

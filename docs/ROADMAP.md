@@ -86,6 +86,17 @@ and docs/TESTING.md / docs/BENCHMARKS.md for the full verification surface.
 
 ## Phase 3 — Rust realtime sync gateway + custom protocol + basic durability
 
+**Status: COMPLETE (2026-09-07).** Rust/Tokio/Axum single-gateway with
+wire protocol v1 (hybrid JSON control + binary op frames, cross-language
+golden parity), Clerk RS256 verification (JWKS rotation), one canonical
+authz policy with per-batch write recheck, durable `crdt_operations`
+op-log with DB-enforced idempotency, bounded queues + slow-consumer
+containment, heartbeats/idle reaping, graceful drain; browser sync layer
+(transport/backoff/outbox/session); two-client E2E incl. offline
+reconciliation, live downgrade, duplicate resends, kill-9 recovery;
+adversarial security suite; honest benchmarks. See DEC-028/029,
+docs/PROTOCOL.md §9, docs/SECURITY.md, docs/BENCHMARKS.md.
+
 - **Objective:** Multiple browsers synchronize through a self-hosted backend.
 - **Major deliverables:** Rust/Tokio service (Axum or justified equivalent);
   WebSocket protocol with framing; authentication + ACL authorization;

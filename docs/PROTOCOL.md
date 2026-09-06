@@ -1,8 +1,8 @@
 # Concord — Protocol (Local Operation Schema + Phase 3 Wire Layer)
 
-Status: Authoritative (implemented — native + WASM parity-tested; wire layer is Phase 3 CURRENT)
+Status: Authoritative (implemented — native + WASM parity-tested; wire protocol v1 IMPLEMENTED and cross-language golden-tested)
 Version: protocol v1 · wire protocol v1
-Last updated: 2026-09-06 (Phase 3 wire spec added)
+Last updated: 2026-09-07 (Phase 3 wire layer implemented in Rust + TypeScript)
 
 This document specifies the canonical operation and document model for
 Concord's CRDT core (DEC-023) and the Phase 3 synchronization wire protocol

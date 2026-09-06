@@ -53,3 +53,31 @@ all CRDT work executes inside the Web Worker.
 
 Every future public/resume metric still requires workload + environment +
 run count + distribution, recorded in the private ledger first.
+
+
+---
+
+## Phase 3 — Single-gateway baseline (MEASURED, 2026-09-07)
+
+Environment: macOS arm64 host; release build (Rust 1.98.1); Docker
+postgres 18.6 @127.0.0.1:5433; pool 8; outbound queue 512; workload =
+canonical 32-byte insert operations (the production envelope), client
+sends a batch then waits for its durable ACK (at-least-once client
+semantics — NOT pipelined). Run count: 2 (initial + gate rerun; the
+rerun catch-up figure improved to 678k ops/s on a warm page cache —
+both runs recorded in the private ledger).
+
+| Metric | Value |
+|---|---|
+| Ingest throughput (25-op batches, sequential) | 1,085 ops/s |
+| Durable-ACK latency per 25-op batch | p50 22.0 ms · p95 28.3 ms · p99 33.3 ms |
+| Peer propagation (writer → 3 peers, 1 op) | p50 1.98 ms · p95 2.42 ms · p99 2.67 ms |
+| Catch-up re-stream | 408k–679k ops/s (5,100 ops: 7.5–12.5 ms) |
+| Concurrent connections (handshake baseline) | 50/50 established |
+
+Honest notes: ACK latency is dominated by the client-sequential
+round-trip + local TCP + WAL commit; the server-side fanout path is
+~2 ms. No optimization was performed (P3-M044: profiling found no
+bottleneck at the Phase 3 target workload; optimization deferred to
+Phase 4 re-baselining under distribution). These are local Docker-network
+numbers — informative, not promotional.

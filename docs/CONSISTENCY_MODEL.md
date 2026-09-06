@@ -5,10 +5,10 @@ Version: 1.0 (implemented)
 Last updated: 2026-09-06
 
 This document defines the correctness contract for Concord's collaborative
-document core as implemented in Phase 2: a C++20 CRDT engine compiled natively
-and to WebAssembly, driving a local-first browser client. It deliberately
-describes **local replica semantics only** — no network transport exists yet
-(Phase 3 introduces the Rust gateway; this document will be extended there).
+document core. Phase 2 established the local replica semantics (C++20 CRDT,
+native + WASM). **Phase 3 adds the realtime transport** (Rust gateway) under
+the SAME assumptions — the network layer preserves them rather than replacing
+them (section 6).
 
 Companion documents: [PROTOCOL.md](PROTOCOL.md) (operation schema),
 [ARCHITECTURE.md](ARCHITECTURE.md), [DECISIONS.md](DECISIONS.md) (DEC-023).
@@ -112,3 +112,32 @@ deterministic simulator, native/WASM parity, worker durability/reload,
 multi-replica harness, offline-first flow). The delivery assumptions in §1
 are exercised through the in-memory test transport; the real transport
 arrives in Phase 3.
+
+
+---
+
+## 6. Phase 3 transport consistency (CURRENT)
+
+The gateway extends the Phase 2 contract; nothing about local semantics
+changed:
+
+1. **Delivery assumptions preserved.** The gateway provides at-least-once,
+   unordered delivery — exactly what §1 requires. Server sequence
+   (`crdt_operations.id`) is a storage/fetch cursor ONLY; the CRDT never
+   consumes it for ordering (non-negotiable #7, enforced by design: op bytes
+   are stored and fanned out verbatim).
+2. **ACK_DURABLE** (FAILURE_MODEL §1): authentication + authorization +
+   envelope validation + PostgreSQL commit under
+   `(document_id, operation_id)`, atomic per batch. Not peer-delivery, not
+   broker replication (Phase 4 vocabulary), not multi-region.
+3. **Idempotency chain**: client retries use stable identities →
+   `INSERT ... ON CONFLICT DO NOTHING` → duplicates resolve to existing
+   rows → CRDT application is idempotent. Each link is independently
+   tested (Rust unit, db integration with a concurrent race, E2E verbatim
+   resends).
+4. **Reconnect convergence**: authenticate → join (state summary) →
+   catch-up (cursor-paged) → resend unacked (same identities) — replicas
+   converge with no manual refresh (E2E-proven including a page-reload-
+   equivalent fresh replica and a SIGKILL'd gateway).
+5. **Authorization is per-batch**, not per-connection: downgrades take
+   effect on the next write (live-downgrade E2E).

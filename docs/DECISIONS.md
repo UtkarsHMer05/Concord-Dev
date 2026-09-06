@@ -751,3 +751,43 @@ retained and will not be removed.
   classes.
 - **Revisit conditions:** if throughput at scale demands it, data frames may
   gain compression (e.g., zstd) inside the same framing — a Phase 4+ concern.
+
+- **Revisit conditions:** benchmark evidence under Phase 4 distribution.
+
+## DEC-030 — Phase 3 runtime decisions: recheck-per-write authz, server-seq catch-up cursor, sync-first browser layer
+
+- **Status:** Accepted
+- **Decision:** Three Phase 3 implementation policies:
+  1. **Write authorization is rechecked on every batch, inside the
+     ingestion transaction** (not cached per connection). Correctness over
+     micro-optimization per the Phase 3 prompt; live downgrade is
+     E2E-proven (a mid-session ownership transfer denies the next batch).
+  2. **Catch-up uses the server-sequence cursor** (`crdt_operations.id`,
+     BIGSERIAL) as the fetch primitive — bounded, deterministic paging —
+     while the client state summary accompanies joins as a coverage
+     signal. Server sequence NEVER defines CRDT order (non-negotiable #7):
+     op bytes are stored and fanned out verbatim; the CRDT core alone
+     integrates them.
+  3. **The browser sync layer ships ahead of the product cutover**:
+     transport + outbox + session are implemented and E2E-proven this
+     phase; the document UI migrates onto `SyncSession` in later phases
+     (the Phase 1 mirror remains the active save path in the product
+     shell meanwhile — an explicitly transitional state).
+- **Context:** P3-M020/M037/M031 decisions surfaced during implementation.
+- **Alternatives:** authorization cache with TTL (rejected: stale-grant
+  windows); state-vector-only catch-up (rejected: sets are hard to page
+  deterministically); forcing the UI cutover into Phase 3 (rejected:
+  milestone scope discipline — E2E proves the layer; UI wiring is product
+  work).
+- **Rationale:** Every denial-of-risk is eliminated at the cheapest layer;
+  paging semantics stay simple and testable; UI cutover lands with
+  presence/threads in a later phase where it can be verified as a product
+  behavior.
+- **Consequences:** Per-batch authz adds one SQL join per ingest (measured
+  p50 ≈ 22 ms end-to-end — acceptable); summary is informational until a
+  future phase uses it for delta sync; docs carry the transitional-state
+  note.
+- **Evidence:** e2e.test.ts (live downgrade, catch-up convergence);
+  repo.rs (recheck inside the transaction); benchmarks (BENCHMARKS.md).
+- **Revisit conditions:** Phase 4 distribution changes authz caching
+  economics; delta sync design revives the state vector.
