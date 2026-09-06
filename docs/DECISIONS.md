@@ -459,3 +459,76 @@ retained and will not be removed.
 - **Evidence:** tests/db/content-save.test.ts (incl. concurrent same-version
   saves), browser two-tab verification (2026-09-06).
 - **Revisit conditions:** Superseded by the Phase 2 CRDT document model.
+
+---
+
+## Phase 2 additions (2026-09-06)
+
+## DEC-023 — CRDT model: operation-based sequence CRDT (YATA-style ordering) over a flat item stream with block-delimiter items
+
+- **Status:** Accepted
+- **Decision:** Concord's collaborative document model is a single
+  **operation-based sequence CRDT**. The document is one totally-ordered
+  stream of *items*; an item is either a **text item** (one Unicode scalar
+  plus a mark set) or a **block-delimiter item** (starts a new block and
+  carries the block type/attributes). Blocks are a derived view: the item
+  stream partitioned at delimiters.
+  - Item identity: `(ReplicaId: u64, counter: u64)` — unique, monotonic per
+    replica, never reused.
+  - Ordering: each insert records its **left and right origin anchors**
+    (YATA-style). Integration resolves concurrent insertions at the same
+    position by comparing item identities — the first-seen placement wins
+    ties consistently across replicas regardless of arrival order.
+  - Deletion: tombstone flag on the item; deletes are idempotent and
+    converge under duplication/reorder. A delete of a delimiter is a block
+    merge; deleting characters inside a block never merges blocks.
+  - Marks/attributes: per-element last-writer-wins registers ordered by
+    `(lamportClock, ReplicaId)` — logical order only, never arrival time.
+  - Causal summary: per-replica highest contiguous counter (state vector),
+    used by tests and later by the Phase 3 transport.
+- **Context:** Phase 2 requires a self-engineered C++ core whose semantics
+  can faithfully represent the current TipTap feature set (paragraphs,
+  headings, inline text, bold/italic/underline, block attributes), work
+  offline, survive reload via snapshots + logs, compile identically to native
+  and WASM targets, and be verifiable by deterministic simulation before any
+  network exists.
+- **Alternatives:**
+  - *Per-block RGA composition* (a sequence CRDT of blocks, each containing
+    its own text CRDT): split/merge requires moving elements across CRDT
+    containers, making concurrent split/merge semantics divergent or lossy —
+    rejected.
+  - *Logoot/LSEQ positional identifiers*: ordering by identifier comparison is
+    elegant and integration is a binary search, but identifier-size management
+    (allocation strategies, interleaving behavior) adds subtlety without
+    removing complexity from the properties that actually matter here —
+    rejected in favor of origin-anchored ordering with fixed-size identities.
+  - *Tree CRDT over the ProseMirror node tree*: most faithful structurally,
+    but dramatically larger implementation surface (node identity, split,
+    move, attribute placement) for features Phase 2 does not need (tables
+    stay non-collaborative — see M041 capability notes) — deferred.
+  - *State-based (CRDTPayload) approach*: shipping full state per update
+    duplicates content; operation-based with state-vector summaries gives the
+    same convergence with smaller payloads — chosen.
+  - *Adopting an existing CRDT library* (Yrs, Automerge, diamond-types):
+    contradicts the project thesis of owning the synchronization core — not
+    allowed; only the published *algorithms* were studied, no code copied.
+- **Rationale:** The flat delimiter model makes Enter/Backspace ordinary
+  insert/delete operations (concurrent split + merge compose naturally), maps
+  1:1 onto ProseMirror block structure, keeps item identities fixed-size, and
+  concentrates all ordering complexity in one well-specified integration
+  rule that deterministic simulation can hammer. Origin-anchored
+  (two-neighbor) integration is proven in the literature and its failure
+  modes are testable.
+- **Consequences:** Tombstones are retained until a future compaction design
+  (safe reclamation needs stronger causal knowledge — deferred, measured in
+  benchmarks); memory grows with total edits, not visible size. Concurrent
+  inserts at the same position get a deterministic but arbitrary order (a
+  user may see their text land after a peer's). Delete-wins is not global:
+  a concurrent insert adjacent to a deleted range survives — accepted.
+- **Evidence:** algorithm selection analysis (SA-CRDT review, private report);
+  convergence established by the native unit suite, property/randomized
+  seeds, and the deterministic multi-replica simulator (Phase 2 test suites);
+  native/WASM golden parity.
+- **Revisit conditions:** If TipTap mapping cannot represent a required
+  product feature (e.g., collaborative tables) the tree-CRDT alternative is
+  revisited in a later phase with its own decision.

@@ -50,3 +50,11 @@ next-env.d.ts
 .agents/
 .claude/
 skills-lock.json
+
+# Phase 2 native/WASM build output (never commit build artifacts)
+build/
+wasm/dist/
+*.wasm
+*.wasm.map
+.emcache/
+compile_commands.json
