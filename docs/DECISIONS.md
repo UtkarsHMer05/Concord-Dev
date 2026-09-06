@@ -672,3 +672,82 @@ retained and will not be removed.
 - **Revisit conditions:** Phase 3 transport must keep snapshot import
   validation for remote input; block-0 attribute support if the product
   requires attributes on the first paragraph.
+
+---
+
+## Phase 3 additions (2026-09-06)
+
+## DEC-028 — Phase 3 gateway stack: Tokio + Axum + tokio-postgres + jsonwebtoken + tracing
+
+- **Status:** Accepted
+- **Decision:** The Phase 3 sync gateway uses the following Rust stack (stable
+  toolchain pinned by `rust/rust-toolchain.toml`):
+  - **Async runtime:** `tokio 1.x` (multi-thread runtime) — the de-facto
+    standard; cancellation-safe primitives, bounded channels, graceful
+    shutdown support.
+  - **HTTP/WebSocket:** `axum 0.8` (its built-in `axum::extract::ws`,
+    `ws` feature) — ergonomic extractors, first-class WebSocket upgrade
+    handler, middleware story consistent with `tower`.
+  - **PostgreSQL driver:** `tokio-postgres 0.7` (async, native) — chosen over
+    `sqlx` because Phase 3 needs only prepared, parameterized queries (no
+    ORM/compile-time query macros) and a small dependency surface. Runtime
+    query parsing is trivially safe (all values parameterized; no string
+    concatenation with untrusted input). Migration execution is a small
+    embedded-SQL runner (P3-M017) rather than a CLI.
+  - **Serialization:** `serde` + `serde_json` for control frames (wire
+    decision see DEC-029); CRDT op payloads travel as opaque bytes.
+  - **AuthN:** `jsonwebtoken 11` — `DecodingKey::from_rsa_components` /
+    `TryFrom<&Jwk>`; JWKS fetched from the Clerk issuer and cached with
+    iteration-based refresh (key rotation).
+  - **Telemetry:** `tracing` + `tracing-subscriber` (fmt + env-filter).
+  - **Test client:** `tokio-tungstenite` (dev-dependency) for WebSocket
+    integration/security tests; `uuid 1` (v4) for identifiers; `sha2` +
+    `hex` for payload checksums.
+- **Context:** P3-M007; Phase 3 is a single-gateway architecture — no
+  NATS/Redis, no multi-gateway coordination.
+- **Alternatives considered:** `sqlx` (rejected: heavier, macro/offline tooling
+  not needed; `tokio-postgres` matches the actual query needs);
+  `tower-ws` (rejected: axum 0.8 still ships `axum::extract::ws`);
+  `hyper` directly (rejected: axum adds typed routing without a second
+  framework); `actix-web` (rejected: separate actor runtime model, not
+  needed); `axum` for WebSocket + `tokio-tungstenite` server-side (rejected:
+  axum's upgrade handler is the cleaner integration).
+- **Rationale:** minimal deterministic dependency surface; every selected
+  crate is stable and widely used; no framework mixing. The single-gateway
+  constraint makes a native async postgres client the right size.
+- **Consequences:** runtime query typing is manual (row → struct mapping in
+  one repository module); `jsonwebtoken` requires feature `use_pem`/JWK
+  usage rather than a hosted verify service (Clerk doesn't offer a local
+  verification service).
+- **Revisit conditions:** multi-gateway Phase 4 will revisit DB fanout and
+  may switch to a compile-time-checked driver at that point.
+
+## DEC-029 — Phase 3 wire protocol: versioned hybrid (JSON control frames + binary data frames)
+
+- **Status:** Accepted
+- **Decision:** Wire protocol version 1 (spec: docs/PROTOCOL.md §9) is a
+  hybrid:
+  - **Control frames** (`hello`, `authenticate`, `join_document`,
+    `join_accepted`, `durable_ack`, `error`, `ping`/`pong`,
+    `server_draining`, `sync_done`): compact typed JSON text messages with a
+    `{v, type, id?, payload}` envelope.
+  - **Data frames** carrying CRDT operation bytes (`client_ops`,
+    `sync_batch`): binary WebSocket messages with a fixed header
+    (`[version][kind][batch_id u64 BE][count u16 BE]` + length-prefixed op
+    bytes).
+- **Context:** P3-M006; Phase 2 defines canonical binary operation
+  serialization (PROTOCOL §7) that must be preserved verbatim across the
+  wire.
+- **Alternatives rejected:** all-JSON with base64 ops (33% inflation plus a
+  second encoding layer); all-binary (control frames become opaque and
+  harder to debug/share with TS); protobuf/flatbuffers (codegen dependency
+  for 15 frame types); auth token in query string (credential leakage).
+- **Rationale:** ops are the high-volume, already-canonical payload → binary
+  is preferred (per the Phase 3 prompt); control frames are low-volume and
+  benefit from human-readable JSON in dev tooling with zero extra schema
+  tooling.
+- **Consequences:** two encoders/decoders (one per class), each with golden
+  fixture + round-trip tests in Rust and TypeScript; version byte on both
+  classes.
+- **Revisit conditions:** if throughput at scale demands it, data frames may
+  gain compression (e.g., zstd) inside the same framing — a Phase 4+ concern.

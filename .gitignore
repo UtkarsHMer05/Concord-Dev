@@ -59,3 +59,6 @@ public/wasm/
 *.wasm.map
 .emcache/
 compile_commands.json
+
+# Phase 3 Rust build output (never commit build artifacts)
+rust/**/target/

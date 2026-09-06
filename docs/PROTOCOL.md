@@ -1,17 +1,17 @@
-# Concord — Local Operation Protocol (Phase 2)
+# Concord — Protocol (Local Operation Schema + Phase 3 Wire Layer)
 
-Status: Authoritative (implemented — native + WASM parity-tested)
-Version: protocol v1
-Last updated: 2026-09-06
+Status: Authoritative (implemented — native + WASM parity-tested; wire layer is Phase 3 CURRENT)
+Version: protocol v1 · wire protocol v1
+Last updated: 2026-09-06 (Phase 3 wire spec added)
 
 This document specifies the canonical operation and document model for
-Concord's local-first CRDT core (DEC-023). It is implementation-neutral: an
-engineer could build a compatible local engine from this spec alone. The
-network transport, framing, and gateway protocol are **out of scope here**
-(Phase 3 will extend, not replace, this schema).
+Concord's CRDT core (DEC-023) and the Phase 3 synchronization wire protocol
+(DEC-029). The local model is implementation-neutral; the wire model is what
+the browser runtime and the Rust gateway both speak.
 
 Related: [CONSISTENCY_MODEL.md](CONSISTENCY_MODEL.md) (invariants),
-[DECISIONS.md](DECISIONS.md) DEC-023.
+[FAILURE_MODEL.md](FAILURE_MODEL.md) (durability/ACK contract),
+[DECISIONS.md](DECISIONS.md) DEC-023 / DEC-029.
 
 ---
 
@@ -162,3 +162,197 @@ counter > summary+1) are tracked explicitly, never silently collapsed.
   non-collaboratively through the existing editor path where applicable).
 - Tombstone garbage collection: not implemented (deferred, see consistency
   model).
+
+## 9. Phase 3 wire protocol (sync transport)
+
+### 9.1 Overview
+
+- **Transport:** WebSocket. `ws://` in local dev; `wss://` is a deployment
+  configuration (Phase 7) — no protocol change.
+- **Gateway endpoint:** `/api/v1/sync`.
+- **Wire protocol version:** `1`. The CRDT local operation protocol also has
+  its own version byte (currently `1`) — the two are independent.
+- **Encoding decision (DEC-029):** **control frames are compact typed JSON**
+  (text WebSocket messages); **data frames that carry CRDT operation bytes
+  (`client_ops`, `sync_batch`) are binary.** Rationale: Phase 2 defines
+  canonical binary serialization of operations (§7), which must travel
+  verbatim (no base64 inflation, no semantic fork); control frames are
+  low-volume, debuggable, and trivially mirrored in TypeScript without schema
+  codegen. Rejected alternatives are recorded in DEC-029.
+
+### 9.2 Text frame envelope
+
+```json
+{ "v": 1, "type": "hello", "id": "<optional correlation id>", "payload": { ... } }
+```
+
+`id`, when present on a request, is echoed verbatim by the server in the
+matching reply so the client can correlate without maintaining socket state
+per frame type. Unknown `type` → `error` frame with `unknown_frame_type`.
+Unknown `v` → behavior defined in §9.12.
+
+### 9.3 Binary frame layout
+
+All integers big-endian. `kind` byte selects the binary frame type.
+
+```
+client_ops:  [0x01] [0x20] [batch_id u64] [count u16] { [op_len u16] [op bytes] }*
+sync_batch:  [0x01] [0x21] [next_cursor u64] [has_more u8] [count u16] { [op_len u16] [op bytes] }*
+```
+
+- `op bytes` are the Phase 2 canonical operation frames (§7, `payload_version
+  = 1`) — the gateway stores them verbatim and never rewrites them.
+- `next_cursor` is the server-sequence high-water mark of the batch (the
+  highest `crdt_operations.id` included).
+- `has_more`: `1` when another `sync_batch` follows.
+
+### 9.4 Frame catalogue
+
+| Frame | Direction | Payload |
+|---|---|---|
+| `hello` | c→s | `{ clientProtocolVersion: u32 }` |
+| `hello_ack` | s→c | `{ protocolVersion: u32, connectionId: string }` |
+| `authenticate` | c→s | `{ token: string }` (Clerk session JWT) |
+| `authenticated` | s→c | `{ userId: uuid, clerkUserId: string, orgId: uuid? }` |
+| `join_document` | c→s | `{ documentId: uuid, stateSummary: [{ replicaId: string, sequence: string }] }` (u64 as decimal strings) |
+| `join_accepted` | s→c | `{ documentId: uuid, role: "owner"\|"editor"\|"commenter"\|"viewer", durableCursor: string }` |
+| `sync_request` | c→s | `{ cursor: string }` (server-seq cursor; u64 decimal) |
+| `sync_batch` | s→c | binary data frame (§9.3) |
+| `sync_done` | s→c | `{ }` (marks the end of catch-up; only then READY) |
+| `client_ops` | c→s | binary data frame (§9.3) |
+| `durable_ack` | s→c | `{ batchId: string, opIds: [string] }` → **ACK_DURABLE** |
+| `ping` | c→s | `{ nonce: u64 }` |
+| `pong` | s→c | `{ nonce: u64 }` |
+| `error` | both | `{ code, message, requestId? }` (§9.8) |
+| `server_draining` | s→c | `{ reason: "shutdown", graceMs: u32 }` |
+
+Role strings map from the Phase 1 effective role (`OWNER`/`EDITOR`/
+`COMMENTER`/`VIEWER`, lowercased on the wire), computed server-side from
+PostgreSQL — never from client input.
+
+### 9.5 Handshake and authentication
+
+1. Client connects to `/api/v1/sync` and sends `hello` with its
+   `clientProtocolVersion`.
+2. Server replies `hello_ack {protocolVersion, connectionId}`, or
+   `error {unsupported_protocol_version}` followed by a close when versions
+   are incompatible.
+3. Client sends `authenticate {token}` with its **Clerk session JWT**. The
+   token travels in-message because browser WebSocket APIs cannot set an
+   Authorization header; it is never placed in a URL query string.
+4. Server verifies the token server-side (signature via JWKS, issuer, expiry,
+   subject) and replies `authenticated {userId, clerkUserId, orgId?}`, or
+   `error {unauthorized}` + close. The verified principal is the only truth;
+   client-supplied identities are never trusted.
+
+### 9.6 Join and initial sync
+
+5. Client sends `join_document {documentId, stateSummary}` where
+   `stateSummary` is its per-replica counter vector (§6 of the local spec) —
+   used as a safety check; the **server-sequence cursor is the catch-up
+   primitive** (see 9.7).
+6. Server resolves the document's effective role from PostgreSQL
+   (owner > direct ACL > org member EDITOR > deny) and replies:
+   - `join_accepted {documentId, role, durableCursor}` — `durableCursor` is
+     the server's current high-water mark (the client's starting point), or
+   - `error {forbidden}` (no access; the no-access client learns nothing
+     beyond the error code).
+7. The server streams `sync_batch` data frames with ops whose server id is
+   greater than the client's requested cursor (or its `durableCursor`), then
+   `sync_done {}`. The state becomes READY only after `sync_done`.
+
+### 9.7 Catch-up model (documented choice)
+
+The primary fetch primitive is the **server-sequence cursor**: ops are
+ordered by `crdt_operations.id` (a BIGSERIAL) and fetched in bounded,
+deterministic pages (`cursor`, `limit`). The state summary is NOT the fetch
+primitive — sets are harder to page deterministically — but it accompanies
+joins so the server can sanity-check the client's claimed replica coverage.
+A client that lost its cursor re-syncs from `0` (bounded batches). Server
+order is a **storage/fetch order surrogate only**; it never defines CRDT
+conflict resolution (the C++/WASM core does, by identities).
+
+### 9.8 Error codes
+
+`unauthorized`, `forbidden`, `unsupported_protocol_version`,
+`unknown_frame_type`, `invalid_state`, `malformed_frame`,
+`payload_too_large`, `rate_limited` (placeholder, not yet enforced),
+`database_unavailable`, `server_draining`, `internal_error`.
+
+Error frames carry a safe `message` and never expose SQL details, stack
+traces, or internal identifiers. Server logs record the full structured
+context.
+
+### 9.9 Heartbeat
+
+The server sends `ping {nonce}` when idle past the heartbeat interval; the
+client MUST reply `pong {nonce}`. The client may also ping. An idle
+connection past the idle timeout is closed and its session cleaned up.
+Heartbeats use control frames, not WebSocket-level ping frames, so they are
+visible to the protocol layer and proxies uniformly.
+
+### 9.10 Draining
+
+On SIGTERM/SIGINT the server stops accepting connections, sends
+`server_draining {reason:"shutdown", graceMs}`, stops accepting new
+`client_ops` at the cutoff, lets in-flight batches commit within the grace
+window, then closes. A client that was mid-batch reconnects and resends
+(pending ops) — the contract in FAILURE_MODEL §2.4 keeps this safe.
+
+### 9.11 Limits (wire)
+
+- max WebSocket frame size: **8 MiB**,
+- `client_ops` batch: `count ≤ 1024` ops and total payload ≤ 4 MiB,
+- per-operation size ≤ 64 KiB (Phase 2 §5),
+- `sync_batch` page: `count ≤ 1024` ops,
+- token length cap: 32 KiB (defense-in-depth); attribute name/value caps
+  from the local spec apply before anything is persisted.
+
+Exceeding any limit → `payload_too_large`/`malformed_frame` error; oversized
+frames abort the connection.
+
+### 9.12 Unknown/unsupported version behavior
+
+- Client sends `clientProtocolVersion > 1` → server replies
+  `error {unsupported_protocol_version}` and closes.
+- Server speaking a newer protocol than the client → server downgrades to the
+  client's version when backward-compatible; otherwise the same error. A
+  client receiving `unsupported_protocol_version` marks the gateway
+  incompatible, surfaces a safe message, and retries with bounded backoff.
+- Unknown frame `v` in a text frame → `error {unsupported_protocol_version}`.
+
+### 9.13 Connection state machine (normative)
+
+```
+CONNECTING → (hello/hello_ack) → AUTHENTICATING → (authenticated) → AUTHENTICATED
+→ (join_document/join_accepted) → JOINING → SYNCING → (sync_done) → READY
+READY ──server_draining──▶ DRAINING ──close──▶ CLOSED
+any ──protocol error / reject / close──▶ CLOSED (or REJECTED before READY)
+```
+
+Frames illegal for the current state receive `error {invalid_state}`. In
+particular: `client_ops` before READY, `join_document` before
+AUTHENTICATED, a second `join_document` without leaving the current
+document, and any data frame after DRAINING are all rejected. The reviewer
+tests these transitions (P3-M023/P3-M045).
+
+### 9.14 Retry/replay semantics
+
+- The client retries on the same stable operation identities (never
+  regenerates IDs for resends — Phase 2 identity model).
+- The server is idempotent under duplicates at the SQL layer.
+- Reconnect flow: hello → authenticate → join (with state summary and last
+  durable cursor) → catch-up → resend pending → READY → converge.
+
+### 9.15 Rejected alternatives (see DEC-029 for full record)
+
+- All-binary wire protocol (rejected: control frames are a handful of small
+  variants; JSON keeps them debuggable and trivially shared with TypeScript
+  without codegen).
+- All-JSON with base64-encoded operation payloads (rejected: Phase 2 already
+  has canonical binary op bytes — base64 inflates +33% and adds a second
+  encoding layer for no correctness benefit).
+- Auth token in a query string (rejected: leaks the session credential into
+  logs/history).
+- protobuf/flatbuffers schema (rejected: adds a codegen dependency for 15
+  frame types; no cross-language tooling benefit in this phase).
