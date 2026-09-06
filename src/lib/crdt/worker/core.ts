@@ -134,14 +134,22 @@ export class CrdtWorkerCore {
                 const engine = await this.ensureEngine();
                 let applied = 0;
                 let duplicates = 0;
+                const durable: Uint8Array[] = [];
                 for (const bytes of request.ops) {
                     if (engine.applyRemote(bytes) === "applied") {
                         applied += 1;
+                        durable.push(bytes);
                     } else {
                         duplicates += 1;
                     }
                 }
-                return { kind: "applyRemote", applied, duplicates, ops: [] };
+                // Received remote ops join the durable log: a reload replays
+                // the full replica history (origin + remote), so no received
+                // content is ever lost across a reload (M044 gap this fixed).
+                if (durable.length > 0) {
+                    await this.config.persistence.appendOps(this.config.documentId, durable);
+                }
+                return { kind: "applyRemote", applied, duplicates, ops: durable };
             }
 
             case "localInsertText": {
