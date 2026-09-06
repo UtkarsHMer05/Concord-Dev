@@ -4,6 +4,7 @@
 // bounded: a request that overflows it fails immediately with a structured
 // error instead of growing without bound; worker termination rejects every
 // pending request.
+import type { StreamEntryJson } from "../adapter";
 import type { WorkerRequest, WorkerResponse, WorkerResultPayload, CrdtWorkerError } from "./protocol";
 
 const MAX_PENDING = 256;
@@ -145,6 +146,12 @@ export class CrdtClient {
     async exportOps(): Promise<Uint8Array[]> {
         const result = await this.call({ kind: "exportOps" });
         return (result as { kind: "exportOps"; ops: Uint8Array[] }).ops;
+    }
+
+    /** The full tombstone-inclusive stream (adapter mapping surface). */
+    async exportStream(): Promise<StreamEntryJson[]> {
+        const result = await this.call({ kind: "exportStream" });
+        return JSON.parse((result as { kind: "exportStream"; json: string }).json) as StreamEntryJson[];
     }
 
     terminate(): void {

@@ -13,18 +13,32 @@ import FontFamily from '@tiptap/extension-font-family'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
 import { useEditor, EditorContent } from '@tiptap/react'
+import { useEffect, useRef } from 'react'
 
 import { useEditorStore } from '@/store/use-editor-store';
 import { useDocumentSession } from '@/lib/collaboration/provider';
+import { CrdtEditorBridge } from '@/lib/crdt/editor-bridge';
+import type { CrdtClient } from '@/lib/crdt/worker/client';
+import type { PmNode } from '@/lib/crdt/pm-model';
 import { FontSizeExtension } from '@/extensions/font-size';
 import { LineHeightExtension } from '@/extensions/line-height';
 
 import { Ruler } from './ruler';
 
-export const Editor = () => {
+interface EditorProps {
+  /** CRDT worker client; null on the server or when workers are unavailable. */
+  crdtClient: CrdtClient | null;
+  /** Server-side seed (Phase 1 envelope content) for the first local open. */
+  seedPmDoc: PmNode | null;
+}
+
+export const Editor = ({ crdtClient, seedPmDoc }: EditorProps) => {
   const { editorContent, content, settings, canEditContent } = useDocumentSession();
 
   const { setEditor } = useEditorStore();
+  // The bridge is created after the editor exists; onUpdate routes through
+  // this ref so the creation-time closure stays valid.
+  const bridgeRef = useRef<CrdtEditorBridge | null>(null);
 
   const editor = useEditor({
     autofocus: true,
@@ -42,7 +56,12 @@ export const Editor = () => {
     },
     onUpdate({ editor }) {
       setEditor(editor)
+      // Phase 1 server mirror (transitional): keeps documents.content in
+      // PostgreSQL roughly in sync for the home list and other devices.
       content.saveContent(editor.getJSON())
+      // Phase 2 local-first path: diff against the CRDT canonical state and
+      // emit durable operations through the worker.
+      void bridgeRef.current?.onLocalTransaction(editor)
     },
     onSelectionUpdate({ editor }) {
       setEditor(editor)
@@ -100,6 +119,25 @@ export const Editor = () => {
       TaskList,
     ],
   })
+
+  // Bridge lifecycle: connect once the editor exists (client-side only).
+  useEffect(() => {
+    if (!crdtClient || !editor) {
+      return;
+    }
+    const bridge = new CrdtEditorBridge({
+      editor,
+      client: crdtClient,
+      seedPmDoc,
+    });
+    bridgeRef.current = bridge;
+    void bridge.start();
+    return () => {
+      bridgeRef.current = null;
+    };
+    // The bridge is per editor instance; content/seed are read once at start.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crdtClient, editor]);
 
   return (
     <div className="size-full overflow-x-auto bg-[#F9FBFD] px-4 print:p-0 print:bg-white print:overflow-visible">

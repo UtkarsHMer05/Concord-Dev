@@ -30,24 +30,6 @@ async function loadFactory(): Promise<ConcordModule> {
     });
 }
 
-function replicaIdFor(documentId: string): bigint {
-    const key = `concord.replica.${documentId}`;
-    const stored = globalThis.localStorage?.getItem(key) ?? null;
-    if (stored !== null) {
-        return BigInt(stored);
-    }
-    const bytes = new Uint8Array(8);
-    globalThis.crypto.getRandomValues(bytes);
-    bytes[0] |= 1; // never zero
-    const value = new DataView(bytes.buffer).getBigUint64(0);
-    try {
-        globalThis.localStorage?.setItem(key, value.toString());
-    } catch {
-        // localStorage unavailable (private mode): identity is per session.
-    }
-    return value;
-}
-
 let core: CrdtWorkerCore | null = null;
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {

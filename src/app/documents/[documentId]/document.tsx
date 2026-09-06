@@ -1,9 +1,11 @@
 "use client";
 
-import type { DocumentDetailDto } from "@/server/services/documents";
+import { useMemo } from "react";
 
-import { DocumentSessionProvider } from "@/lib/collaboration/provider";
+import type { DocumentDetailDto } from "@/server/services/documents";
+import { CrdtClient } from "@/lib/crdt/worker/client";
 import { parseDocumentContent } from "@/lib/collaboration/content";
+import { DocumentSessionProvider } from "@/lib/collaboration/provider";
 
 import { Editor } from "./editor";
 import { Navbar } from "./navbar";
@@ -23,6 +25,16 @@ export const Document = ({ document }: DocumentProps) => {
 
   const canEdit = document.effectiveRole === "OWNER" || document.effectiveRole === "EDITOR";
 
+  // Phase 2 local-first session: the worker owns the CRDT replica and its
+  // IndexedDB durability; the editor bridge (created inside <Editor>) syncs
+  // the TipTap document both ways. The client is created once per document.
+  const crdtClient = useMemo(() => {
+    if (typeof window === "undefined" || typeof Worker === "undefined") {
+      return null;
+    }
+    return new CrdtClient();
+  }, []);
+
   return (
     <DocumentSessionProvider
       documentId={document.id}
@@ -36,7 +48,7 @@ export const Document = ({ document }: DocumentProps) => {
           <Toolbar />
         </div>
         <div className="pt-[114px] print:pt-0">
-          <Editor />
+          <Editor crdtClient={crdtClient} seedPmDoc={(editorContent ?? null) as never} />
         </div>
       </div>
     </DocumentSessionProvider>

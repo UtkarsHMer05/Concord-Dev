@@ -17,7 +17,8 @@ export type WorkerRequest =
     | { id: number; kind: "digest" }
     | { id: number; kind: "streamSize" }
     | { id: number; kind: "exportSnapshot" }
-    | { id: number; kind: "exportOps" };
+    | { id: number; kind: "exportOps" }
+    | { id: number; kind: "exportStream" };
 
 export type CrdtWorkerError = {
     code: string;
@@ -37,4 +38,5 @@ export type WorkerResultPayload =
     | { kind: "digest"; digest: string }
     | { kind: "streamSize"; size: number }
     | { kind: "exportSnapshot"; snapshot: Uint8Array }
-    | { kind: "exportOps"; ops: Uint8Array[] };
+    | { kind: "exportOps"; ops: Uint8Array[] }
+    | { kind: "exportStream"; json: string };

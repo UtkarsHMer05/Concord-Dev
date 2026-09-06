@@ -20,6 +20,7 @@
 // pointer for the most recent error (valid until the next call).
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
 #include <string>
 
 #include <emscripten.h>
@@ -248,6 +249,63 @@ void* concord_create_from_snapshot(std::uint64_t replica_id, const std::uint8_t*
         return new Doc(Doc::import_snapshot(concord::crdt::ReplicaId{replica_id}, data));
     } catch (...) {
         return nullptr;
+    }
+}
+
+// Writes the full tombstone-inclusive stream as JSON:
+// [{"r":<replica>,"c":<counter>,"k":"text"|"delim","t":false,"s":"...","a":{...}}]
+// (t = tombstoned, s = scalar for text items, a = winning attributes). This is
+// the mapping surface the TipTap adapter uses to translate editor positions
+// into CRDT anchors.
+std::int32_t concord_stream_json(void* handle, std::uint8_t* out, std::int32_t cap) {
+    const auto doc = static_cast<Doc*>(handle);
+    try {
+        std::string json = "[";
+        const std::size_t size = doc->stream_size();
+        for (std::size_t i = 0; i < size; ++i) {
+            const concord::crdt::StreamEntry entry = doc->stream_entry(i);
+            if (i > 0) {
+                json += ",";
+            }
+            json += "{\"r\":" + std::to_string(entry.id.replica.value());
+            json += ",\"c\":" + std::to_string(entry.id.counter.value());
+            json += ",\"k\":\"" +
+                    std::string(entry.kind == concord::crdt::ItemKind::Text ? "text" : "delim") + "\"";
+            json += ",\"t\":" + std::string(entry.tombstoned ? "true" : "false");
+            std::string scalar;
+            if (entry.kind == concord::crdt::ItemKind::Text) {
+                concord::crdt::append_utf8(scalar, entry.scalar);
+            }
+            json += ",\"s\":\"";
+            for (const char ch : scalar) {
+                if (static_cast<unsigned char>(ch) < 0x20 || ch == '"' || ch == '\\') {
+                    char escape[8];
+                    std::snprintf(escape, sizeof(escape), "\\u%04x", ch);
+                    json += escape;
+                } else {
+                    json += ch;
+                }
+            }
+            json += "\"";
+            json += ",\"a\":{";
+            bool first = true;
+            for (const auto& [name, value] : entry.attrs) {
+                if (!first) {
+                    json += ",";
+                }
+                first = false;
+                json += "\"";
+                json += name;
+                json += "\":\"";
+                json += value;
+                json += "\"";
+            }
+            json += "}}";
+        }
+        json += "]";
+        return OutBuffer{out, cap}.write(json);
+    } catch (const concord::crdt::CrdtError& error) {
+        return error_code(error);
     }
 }
 

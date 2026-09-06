@@ -12,12 +12,6 @@ import type { PersistenceAdapter, LocalState } from "@/lib/crdt/worker/idb";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const wasmDist = path.join(repoRoot, "wasm/dist");
 
-interface GoldenFixture {
-    ops: string[];
-    visible: string;
-    digest: string;
-}
-
 async function loadFactory() {
     const source = await readFile(path.join(wasmDist, "concord-crdt.js"), "utf8");
     const binary = await readFile(path.join(wasmDist, "concord-crdt.wasm"));

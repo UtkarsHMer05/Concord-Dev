@@ -366,4 +366,15 @@ export class ConcordEngine {
             internals.module._concord_export_snapshot(internals.handle, ptr, cap),
         );
     }
+
+    /**
+     * The full tombstone-inclusive item stream (adapter mapping surface).
+     */
+    streamJson(): string {
+        const internals = this.assertLive();
+        return new TextDecoder().decode(
+            this.runReadCall(internals, (ptr, cap) =>
+                internals.module._concord_stream_json(internals.handle, ptr, cap)),
+        );
+    }
 }

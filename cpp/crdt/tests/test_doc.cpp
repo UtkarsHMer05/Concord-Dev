@@ -56,12 +56,12 @@ CONCORD_TEST(multiple_blocks_and_types) {
 (void)    doc.local_insert_text(5, U'x');
 
     const auto blocks = doc.visible_document();
-    // The implicit root block precedes the first explicit delimiter.
-    CHECK(blocks.size() == 3);
-    CHECK(blocks[1].type == "paragraph");
-    CHECK(to_utf8(std::vector<VisibleBlock>{blocks[1]}) == "[paragraph]abc");
-    CHECK(blocks[2].type == "heading-1");
-    CHECK(to_utf8(std::vector<VisibleBlock>{blocks[2]}) == "[heading-1]x");
+    // The stream opens with a delimiter: it defines block 0 (no ghost root).
+    CHECK(blocks.size() == 2);
+    CHECK(blocks[0].type == "paragraph");
+    CHECK(to_utf8(std::vector<VisibleBlock>{blocks[0]}) == "[paragraph]abc");
+    CHECK(blocks[1].type == "heading-1");
+    CHECK(to_utf8(std::vector<VisibleBlock>{blocks[1]}) == "[heading-1]x");
 }
 
 CONCORD_TEST(unicode_content) {

@@ -484,13 +484,18 @@ StreamEntry Doc::stream_entry(std::size_t index) const {
 
 std::vector<VisibleBlock> Doc::visible_document() const {
     std::vector<VisibleBlock> blocks;
-    blocks.push_back(VisibleBlock{});
-    blocks.back().type = AllowedAttrs::kDefaultBlockType;
+    // The root block is implicit UNLESS the stream opens with a delimiter —
+    // then that delimiter defines block 0 (lets the first paragraph become a
+    // heading without a ghost empty block).
+    bool root_open = true;
     std::int64_t cursor = head_;
     while (cursor != -1) {
         const Item& item = at_index(cursor);
         if (!item.tombstoned) {
             if (item.kind == ItemKind::Delimiter) {
+                if (root_open) {
+                    root_open = false;  // this delimiter IS block 0's delimiter
+                }
                 VisibleBlock block;
                 block.type = AllowedAttrs::kDefaultBlockType;
                 for (const auto& [name, reg] : item.attrs) {
@@ -504,6 +509,11 @@ std::vector<VisibleBlock> Doc::visible_document() const {
                 }
                 blocks.push_back(std::move(block));
             } else {
+                if (root_open) {
+                    blocks.push_back(VisibleBlock{});
+                    blocks.back().type = AllowedAttrs::kDefaultBlockType;
+                    root_open = false;
+                }
                 VisibleChar ch;
                 ch.scalar = item.scalar;
                 for (const auto& [name, reg] : item.attrs) {
@@ -515,6 +525,11 @@ std::vector<VisibleBlock> Doc::visible_document() const {
             }
         }
         cursor = at_index(cursor).next;
+    }
+    if (blocks.empty()) {
+        VisibleBlock empty;
+        empty.type = AllowedAttrs::kDefaultBlockType;
+        blocks.push_back(std::move(empty));
     }
     return blocks;
 }

@@ -202,6 +202,12 @@ export class CrdtWorkerCore {
                 const state = await this.config.persistence.loadLocalState(this.config.documentId);
                 return { kind: "exportOps", ops: state.ops };
             }
+
+            case "exportStream": {
+                // Adapter mapping surface: full tombstone-inclusive stream.
+                const engine = await this.ensureEngine();
+                return { kind: "exportStream", json: engine.streamJson() };
+            }
         }
     }
 }
