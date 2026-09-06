@@ -25,6 +25,18 @@ export default defineConfig({
       },
       {
         test: {
+          name: "realtime",
+          include: ["tests/realtime/**/*.test.ts"],
+          // Real-socket E2E suites share one gateway process + test DB:
+          // serialize files, generous timeouts.
+          fileParallelism: false,
+          testTimeout: 120_000,
+          hookTimeout: 120_000,
+          pool: "forks",
+        },
+      },
+      {
+        test: {
           name: "db",
           include: ["tests/db/**/*.test.ts"],
           setupFiles: ["tests/db/setup-env.ts"],

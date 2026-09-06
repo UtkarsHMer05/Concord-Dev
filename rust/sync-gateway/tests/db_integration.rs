@@ -34,6 +34,7 @@ async fn test_db() -> Option<Db> {
         heartbeat_interval: std::time::Duration::from_secs(30),
         idle_timeout: std::time::Duration::from_secs(120),
         db_pool_size: 4,
+        jwks_file: None,
     };
     Db::connect(&config).await.ok() // DB not running: skip (documented gate precondition)
 }
@@ -157,6 +158,7 @@ fn test_config() -> Config {
         heartbeat_interval: std::time::Duration::from_secs(30),
         idle_timeout: std::time::Duration::from_secs(120),
         db_pool_size: 2,
+        jwks_file: None,
     }
 }
 

@@ -95,11 +95,37 @@ impl JwksSource for HttpJwks {
     }
 }
 
-/// Verifier source used by the gateway: HTTPS in production, injected
-/// static keys in tests.
+/// File-backed JWKS source (GATEWAY_JWKS_FILE): local dev/E2E path — reads
+/// a standard JWKS document from disk. Never enabled implicitly; the
+/// config layer requires the env var. Production uses HTTPS.
+pub struct FileJwks {
+    path: std::path::PathBuf,
+}
+
+impl FileJwks {
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
+impl JwksSource for FileJwks {
+    fn load_jwks(&self) -> futures_util::future::BoxFuture<'static, Result<JwkSet, AuthError>> {
+        let path = self.path.clone();
+        Box::pin(async move {
+            let bytes = tokio::fs::read(&path)
+                .await
+                .map_err(|_| AuthError::JwksUnavailable)?;
+            serde_json::from_slice(&bytes).map_err(|_| AuthError::JwksUnavailable)
+        })
+    }
+}
+
+/// Verifier source used by the gateway: HTTPS in production, a static
+/// file or injected keys in dev/test (explicit config only).
 pub enum VerifierSource {
     Http(HttpJwks),
     Static(StaticJwks),
+    File(FileJwks),
 }
 
 impl JwksSource for VerifierSource {
@@ -107,6 +133,7 @@ impl JwksSource for VerifierSource {
         match self {
             VerifierSource::Http(s) => s.load_jwks(),
             VerifierSource::Static(s) => s.load_jwks(),
+            VerifierSource::File(s) => s.load_jwks(),
         }
     }
 }

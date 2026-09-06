@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit",
+    "test:realtime": "vitest run --project realtime",
     "test:db": "vitest run --project db",
     "test:all": "npm run test && npm run test:db",
     "smoke": "node scripts/smoke.mjs",

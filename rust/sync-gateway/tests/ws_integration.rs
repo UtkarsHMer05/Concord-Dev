@@ -156,6 +156,7 @@ fn base_config() -> Config {
         heartbeat_interval: Duration::from_secs(10),
         idle_timeout: Duration::from_secs(600),
         db_pool_size: 4,
+        jwks_file: None,
     }
 }
 

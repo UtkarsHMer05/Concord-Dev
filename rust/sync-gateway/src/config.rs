@@ -31,6 +31,9 @@ pub struct Config {
     pub idle_timeout: Duration,
     /// DB pool size (connections).
     pub db_pool_size: u32,
+    /// Optional local JWKS file (dev/E2E only; production uses the issuer
+    /// over HTTPS). Path, never contents, in config.
+    pub jwks_file: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -116,6 +119,8 @@ impl Config {
             "expected a positive integer",
             DEFAULT_DB_POOL_SIZE,
         )?;
+        // Optional local JWKS file (dev/E2E only; empty or absent = HTTPS).
+        let jwks_file = env_optional("GATEWAY_JWKS_FILE").filter(|s| !s.is_empty());
 
         if per_connection_queue_capacity == 0 {
             return Err(ConfigError::Invalid {
@@ -159,6 +164,7 @@ impl Config {
             heartbeat_interval,
             idle_timeout,
             db_pool_size,
+            jwks_file,
         })
     }
 }

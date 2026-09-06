@@ -8,7 +8,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util", "process"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util", "process", "fs"] }
 axum = { version = "0.8", features = ["ws"] }
 tokio-postgres = { version = "0.7.18", features = ["with-chrono-0_4", "with-uuid-1"] }
 deadpool-postgres = { version = "0.14.2", features = ["rt_tokio_1"] }

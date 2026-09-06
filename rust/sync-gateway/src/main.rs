@@ -51,7 +51,12 @@ async fn main() {
         repo: Arc::new(GatewayRepo::new(db)),
         verifier: Arc::new(TokenVerifier::new(
             &config.clerk_issuer,
-            VerifierSource::Http(sync_gateway::auth::HttpJwks::new(&config.clerk_issuer)),
+            match &config.jwks_file {
+                Some(path) => VerifierSource::File(sync_gateway::auth::FileJwks::new(path)),
+                None => {
+                    VerifierSource::Http(sync_gateway::auth::HttpJwks::new(&config.clerk_issuer))
+                }
+            },
         )),
         draining: Arc::new(AtomicBool::new(false)),
     };
