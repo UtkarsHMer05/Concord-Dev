@@ -13,10 +13,11 @@
 //! All decoders enforce the wire limits from PROTOCOL §9.11 at parse time
 //! in addition to the transport-level frame-size cap.
 
-mod control;
+pub mod control;
 mod data;
-mod envelope;
+pub mod envelope;
 mod error;
+#[cfg(test)]
 mod golden;
 mod limits;
 

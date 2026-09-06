@@ -31,3 +31,9 @@ futures-util.workspace = true
 
 [dev-dependencies]
 tokio-tungstenite.workspace = true
+rsa.workspace = true
+# Integration tests share one test database; serialize them (matches the
+# vitest db project's fileParallelism:false policy).
+[[test]]
+name = "db_integration"
+harness = true

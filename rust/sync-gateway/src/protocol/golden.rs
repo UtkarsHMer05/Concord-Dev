@@ -115,7 +115,9 @@ fn fixtures() -> FixtureFile {
             name: "hello",
             wire: ControlFrame {
                 id: Some("req-1".into()),
-                frame: Frame::Hello(Hello { client_protocol_version: 1 }),
+                frame: Frame::Hello(Hello {
+                    client_protocol_version: 1,
+                }),
             }
             .encode(),
         },
@@ -134,7 +136,9 @@ fn fixtures() -> FixtureFile {
             name: "authenticate",
             wire: ControlFrame {
                 id: None,
-                frame: Frame::Authenticate(Authenticate { token: "eyJhbGciOiJSUzI1NiJ9.test-token".into() }),
+                frame: Frame::Authenticate(Authenticate {
+                    token: "eyJhbGciOiJSUzI1NiJ9.test-token".into(),
+                }),
             }
             .encode(),
         },
@@ -157,8 +161,14 @@ fn fixtures() -> FixtureFile {
                 frame: Frame::JoinDocument(JoinDocument {
                     document_id: "3a2b1c0d-0000-4000-8000-000000000003".into(),
                     state_summary: vec![
-                        SummaryEntry { replica_id: "212".into(), sequence: "40".into() },
-                        SummaryEntry { replica_id: "340".into(), sequence: "7".into() },
+                        SummaryEntry {
+                            replica_id: "212".into(),
+                            sequence: "40".into(),
+                        },
+                        SummaryEntry {
+                            replica_id: "340".into(),
+                            sequence: "7".into(),
+                        },
                     ],
                 }),
             }
@@ -180,13 +190,19 @@ fn fixtures() -> FixtureFile {
             name: "sync_request",
             wire: ControlFrame {
                 id: None,
-                frame: Frame::SyncRequest(SyncRequest { cursor: "9223372036854775".into() }),
+                frame: Frame::SyncRequest(SyncRequest {
+                    cursor: "9223372036854775".into(),
+                }),
             }
             .encode(),
         },
         TextFixture {
             name: "sync_done",
-            wire: ControlFrame { id: None, frame: Frame::SyncDone(SyncDone {}) }.encode(),
+            wire: ControlFrame {
+                id: None,
+                frame: Frame::SyncDone(SyncDone {}),
+            }
+            .encode(),
         },
         TextFixture {
             name: "durable_ack",
@@ -201,11 +217,23 @@ fn fixtures() -> FixtureFile {
         },
         TextFixture {
             name: "ping",
-            wire: ControlFrame { id: None, frame: Frame::Ping(Ping { nonce: "314159".into() }) }.encode(),
+            wire: ControlFrame {
+                id: None,
+                frame: Frame::Ping(Ping {
+                    nonce: "314159".into(),
+                }),
+            }
+            .encode(),
         },
         TextFixture {
             name: "pong",
-            wire: ControlFrame { id: None, frame: Frame::Pong(Pong { nonce: "314159".into() }) }.encode(),
+            wire: ControlFrame {
+                id: None,
+                frame: Frame::Pong(Pong {
+                    nonce: "314159".into(),
+                }),
+            }
+            .encode(),
         },
         TextFixture {
             name: "error",
@@ -223,17 +251,32 @@ fn fixtures() -> FixtureFile {
             name: "server_draining",
             wire: ControlFrame {
                 id: None,
-                frame: Frame::ServerDraining(ServerDraining { reason: "shutdown".into(), grace_ms: 5000 }),
+                frame: Frame::ServerDraining(ServerDraining {
+                    reason: "shutdown".into(),
+                    grace_ms: 5000,
+                }),
             }
             .encode(),
         },
     ];
 
     let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
-    let ops = vec![golden_insert_op(), golden_delimiter_op(), golden_delete_op()];
+    let ops = vec![
+        golden_insert_op(),
+        golden_delimiter_op(),
+        golden_delete_op(),
+    ];
 
-    let client_ops = ClientOps { batch_id: 42, ops: ops.clone(), identities: Vec::new() };
-    let sync_batch = SyncBatch { next_cursor: 99, has_more: true, ops: ops.clone() };
+    let client_ops = ClientOps {
+        batch_id: 42,
+        ops: ops.clone(),
+        identities: Vec::new(),
+    };
+    let sync_batch = SyncBatch {
+        next_cursor: 99,
+        has_more: true,
+        ops: ops.clone(),
+    };
 
     let binary_frames = vec![
         BinaryFixture {
@@ -265,24 +308,40 @@ fn fixtures() -> FixtureFile {
         ProtocolError::InternalError,
     ]
     .iter()
-    .map(|c| ErrorFixture { name: "code", code: c.as_str(), fatal: c.is_fatal() })
+    .map(|c| ErrorFixture {
+        name: "code",
+        code: c.as_str(),
+        fatal: c.is_fatal(),
+    })
     .collect();
 
     let op_envelopes = vec![
         EnvelopeFixture {
             name: "insert_text",
             op_hex: hex(&golden_insert_op()),
-            identity: OpIdentity { replica: 0xD4, counter: 17 }.to_wire(),
+            identity: OpIdentity {
+                replica: 0xD4,
+                counter: 17,
+            }
+            .to_wire(),
         },
         EnvelopeFixture {
             name: "insert_delimiter",
             op_hex: hex(&golden_delimiter_op()),
-            identity: OpIdentity { replica: 0xD4, counter: 18 }.to_wire(),
+            identity: OpIdentity {
+                replica: 0xD4,
+                counter: 18,
+            }
+            .to_wire(),
         },
         EnvelopeFixture {
             name: "delete",
             op_hex: hex(&golden_delete_op()),
-            identity: OpIdentity { replica: 0xE2, counter: 5 }.to_wire(),
+            identity: OpIdentity {
+                replica: 0xE2,
+                counter: 5,
+            }
+            .to_wire(),
         },
     ];
 
@@ -298,8 +357,7 @@ fn fixtures() -> FixtureFile {
 
 /// Repo-root fixtures path (works from `rust/` cargo invocations).
 pub fn fixture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/protocol/v1/golden.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/protocol/v1/golden.json")
 }
 
 /// Writes the golden fixture file (generator mode).
@@ -348,12 +406,28 @@ fn golden_binary_frames_match_committed_bytes() {
         let committed_hex = committed["binary_frames"][i]["hex"]
             .as_str()
             .expect("binary fixture hex present");
-        assert_eq!(&fixture.hex, committed_hex, "binary fixture {} drifted", fixture.name);
+        assert_eq!(
+            &fixture.hex, committed_hex,
+            "binary fixture {} drifted",
+            fixture.name
+        );
     }
     for (i, fixture) in file.op_envelopes.iter().enumerate() {
-        let committed_hex = committed["op_envelopes"][i]["op_hex"].as_str().expect("envelope hex");
-        assert_eq!(&fixture.op_hex, committed_hex, "op envelope {} drifted", fixture.name);
-        let committed_id = committed["op_envelopes"][i]["identity"].as_str().expect("identity");
-        assert_eq!(&fixture.identity, committed_id, "op identity {} drifted", fixture.name);
+        let committed_hex = committed["op_envelopes"][i]["op_hex"]
+            .as_str()
+            .expect("envelope hex");
+        assert_eq!(
+            &fixture.op_hex, committed_hex,
+            "op envelope {} drifted",
+            fixture.name
+        );
+        let committed_id = committed["op_envelopes"][i]["identity"]
+            .as_str()
+            .expect("identity");
+        assert_eq!(
+            &fixture.identity, committed_id,
+            "op identity {} drifted",
+            fixture.name
+        );
     }
 }
