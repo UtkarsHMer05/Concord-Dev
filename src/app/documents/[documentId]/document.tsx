@@ -48,7 +48,7 @@ export const Document = ({ document }: DocumentProps) => {
           <Toolbar />
         </div>
         <div className="pt-[114px] print:pt-0">
-          <Editor crdtClient={crdtClient} seedPmDoc={(editorContent ?? null) as never} />
+          <Editor crdtClient={crdtClient} documentId={document.id} seedPmDoc={(editorContent ?? null) as never} />
         </div>
       </div>
     </DocumentSessionProvider>

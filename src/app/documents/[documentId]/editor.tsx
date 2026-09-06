@@ -28,11 +28,13 @@ import { Ruler } from './ruler';
 interface EditorProps {
   /** CRDT worker client; null on the server or when workers are unavailable. */
   crdtClient: CrdtClient | null;
+  /** Document the replica belongs to. */
+  documentId: string;
   /** Server-side seed (Phase 1 envelope content) for the first local open. */
   seedPmDoc: PmNode | null;
 }
 
-export const Editor = ({ crdtClient, seedPmDoc }: EditorProps) => {
+export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
   const { editorContent, content, settings, canEditContent } = useDocumentSession();
 
   const { setEditor } = useEditorStore();
@@ -128,6 +130,7 @@ export const Editor = ({ crdtClient, seedPmDoc }: EditorProps) => {
     const bridge = new CrdtEditorBridge({
       editor,
       client: crdtClient,
+      documentId,
       seedPmDoc,
     });
     bridgeRef.current = bridge;

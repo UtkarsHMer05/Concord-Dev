@@ -76,9 +76,15 @@ async function makeReplica(
     replicaId: bigint,
     documentId: string,
     factory: () => Promise<unknown>,
-    persistence: PersistenceAdapter = new MemoryPersistence(),
+    persistenceArg?: MemoryPersistence,
 ): Promise<Replica> {
-    const core = new CrdtWorkerCore({ documentId, replicaId, loadFactory: factory, persistence });
+    const persistence = persistenceArg ?? new MemoryPersistence();
+    const core = new CrdtWorkerCore({
+        documentId,
+        replicaId,
+        loadFactory: factory as never,
+        persistence,
+    });
     await core.handle({
         id: nextRequestId++,
         kind: "init",

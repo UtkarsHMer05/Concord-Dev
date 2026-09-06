@@ -31,9 +31,43 @@ export type BridgeState =
 export interface BridgeInit {
     editor: Editor;
     client: CrdtClient;
+    /** Document the replica belongs to. */
+    documentId: string;
     /** Server-side seed (Phase 1 envelope) for the first open of a document. */
     seedPmDoc: PmNode | null;
     onStatusChange?: (state: BridgeState) => void;
+}
+
+/**
+ * Stable per-browser+document replica identity (never zero; collision with a
+ * concurrent editor is astronomically unlikely for 63 random bits).
+ */
+function replicaIdForDocument(documentId: string): bigint {
+    const key = `concord.replica.${documentId}`;
+    try {
+        const stored = globalThis.localStorage?.getItem(key);
+        if (stored !== null && BigInt(stored) !== 0n) {
+            return BigInt(stored);
+        }
+    } catch {
+        // localStorage unavailable (private mode): per-session identity.
+    }
+    const bytes = new Uint8Array(8);
+    if (typeof globalThis.crypto?.getRandomValues === "function") {
+        globalThis.crypto.getRandomValues(bytes);
+    } else {
+        for (let i = 0; i < 8; ++i) {
+            bytes[i] = Math.floor(Math.random() * 256);
+        }
+    }
+    bytes[0] |= 1; // never zero
+    const value = new DataView(bytes.buffer).getBigUint64(0);
+    try {
+        globalThis.localStorage?.setItem(key, value.toString());
+    } catch {
+        // Best-effort persistence; the identity stays for this session.
+    }
+    return value;
 }
 
 export class CrdtEditorBridge {
@@ -52,37 +86,59 @@ export class CrdtEditorBridge {
      * state — or from the server snapshot when the local replica is new.
      */
     async start(): Promise<BridgeState> {
-        const { editor, client, seedPmDoc } = this.init;
-        await client.streamSize();
-        const json = await client.visibleJson();
-        const crdtBlocks = (JSON.parse(json) as { blocks: unknown }).blocks as CanonicalBlock[];
-        const crdtIsEmpty =
-            crdtBlocks.length <= 1 && (crdtBlocks[0]?.chars.length ?? 0) === 0;
+        const { editor, client, documentId, seedPmDoc } = this.init;
+        try {
+            await client.init(documentId, replicaIdForDocument(documentId));
+            const json = await client.visibleJson();
+            const crdtBlocks = (JSON.parse(json) as { blocks: unknown }).blocks as CanonicalBlock[];
+            const crdtIsEmpty =
+                crdtBlocks.length <= 1 && (crdtBlocks[0]?.chars.length ?? 0) === 0;
 
-        let seedBlocks: CanonicalBlock[];
-        if (!crdtIsEmpty) {
-            // Local replica exists: it is the editing truth (offline-first).
-            seedBlocks = crdtBlocks;
-        } else if (seedPmDoc !== null) {
-            const parsed = pmDocToBlocks(seedPmDoc);
-            if (!parsed.support.supported) {
-                this.state = { mode: "fallback", reason: `unsupported: ${parsed.support.unsupportedTypes.join(", ")}` };
-                this.init.onStatusChange?.(this.state);
-                return this.state;
+            let seedBlocks: CanonicalBlock[];
+            let seedIsNew = false;
+            if (!crdtIsEmpty) {
+                // Local replica exists: it is the editing truth (offline-first).
+                seedBlocks = crdtBlocks;
+            } else if (seedPmDoc !== null) {
+                const parsed = pmDocToBlocks(seedPmDoc);
+                if (!parsed.support.supported) {
+                    this.state = {
+                        mode: "fallback",
+                        reason: `unsupported: ${parsed.support.unsupportedTypes.join(", ")}`,
+                    };
+                    this.init.onStatusChange?.(this.state);
+                    return this.state;
+                }
+                seedBlocks = parsed.blocks;
+                seedIsNew = true;
+            } else {
+                seedBlocks = [{ type: "paragraph", attrs: { type: "paragraph" }, chars: [] }];
+                seedIsNew = true;
             }
-            seedBlocks = parsed.blocks;
-        } else {
-            seedBlocks = [{ type: "paragraph", attrs: { type: "paragraph" }, chars: [] }];
-        }
 
-        this.state = { mode: "crdt", lastBlocks: seedBlocks };
-        // Seed the editor: emitUpdate=false — this is not a local
-        // transaction, so the op pipeline is never re-entered (M038).
-        editor.commands.setContent(blocksToPmDoc(seedBlocks), {
-            emitUpdate: false,
-        });
-        this.init.onStatusChange?.(this.state);
-        return this.state;
+            // Seed the editor: emitUpdate=false — this is not a local
+            // transaction, so the op pipeline is never re-entered (M038).
+            editor.commands.setContent(blocksToPmDoc(seedBlocks), {
+                emitUpdate: false,
+            });
+            this.state = { mode: "crdt", lastBlocks: seedBlocks };
+
+            if (seedIsNew && !crdtIsEmpty) {
+                // First open: emit the seed content into the durable CRDT
+                // replica through the normal reconciliation path.
+                await this.onLocalTransaction(editor);
+            }
+            this.init.onStatusChange?.(this.state);
+            return this.state;
+        } catch (error) {
+            // Surface worker/persistence failures honestly (fallback).
+            this.state = {
+                mode: "fallback",
+                reason: error instanceof Error ? error.message : "worker init failed",
+            };
+            this.init.onStatusChange?.(this.state);
+            return this.state;
+        }
     }
 
     /**
