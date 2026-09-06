@@ -8,6 +8,7 @@ add_library(concord_crdt STATIC
   src/state_vector.cpp
   src/sha256.cpp
   src/digest.cpp
+  src/json.cpp
   src/errors.cpp
   src/executor.cpp
 )

@@ -18,3 +18,10 @@ target_compile_options(concord_crdt_tests PRIVATE ${CONCORD_WARNING_FLAGS} ${CON
 target_link_options(concord_crdt_tests PRIVATE ${CONCORD_SANITIZER_FLAGS})
 
 add_test(NAME concord_crdt_tests COMMAND concord_crdt_tests)
+
+# Golden-vector generator (P2-M032): emits the parity fixture to stdout.
+add_executable(golden_gen golden_gen.cpp)
+target_compile_features(golden_gen PRIVATE cxx_std_20)
+target_link_libraries(golden_gen PRIVATE concord::crdt)
+target_compile_options(golden_gen PRIVATE ${CONCORD_WARNING_FLAGS} ${CONCORD_SANITIZER_FLAGS})
+target_link_options(golden_gen PRIVATE ${CONCORD_SANITIZER_FLAGS})
