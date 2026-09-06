@@ -1,28 +1,43 @@
-//! HTTP layer: liveness/readiness/metrics and (later) the WebSocket upgrade.
+//! HTTP layer: liveness, readiness (Postgres-aware), metrics, and the
+//! WebSocket upgrade route (M021/M022).
 
-use std::sync::atomic::Ordering;
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
+use crate::auth::{TokenVerifier, VerifierSource};
 use crate::config::Config;
+use crate::db::pool::PoolHealth;
+use crate::db::repo::GatewayRepo;
+use crate::sessions::SessionRegistry;
 use crate::telemetry::Metrics;
+use crate::ws;
 
+/// Shared application state (all clones are cheap Arc handles).
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Config,
+    pub config: Arc<Config>,
+    pub registry: Arc<SessionRegistry>,
+    pub repo: Arc<GatewayRepo>,
+    pub verifier: Arc<TokenVerifier<VerifierSource>>,
+    /// Drain flag (P3-M041): set on SIGTERM/SIGINT before closing.
+    pub draining: Arc<AtomicBool>,
 }
 
-/// Base router. WebSocket routes + readiness are added by later milestones
-/// (M021/M022); the health endpoint never bypasses readiness semantics.
-pub fn router(config: Config) -> Router {
+pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health/live", get(live))
+        .route("/api/v1/health/ready", get(ready))
         .route("/api/v1/metrics", get(metrics))
-        .with_state(AppState { config })
+        .route("/api/v1/sync", get(ws::upgrade))
+        .with_state(state)
 }
 
 async fn live() -> Json<Value> {
@@ -33,13 +48,25 @@ async fn live() -> Json<Value> {
     }))
 }
 
+/// Readiness (M021): reflects the Postgres dependency — distinguishes
+/// "process alive" (live) from "DB usable" (ready). No internals leaked.
+async fn ready(State(app): State<AppState>) -> (StatusCode, Json<Value>) {
+    match app.repo.db.health().await {
+        PoolHealth::Healthy => (StatusCode::OK, json!({"status": "ready"}).into()),
+        PoolHealth::Unhealthy => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"status": "not_ready", "reason": "dependency_unavailable"}).into(),
+        ),
+    }
+}
+
 /// Local metrics endpoint (M042): counters as plain text. No secrets.
-pub async fn metrics(State(_app): State<AppState>) -> (StatusCode, String) {
+async fn metrics(State(_app): State<AppState>) -> (StatusCode, String) {
     let m = Metrics::global();
     let mut out = String::new();
     macro_rules! emit {
         ($name:literal, $expr:expr) => {
-            out.push_str(&format!("{name} {value}\n", name = $name, value = $expr));
+            out.push_str(&format!("{} {}\n", $name, $expr));
         };
     }
     emit!(
@@ -88,3 +115,8 @@ pub async fn metrics(State(_app): State<AppState>) -> (StatusCode, String) {
     );
     (StatusCode::OK, out)
 }
+
+/// WebSocket upgrade route requires ConnectInfo — helper for the server
+/// builder (main.rs uses `into_make_service_with_connect_info`).
+#[allow(dead_code)]
+fn assert_connect_info_type(_upgrade: WebSocketUpgrade, _connect: ConnectInfo<SocketAddr>) {}

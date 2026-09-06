@@ -35,7 +35,7 @@ pub struct UserId(pub Uuid);
 
 #[derive(Debug, Clone)]
 pub struct GatewayRepo {
-    db: super::Db,
+    pub db: super::Db,
 }
 
 /// Result of an idempotent operation-batch insert (M018/M019).

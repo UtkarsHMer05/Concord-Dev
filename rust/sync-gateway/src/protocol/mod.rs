@@ -14,12 +14,12 @@
 //! in addition to the transport-level frame-size cap.
 
 pub mod control;
-mod data;
+pub mod data;
 pub mod envelope;
-mod error;
+pub mod error;
 #[cfg(test)]
 mod golden;
-mod limits;
+pub mod limits;
 
 #[cfg(test)]
 mod tests;

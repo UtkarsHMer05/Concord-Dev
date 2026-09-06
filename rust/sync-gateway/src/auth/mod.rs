@@ -44,9 +44,22 @@ struct ClerkClaims {
     sub: String,
 }
 
-/// JWKS source: real HTTPS fetcher or test injector.
+/// JWKS source: real HTTPS fetcher or test injector. Async-native (a
+/// boxed future — no block_in_place anywhere).
 pub trait JwksSource: Send + Sync {
-    fn load_jwks(&self) -> Result<JwkSet, AuthError>;
+    fn load_jwks(&self) -> futures_util::future::BoxFuture<'static, Result<JwkSet, AuthError>>;
+}
+
+/// Static JWKS source for tests and tooling (no network).
+pub struct StaticJwks(pub JwkSet);
+
+impl JwksSource for StaticJwks {
+    fn load_jwks(&self) -> futures_util::future::BoxFuture<'static, Result<JwkSet, AuthError>> {
+        let set = JwkSet {
+            keys: self.0.keys.clone(),
+        };
+        Box::pin(async move { Ok(set) })
+    }
 }
 
 /// HTTPS JWKS source for a Clerk issuer (`{issuer}/.well-known/jwks.json`).
@@ -63,37 +76,45 @@ impl HttpJwks {
 }
 
 impl JwksSource for HttpJwks {
-    fn load_jwks(&self) -> Result<JwkSet, AuthError> {
-        // The gateway is tokio-native; block_on from a fresh current-thread
-        // runtime is safe here because load_jwks is only called from async
-        // contexts on the worker threads (never from within another
-        // runtime's reactor thread), and reqwest blocks only its own I/O.
+    fn load_jwks(&self) -> futures_util::future::BoxFuture<'static, Result<JwkSet, AuthError>> {
         let url = self.url.clone();
-        tokio::task::block_in_place(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
+        Box::pin(async move {
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
                 .build()
                 .map_err(|_| AuthError::JwksUnavailable)?;
-            rt.block_on(async {
-                let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(10))
-                    .build()
-                    .map_err(|_| AuthError::JwksUnavailable)?;
-                client
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|_| AuthError::JwksUnavailable)?
-                    .json::<JwkSet>()
-                    .await
-                    .map_err(|_| AuthError::JwksUnavailable)
-            })
+            client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|_| AuthError::JwksUnavailable)?
+                .json::<JwkSet>()
+                .await
+                .map_err(|_| AuthError::JwksUnavailable)
         })
     }
 }
 
+/// Verifier source used by the gateway: HTTPS in production, injected
+/// static keys in tests.
+pub enum VerifierSource {
+    Http(HttpJwks),
+    Static(StaticJwks),
+}
+
+impl JwksSource for VerifierSource {
+    fn load_jwks(&self) -> futures_util::future::BoxFuture<'static, Result<JwkSet, AuthError>> {
+        match self {
+            VerifierSource::Http(s) => s.load_jwks(),
+            VerifierSource::Static(s) => s.load_jwks(),
+        }
+    }
+}
+
 /// Verifies Clerk session tokens against a cached, refreshable JWKS.
-pub struct TokenVerifier<S: JwksSource> {
+/// Generic over the JWKS source (HTTPS in production; injected keys in
+/// tests).
+pub struct TokenVerifier<S: JwksSource = HttpJwks> {
     issuer: String,
     source: S,
     keys: Mutex<HashMap<String, Arc<DecodingKey>>>,
@@ -152,14 +173,10 @@ impl<S: JwksSource> TokenVerifier<S> {
         validation.validate_nbf = true;
         validation.leeway = 5;
 
-        // Verification is CPU-bound and short; block_in_place keeps the
-        // async signature without spanning awaits across the mutex guard.
-        let key = tokio::task::block_in_place(|| self.key_for(&kid)).ok_or(AuthError::Invalid {
+        let key = self.key_for(&kid).await.ok_or(AuthError::Invalid {
             reason: "unknown key id",
         })?;
-        let data = tokio::task::block_in_place(|| {
-            decode::<ClerkClaims>(token, &key, &validation).map_err(classify)
-        })?;
+        let data = decode::<ClerkClaims>(token, &key, &validation).map_err(classify)?;
 
         let sub = data.claims.sub;
         if sub.is_empty() {
@@ -168,18 +185,21 @@ impl<S: JwksSource> TokenVerifier<S> {
         Ok(Principal { clerk_user_id: sub })
     }
 
-    fn key_for(&self, kid: &str) -> Option<Arc<DecodingKey>> {
-        if let Ok(keys) = self.keys.lock() {
+    async fn key_for(&self, kid: &str) -> Option<Arc<DecodingKey>> {
+        // Fast path: cached key (lock released before any await).
+        {
+            let keys = self.keys.lock().ok()?;
             if let Some(k) = keys.get(kid) {
                 return Some(Arc::clone(k));
             }
         }
-        // Unknown kid: bounded refresh (key rotation).
+        // Unknown kid: bounded refresh (key rotation). The lock is NOT held
+        // across the await.
         if self.refresh_count.load(Ordering::Relaxed) >= self.max_refreshes as u64 {
             return None;
         }
         self.refresh_count.fetch_add(1, Ordering::Relaxed);
-        let set = self.source.load_jwks().ok()?;
+        let set = self.source.load_jwks().await.ok()?;
         let mut keys = self.keys.lock().ok()?;
         keys.clear();
         for jwk in set.keys {
@@ -233,20 +253,10 @@ mod tests {
     use jsonwebtoken::{encode, EncodingKey, Header};
     use serde::Serialize;
 
-    struct StaticJwks(JwkSet);
-
-    impl JwksSource for StaticJwks {
-        fn load_jwks(&self) -> Result<JwkSet, AuthError> {
-            Ok(JwkSet {
-                keys: self.0.keys.clone(),
-            })
-        }
-    }
-
     struct FailingJwks;
     impl JwksSource for FailingJwks {
-        fn load_jwks(&self) -> Result<JwkSet, AuthError> {
-            Err(AuthError::JwksUnavailable)
+        fn load_jwks(&self) -> futures_util::future::BoxFuture<'static, Result<JwkSet, AuthError>> {
+            Box::pin(async { Err(AuthError::JwksUnavailable) })
         }
     }
 
@@ -350,6 +360,16 @@ mod tests {
 
     const KID: &str = "test-key-1";
     const ISSUER: &str = "https://test.clerk.accounts.dev";
+
+    #[test]
+    fn probe_decode_header_accepts_signed_token() {
+        let key = test_encoding_key();
+        let token = sign(&claims_now("user_x", ISSUER), &key, KID);
+        assert!(
+            jsonwebtoken::decode_header(&token).is_ok(),
+            "decode_header must parse"
+        );
+    }
 
     #[test]
     fn valid_token_verifies_and_extracts_sub() {
@@ -478,16 +498,21 @@ mod tests {
             state: Arc<Mutex<u8>>,
         }
         impl JwksSource for RotatingJwks {
-            fn load_jwks(&self) -> Result<JwkSet, AuthError> {
-                let mut state = self.state.lock().expect("lock");
-                *state += 1;
-                // Before rotation: key-1 only. After rotation: key-2 only.
-                let jwk = if *state >= 2 {
-                    jwks_with_kid("rotated-kid", KEY2)
-                } else {
-                    jwks_with_kid("test-key-1", KEY1)
-                };
-                Ok(jwk)
+            fn load_jwks(
+                &self,
+            ) -> futures_util::future::BoxFuture<'static, Result<JwkSet, AuthError>> {
+                let state = self.state.clone();
+                Box::pin(async move {
+                    let mut state = state.lock().expect("lock");
+                    *state += 1;
+                    // Before rotation: key-1 only. After rotation: key-2 only.
+                    let jwk = if *state >= 2 {
+                        jwks_with_kid("rotated-kid", KEY2)
+                    } else {
+                        jwks_with_kid("test-key-1", KEY1)
+                    };
+                    Ok(jwk)
+                })
             }
         }
 
