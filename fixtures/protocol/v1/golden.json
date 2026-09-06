@@ -1,0 +1,147 @@
+{
+  "wire_version": 1,
+  "generated_by": "rust/sync-gateway/src/protocol/golden.rs",
+  "text_frames": [
+    {
+      "name": "hello",
+      "wire": "{\"v\":1,\"id\":\"req-1\",\"type\":\"hello\",\"payload\":{\"clientProtocolVersion\":1}}"
+    },
+    {
+      "name": "hello_ack",
+      "wire": "{\"v\":1,\"id\":\"req-1\",\"type\":\"hello_ack\",\"payload\":{\"protocolVersion\":1,\"connectionId\":\"conn-0f1e2d3c\"}}"
+    },
+    {
+      "name": "authenticate",
+      "wire": "{\"v\":1,\"type\":\"authenticate\",\"payload\":{\"token\":\"eyJhbGciOiJSUzI1NiJ9.test-token\"}}"
+    },
+    {
+      "name": "authenticated",
+      "wire": "{\"v\":1,\"type\":\"authenticated\",\"payload\":{\"userId\":\"5f0e9a4b-0000-4000-8000-000000000001\",\"clerkUserId\":\"user_2testAAAA\",\"orgId\":\"7c1d8e5f-0000-4000-8000-000000000002\"}}"
+    },
+    {
+      "name": "join_document",
+      "wire": "{\"v\":1,\"id\":\"j-7\",\"type\":\"join_document\",\"payload\":{\"documentId\":\"3a2b1c0d-0000-4000-8000-000000000003\",\"stateSummary\":[{\"replicaId\":\"212\",\"sequence\":\"40\"},{\"replicaId\":\"340\",\"sequence\":\"7\"}]}}"
+    },
+    {
+      "name": "join_accepted",
+      "wire": "{\"v\":1,\"id\":\"j-7\",\"type\":\"join_accepted\",\"payload\":{\"documentId\":\"3a2b1c0d-0000-4000-8000-000000000003\",\"role\":\"editor\",\"durableCursor\":\"9223372036854775\"}}"
+    },
+    {
+      "name": "sync_request",
+      "wire": "{\"v\":1,\"type\":\"sync_request\",\"payload\":{\"cursor\":\"9223372036854775\"}}"
+    },
+    {
+      "name": "sync_done",
+      "wire": "{\"v\":1,\"type\":\"sync_done\",\"payload\":{}}"
+    },
+    {
+      "name": "durable_ack",
+      "wire": "{\"v\":1,\"id\":\"b-42\",\"type\":\"durable_ack\",\"payload\":{\"batchId\":\"42\",\"opIds\":[\"212:41\",\"212:42\"]}}"
+    },
+    {
+      "name": "ping",
+      "wire": "{\"v\":1,\"type\":\"ping\",\"payload\":{\"nonce\":\"314159\"}}"
+    },
+    {
+      "name": "pong",
+      "wire": "{\"v\":1,\"type\":\"pong\",\"payload\":{\"nonce\":\"314159\"}}"
+    },
+    {
+      "name": "error",
+      "wire": "{\"v\":1,\"id\":\"j-7\",\"type\":\"error\",\"payload\":{\"code\":\"forbidden\",\"message\":\"no access to this document\",\"requestId\":\"j-7\"}}"
+    },
+    {
+      "name": "server_draining",
+      "wire": "{\"v\":1,\"type\":\"server_draining\",\"payload\":{\"reason\":\"shutdown\",\"graceMs\":5000}}"
+    }
+  ],
+  "binary_frames": [
+    {
+      "name": "client_ops",
+      "hex": "0120000000000000002a0003000000200101d400000000000000110000000000000009000000000000000000010168000000004c0101d40000000000000012000000000000000a0000000000000001d40000000000000011000000000000000002010400000000000000747970650109000000000000007061726167726170680000002a0102e20000000000000005000000000000000b00000000000000d4000000000000001100000000000000",
+      "identities": [
+        "212:17",
+        "212:18",
+        "226:5"
+      ]
+    },
+    {
+      "name": "sync_batch",
+      "hex": "01210000000000000063010003000000200101d400000000000000110000000000000009000000000000000000010168000000004c0101d40000000000000012000000000000000a0000000000000001d40000000000000011000000000000000002010400000000000000747970650109000000000000007061726167726170680000002a0102e20000000000000005000000000000000b00000000000000d4000000000000001100000000000000"
+    }
+  ],
+  "error_codes": [
+    {
+      "name": "code",
+      "code": "unauthorized",
+      "fatal": true
+    },
+    {
+      "name": "code",
+      "code": "forbidden",
+      "fatal": false
+    },
+    {
+      "name": "code",
+      "code": "unsupported_protocol_version",
+      "fatal": true
+    },
+    {
+      "name": "code",
+      "code": "unknown_frame_type",
+      "fatal": false
+    },
+    {
+      "name": "code",
+      "code": "invalid_state",
+      "fatal": false
+    },
+    {
+      "name": "code",
+      "code": "malformed_frame",
+      "fatal": false
+    },
+    {
+      "name": "code",
+      "code": "payload_too_large",
+      "fatal": true
+    },
+    {
+      "name": "code",
+      "code": "rate_limited",
+      "fatal": false
+    },
+    {
+      "name": "code",
+      "code": "database_unavailable",
+      "fatal": false
+    },
+    {
+      "name": "code",
+      "code": "server_draining",
+      "fatal": false
+    },
+    {
+      "name": "code",
+      "code": "internal_error",
+      "fatal": false
+    }
+  ],
+  "op_envelopes": [
+    {
+      "name": "insert_text",
+      "op_hex": "0101d40000000000000011000000000000000900000000000000000001016800",
+      "identity": "212:17"
+    },
+    {
+      "name": "insert_delimiter",
+      "op_hex": "0101d40000000000000012000000000000000a0000000000000001d4000000000000001100000000000000000201040000000000000074797065010900000000000000706172616772617068",
+      "identity": "212:18"
+    },
+    {
+      "name": "delete",
+      "op_hex": "0102e20000000000000005000000000000000b00000000000000d4000000000000001100000000000000",
+      "identity": "226:5"
+    }
+  ]
+}
