@@ -94,7 +94,8 @@ export interface SyncRequest {
   cursor: string;
 }
 
-export interface SyncDone {}
+/** Empty payload marker for sync_done (no fields). */
+export type SyncDone = { readonly __syncDone?: undefined };
 
 export interface DurableAck {
   batchId: string;
@@ -403,6 +404,9 @@ export function encodeClientOps(frame: ClientOpsFrame): Uint8Array {
   return out;
 }
 
+/** Transport-facing alias for the client_ops encoder. */
+export const encodeClientOpsFrame = encodeClientOps;
+
 // ---------------------------------------------------------------------------
 // Strict shape validation helpers
 // ---------------------------------------------------------------------------
@@ -421,8 +425,17 @@ function isEnum<T extends string>(...values: readonly T[]): Check {
   return (v) => (typeof v === "string" && (values as readonly string[]).includes(v) ? null : `expected one of ${values.join("|")}`);
 }
 
-function optional(check: Check): Check {
-  return (v) => (v === undefined ? null : check(v));
+/**
+ * Marks a shape key optional: absent (not in object) OR undefined passes;
+ * any present value must satisfy the inner check. Used by isStrict to
+ * distinguish "key may be absent" from "key required".
+ */
+function optional(check: Check): Check & { __optional?: true } {
+  const wrapped = ((v: unknown) => (v === undefined ? null : check(v))) as Check & {
+    __optional?: true;
+  };
+  wrapped.__optional = true;
+  return wrapped;
 }
 
 function arrayOf(check: Check): Check {
@@ -443,8 +456,13 @@ function isStrict(shape: Record<string, Check>): Check {
     }
     const obj = v as Record<string, unknown>;
     for (const key of Object.keys(shape)) {
-      if (!(key in obj)) return `missing field '${key}'`;
-      const err = shape[key](obj[key]);
+      const check = shape[key];
+      const isOptional = "__optional" in check;
+      if (!(key in obj)) {
+        if (isOptional) continue; // optional keys may be absent
+        return `missing field '${key}'`;
+      }
+      const err = check(obj[key]);
       if (err !== null) return `field '${key}': ${err}`;
     }
     for (const key of Object.keys(obj)) {
