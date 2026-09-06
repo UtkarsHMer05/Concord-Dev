@@ -1,6 +1,6 @@
 # Concord — Local Operation Protocol (Phase 2)
 
-Status: Authoritative (Phase 2 scope)
+Status: Authoritative (implemented — native + WASM parity-tested)
 Version: protocol v1
 Last updated: 2026-09-06
 

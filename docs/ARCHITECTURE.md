@@ -1,7 +1,7 @@
 # Concord — Architecture
 
-Status: Authoritative (Phase 1 completion version)
-Version: 1.2
+Status: Authoritative (Phase 2 completion version)
+Version: 1.3
 Last updated: 2026-09-06
 
 This document distinguishes three architecture states at all times:
@@ -15,22 +15,28 @@ Nothing in the TARGET section should be read as an implemented capability.
 
 ---
 
-## 1. CURRENT — PostgreSQL control plane with server-side authorization (Phase 1 complete)
+## 1. CURRENT — Local-first CRDT client on the PostgreSQL control plane (Phase 2 complete)
 
-The CURRENT architecture is the result of Phases 0–1: the tutorial stack is
-fully modernized (Next.js 16, React 19 stable, Tailwind 4, TipTap 3, Clerk 7),
-**Liveblocks and Convex are both removed entirely**, and all durable
-application data lives in PostgreSQL behind a server-only data layer with
-explicit authorization (OWNER / EDITOR / COMMENTER / VIEWER).
+The CURRENT architecture is the result of Phases 0–2: the modernized product
+(Next.js 16, React 19, TipTap 3, Clerk 7) runs on the Phase 1 PostgreSQL
+control plane with server-side authorization, **plus a local-first
+collaboration core**: a C++20 CRDT engine compiled natively and to
+WebAssembly, executing in a Web Worker with IndexedDB local durability and a
+TipTap adapter. Editing is offline-first; the Phase 1 server save runs as a
+transitional mirror of the visible content.
 
 ```mermaid
 flowchart TD
     subgraph Browser["Browser (client)"]
         UI["Next.js 16 / React 19 UI"]
-        TIPTAP["TipTap 3 editor<br/>(local undo/redo)"]
-        SEAM["Collaboration seam<br/>DocumentSessionProvider"]
-        UI --> TIPTAP --> SEAM
-        LS[("localStorage<br/>margins (transitional)")] --> SEAM
+        TIPTAP["TipTap 3 editor"]
+        BRIDGE["Editor bridge<br/>(diff/reconcile)"]
+        UI --> TIPTAP
+        TIPTAP <-->|"local transactions / setContent(emitUpdate=false)"| BRIDGE
+        BRIDGE <-->|"typed protocol"| WORKER["Web Worker<br/>CrdtWorkerCore"]
+        WORKER --> WASM["Concord CRDT core<br/>(C++20 → WebAssembly)"]
+        WORKER --> IDB[("IndexedDB<br/>snapshot + durable op log")]
+        LS[("localStorage<br/>margins (transitional)")] --> TIPTAP
     end
 
     subgraph Server["Next.js server (server-only)"]
@@ -83,15 +89,33 @@ flowchart TD
   import guard keeps it out of client bundles).
 - No third-party collaboration or data service receives document content.
 
-### 1.3 Known transitional limitations (honest state)
+### 1.3 Current CRDT layer components
 
-- Realtime, presence, comments, inbox: unavailable by design (DEC-016).
-- Content persistence is whole-document JSONB with optimistic concurrency —
-  a stale writer gets a typed conflict instead of overwriting (DEC-022);
-  the CRDT update log (Phase 2) replaces this path.
-- Margins are per-browser (localStorage), not shared (DEC-017).
-- Sharing UI does not exist yet; the ACL service is implemented and tested
-  (foundation for the later sharing surface).
+| Component | Responsibility |
+|---|---|
+| `cpp/crdt` | C++20 CRDT engine: YATA-style sequence CRDT over items (text + block delimiters), tombstone deletes, LWW attribute registers, pending-op buffer, state summaries, canonical serialization, versioned snapshots, SHA-256 state digests |
+| `wasm/` | Emscripten build of the same core (no semantic fork); narrow C ABI (opaque handles, explicit buffers, structured errors) |
+| `src/lib/crdt/runtime.ts` | TypeScript wrapper — the only engine boundary for app code |
+| `src/lib/crdt/worker/` | Web Worker runtime (typed protocol, bounded pending map), IndexedDB persistence (snapshot + durable per-document op log), reload restoration with allocation-state recovery |
+| `src/lib/crdt/pm-model.ts`, `adapter.ts`, `editor-bridge.ts` | TipTap JSON ⇄ canonical blocks, block/char diff reconciliation, local/remote editor bridge (feedback-loop prevention via emitUpdate=false) |
+| `src/lib/crdt` tests | Native golden vectors, WASM parity, worker durability/reload, adapter mapping, multi-replica harness, offline-first flow |
+
+### 1.4 Known transitional limitations (honest state)
+
+- Realtime **transport** does not exist yet (Phase 3): multi-replica exchange
+  is proven by the deterministic harness, not a network.
+- The collaborative subset is paragraphs, headings (1–6), and basic text
+  marks (bold/italic/underline/strikethrough). Documents containing
+  images/tables/lists/… fall back to the Phase 1 persistence path — detected,
+  never silently corrupted.
+- The Phase 1 whole-document server save still runs as a mirror; the
+  PostgreSQL content column remains the cross-device source of truth until
+  the Phase 3 gateway owns the update log.
+- Undo/redo uses the scoped local-inverse model (reconciliation emits
+  inverse operations from TipTap's local history), not collaborative undo.
+- Margins are per-browser (localStorage), not shared.
+- Tombstones are retained until a future compaction design (measured growth
+  in benchmarks).
 
 ---
 
@@ -109,7 +133,14 @@ Phase 0. See git history for details.
 The fully modernized stack with Liveblocks still present, verified end-to-end
 (all 20 verification-matrix items) and frozen at the tag before extraction.
 
-### 2.3 Phase 0 completion state (`phase-0-complete`, historical)
+### 2.3 Phase 1 completion state (`phase-1-complete`, historical)
+
+PostgreSQL control plane: server-only data layer, Clerk identity projection,
+explicit document authorization with optimistic-concurrency content saves and
+audit events. Superseded by Phase 2 (which keeps the control plane and adds
+the local-first CRDT layer on top).
+
+### 2.4 Phase 0 completion state (`phase-0-complete`, historical)
 
 Liveblocks-free product shell with Convex as transitional persistence:
 documents table with owner-or-organization function-level checks, versioned

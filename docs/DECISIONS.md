@@ -464,6 +464,87 @@ retained and will not be removed.
 
 ## Phase 2 additions (2026-09-06)
 
+## DEC-024 — CRDT concurrency boundary: single-writer engine, bounded offload executor
+
+- **Status:** Accepted
+- **Decision:** The CRDT `Doc` is single-writer — all mutation flows through
+  one thread per replica (the Web Worker on the browser; the native test
+  harness in tests). No synchronization is added to the engine API.
+  CPU-bound auxiliary work (future compaction, batch snapshot hashing) may
+  offload to a bounded worker pool (`TaskExecutor`: fixed threads, bounded
+  queue, stop-token cancellation, exception containment, deterministic
+  shutdown — infrastructure, not a performance claim). TSan runs on the
+  executor suite.
+- **Context:** M027 required an explicit concurrency boundary before any
+  threading; casual multi-writer engines are a classic CRDT bug source.
+- **Alternatives:** Synchronized multi-writer Doc (rejected: lock discipline
+  across 8 mutation paths for no Phase 2 benefit); lock-free structures
+  (rejected: complexity without a measured bottleneck).
+- **Rationale:** One replica = one writer matches the deployment model (one
+  worker per document per browser) and keeps the engine's invariants
+  testable; offloading needs are isolated in a tested primitive.
+- **Consequences:** The embedding layer must serialize engine access (the
+  worker message loop does); native embedders get the same contract.
+- **Evidence:** tests/crdt + executor tests; TSan suite green.
+- **Revisit conditions:** Phase 3+ gateway sharing an engine across sessions.
+
+## DEC-025 — Phase 2 TipTap integration: reconciliation adapter over the collaborative subset
+
+- **Status:** Accepted
+- **Decision:** The editor connects to the CRDT through a diff/reconcile
+  adapter: local TipTap transactions are diffed against the canonical CRDT
+  blocks and emitted as stream-space operations; remote (harness/future
+  transport) updates render through `setContent(emitUpdate=false)` so
+  remote-applied changes never re-enter the op pipeline (feedback-loop
+  prevention). The collaborative subset is paragraphs, headings 1–6, and
+  bold/italic/underline/strikethrough. Documents containing unsupported
+  node types (images, tables, lists, blockquote, code) are detected and the
+  session falls back to the Phase 1 persistence path. Undo/redo rides
+  TipTap's local history — the reconciliation emits the inverse operations
+  (scoped local-inverse model).
+- **Context:** M038–M042; a tree CRDT mapping the full TipTap node model was
+  rejected for Phase 2 scope (DEC-023 alternatives), so the subset must be
+  explicit and the fallback honest.
+- **Alternatives:** Disable unsupported features in the editor (rejected for
+  Phase 2: would regress the working product); map tables/images into
+  opaque CRDT blobs (deferred: no convergence semantics to test).
+- **Rationale:** The product keeps its full editing surface; collaborative
+  guarantees apply where the model can represent content truthfully.
+- **Consequences:** Cross-device sync covers the subset; unsupported content
+  remains single-device (Phase 1 mirror) until later phases extend the
+  model. paste of plain text and formatted subset content works via the
+  same diff path; selection replacement is a multi-char diff.
+- **Evidence:** tests/crdt/adapter.test.ts (mapping, reconciliation, marks,
+  splits, heading changes); pm-model unsupported detection.
+- **Revisit conditions:** Later-phase tree-CRDT adoption or per-feature
+  model extensions.
+
+## DEC-026 — WASM ABI and browser runtime boundary
+
+- **Status:** Accepted
+- **Decision:** The browser consumes the CRDT core through (a) a narrow C ABI
+  over the Emscripten build — opaque handles, explicit grow-and-retry
+  output buffers, structured error codes, no STL exposure; (b) a TypeScript
+  runtime wrapper (`src/lib/crdt/runtime.ts`) that owns memory and hides
+  all Emscripten details; (c) a Web Worker (`CrdtWorkerCore`) holding the
+  engine + IndexedDB persistence; (d) the editor bridge on the main thread.
+  Generating calls stash their serialized op (`concord_last_op`) so sizing
+  retries never create duplicate operations.
+- **Context:** M030–M034; the C++ core must power native and WASM with
+  identical semantics (validated by golden vectors), and heavy CRDT work
+  must never block the UI thread.
+- **Alternatives:** Emscripten's WebIDL/bindings generator (rejected: broad
+  surface, harder memory discipline); running the engine on the main thread
+  (rejected: blocks the UI); Comlink-style RPC (rejected: another layer
+  over an already-typed protocol).
+- **Rationale:** The smallest boundary that keeps ownership explicit;
+  worker isolation gives the UI thread freedom from CRDT work entirely.
+- **Consequences:** Engine access is single-threaded per worker (DEC-024);
+  the ABI is versioned with the protocol.
+- **Evidence:** parity tests (native vs WASM golden vectors); worker
+  latency baselines (metrics ledger: 0.003 ms/op insert).
+- **Revisit conditions:** ABI extensions for Phase 3 transport features.
+
 ## DEC-023 — CRDT model: operation-based sequence CRDT (YATA-style ordering) over a flat item stream with block-delimiter items
 
 - **Status:** Accepted

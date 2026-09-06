@@ -63,6 +63,15 @@ test suites green. See `docs/DATABASE.md`, `docs/AUTHORIZATION.md`,
 
 ## Phase 2 — C++ CRDT core + WASM + local-first client
 
+**Status: COMPLETE (2026-09-06).** C++20 sequence CRDT engine (native +
+WASM, one semantic core, golden-vector parity), deterministic simulator
+and seeded property suites, fuzz targets with a standalone driver,
+ASan/UBSan/TSan clean, Web Worker runtime with IndexedDB durable op log
+and reload restoration, TipTap reconciliation adapter over the
+collaborative subset with honest fallback, multi-replica convergence and
+offline-first flow proven in the worker-level harness. See DEC-023…DEC-026
+and docs/TESTING.md / docs/BENCHMARKS.md for the full verification surface.
+
 - **Objective:** Build the collaboration algorithm foundation.
 - **Major deliverables:** C++20/23 library (CMake/Ninja); deterministic CRDT
   representation (replicas, operations, dedup, merge, clock/vector concepts);

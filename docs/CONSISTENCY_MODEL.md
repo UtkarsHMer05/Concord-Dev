@@ -1,7 +1,7 @@
 # Concord — Consistency Model (Phase 2)
 
 Status: Authoritative
-Version: 0.1 (Phase 2 scope)
+Version: 1.0 (implemented)
 Last updated: 2026-09-06
 
 This document defines the correctness contract for Concord's collaborative
@@ -100,8 +100,15 @@ serialize canonically. Gaps are representable and reported.
 
 ## 6. Storage authority split
 
-| Data | Authoritative store (Phase 2) |
+| Data | Authoritative store (Phase 2, implemented) |
 |---|---|
 | Document metadata, ownership, ACLs, audit | PostgreSQL (Phase 1 control plane) |
-| Collaborative document content (local replica state) | IndexedDB (snapshot + operation log) |
-| PostgreSQL `documents.content` (Phase 1 JSONB envelope) | Transitional server-side persistence; Phase 2 keeps it updated through the existing save path and will reconcile it with the CRDT state in Phase 3 |
+| Collaborative document content (local replica state) | IndexedDB (snapshot + durable operation log, per document) |
+| PostgreSQL `documents.content` (Phase 1 JSONB envelope) | Transitional server mirror of the visible content (kept updated by the existing debounced save); becomes the server-side reconciliation source for the Phase 3 update log |
+
+Implementation status: every invariant in §2 is enforced by the engine and
+exercised by automated tests (native unit suite, seeded property corpus,
+deterministic simulator, native/WASM parity, worker durability/reload,
+multi-replica harness, offline-first flow). The delivery assumptions in §1
+are exercised through the in-memory test transport; the real transport
+arrives in Phase 3.

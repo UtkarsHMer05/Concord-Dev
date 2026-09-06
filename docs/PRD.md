@@ -104,9 +104,15 @@ the engineering depth is for technical evaluators.
   (JSON, HTML, TXT, print-to-PDF).
 - FR-4 Collaboration: concurrent multi-client editing of the same document with
   convergence; presence (avatars); comments/threads anchored to content;
-  comment notifications.
+  comment notifications. STATUS (Phase 2): the CRDT convergence core is
+  implemented and proven by deterministic multi-replica testing; the realtime
+  transport arrives in Phase 3.
 - FR-5 Offline: document editing works with no network connection; state is
-  persisted locally; reconnection replays/converges.
+  persisted locally; reconnection replays/converges. STATUS (Phase 2):
+  implemented for the collaborative content subset (paragraphs, headings,
+  basic text marks) via IndexedDB-backed local replicas; documents with
+  unsupported content (tables, images, lists) continue via the server-mirror
+  path until later phases extend the model.
 - FR-6 Sharing/authorization: document-level roles OWNER / EDITOR / COMMENTER /
   VIEWER; role changes take effect for active sessions.
 - FR-7 History: durable update log enables revision reconstruction, viewing,
@@ -297,9 +303,12 @@ the engineering depth is for technical evaluators.
 
 - Product shell: Next.js, React, TipTap, Radix/shadcn UI, Tailwind.
 - Identity: Clerk (authentication only).
+- Collaboration core (Phase 2): C++20 CRDT engine (native + WebAssembly),
+  Web Worker runtime, IndexedDB local durability, TipTap reconciliation
+  adapter.
 - Removed: Liveblocks (Phase 0), Convex (Phase 1).
-- Infrastructure: PostgreSQL 18 (durable truth, via Docker Compose locally),
-  Drizzle ORM + tracked SQL migrations.
+- Infrastructure: PostgreSQL 18 (control plane + transitional content mirror,
+  via Docker Compose locally), Drizzle ORM + tracked SQL migrations.
 - External services: Clerk (identity); object storage if needed (Phase 7).
 
 ## 25. Phase mapping
