@@ -9,6 +9,7 @@ add_library(concord_crdt STATIC
   src/sha256.cpp
   src/digest.cpp
   src/errors.cpp
+  src/executor.cpp
 )
 
 add_library(concord::crdt ALIAS concord_crdt)

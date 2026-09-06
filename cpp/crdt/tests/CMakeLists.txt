@@ -9,6 +9,7 @@ add_executable(concord_crdt_tests
   test_serialize.cpp
   test_snapshot.cpp
   test_digest.cpp
+  test_executor.cpp
 )
 
 target_compile_features(concord_crdt_tests PRIVATE cxx_std_20)
