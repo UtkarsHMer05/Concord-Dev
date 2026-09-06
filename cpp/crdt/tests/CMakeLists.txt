@@ -5,6 +5,7 @@ add_executable(concord_crdt_tests
   test_ids.cpp
   test_doc.cpp
   test_integration.cpp
+  test_property_sim.cpp
   test_serialize.cpp
   test_snapshot.cpp
   test_digest.cpp
