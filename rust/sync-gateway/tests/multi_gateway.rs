@@ -730,3 +730,321 @@ async fn slow_consumer_does_not_stall_global_collaboration() {
 }
 
 fn void<T>(_: T) {}
+
+// ---------------------------------------------------------------------------
+// P4-M036 — broker consumer lag + backlog drain (bounded, duplicate-tolerant)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn lagging_gateway_drains_backlog_without_duplication() {
+    if !deps_available().await {
+        eprintln!("SKIP: db or nats down");
+        return;
+    }
+    let _ = std::process::Command::new("pkill")
+        .args(["-9", "-f", "target/release/sync-gateway"])
+        .output();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let fixture = seed().await;
+
+    // gw1 publishes; gw2 starts WITHOUT a reader (its subscriber consumes
+    // and acks — the room is empty so its consumer drains immediately; the
+    // READER join happens after). Build a backlog of broker events first,
+    // then connect the reader and let the catch-up floor prove delivery.
+    let mut gw1 = GatewayProcess::spawn(9361, 161, Some(NATS_URL));
+    let mut gw2 = GatewayProcess::spawn(9362, 162, Some(NATS_URL));
+    assert!(wait_ready(9361, 20_000).await);
+    assert!(wait_ready(9362, 20_000).await);
+
+    let mut writer = connect(9361).await;
+    handshake_and_join(&mut writer, &fixture.clerk, &fixture.doc.to_string()).await;
+
+    // Publish 12 batches while NO ONE is in gw2's room (backlog builds
+    // momentarily before gw2's subscriber acks-and-drops them).
+    let mut acked = 0;
+    for batch in 0..12u64 {
+        let ops = vec![op_bytes(530 + batch as u64, 1)];
+        writer
+            .send(WsMessage::Binary(client_ops_frame(batch, &ops).into()))
+            .await
+            .expect("send");
+        assert_eq!(next_control(&mut writer).await["type"], "durable_ack");
+        acked += 1;
+    }
+    assert_eq!(acked, 12);
+
+    // A reader joins gw2 AFTER the burst: the catch-up floor (PostgreSQL)
+    // delivers the full history regardless of broker backlog state —
+    // bounded pages, no loss, no duplication (one row per identity).
+    let mut late = connect(9362).await;
+    handshake_and_join(&mut late, &fixture.clerk, &fixture.doc.to_string()).await;
+    send(
+        &mut late,
+        r#"{"v":1,"type":"sync_request","payload":{"cursor":"0"}}"#.into(),
+    )
+    .await;
+    let mut got = 0;
+    loop {
+        let bytes = next_binary(&mut late).await.expect("catch-up");
+        if let Ok(sync_gateway::protocol::data::DataFrame::SyncBatch(f)) =
+            sync_gateway::protocol::data::DataFrame::decode(&bytes)
+        {
+            got += f.ops.len();
+            if !f.has_more {
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        got, 12,
+        "lagging gateway recovers the full backlog via the DB floor"
+    );
+    let done = next_control(&mut late).await;
+    assert_eq!(done["type"], "sync_done");
+
+    let mut total = 0i64;
+    for batch in 0..12i64 {
+        total += db_count(&fixture.doc, 530 + batch).await;
+    }
+    assert_eq!(total, 12, "no duplicates from backlog drain");
+
+    gw1.kill();
+    gw2.kill();
+}
+
+// ---------------------------------------------------------------------------
+// P4-M038 — NATS restart with persisted JetStream storage
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn nats_restart_preserves_delivery_and_durable_state() {
+    if !deps_available().await {
+        eprintln!("SKIP: db or nats down");
+        return;
+    }
+    let _ = std::process::Command::new("pkill")
+        .args(["-9", "-f", "target/release/sync-gateway"])
+        .output();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let fixture = seed().await;
+
+    let mut gw1 = GatewayProcess::spawn(9371, 171, Some(NATS_URL));
+    let mut gw2 = GatewayProcess::spawn(9372, 172, Some(NATS_URL));
+    assert!(wait_ready(9371, 20_000).await);
+    assert!(wait_ready(9372, 20_000).await);
+
+    // History before the restart.
+    let mut writer = connect(9371).await;
+    let mut reader = connect(9372).await;
+    handshake_and_join(&mut writer, &fixture.clerk, &fixture.doc.to_string()).await;
+    handshake_and_join(&mut reader, &fixture.clerk, &fixture.doc.to_string()).await;
+    let ops = vec![op_bytes(540, 1), op_bytes(540, 2)];
+    writer
+        .send(WsMessage::Binary(client_ops_frame(1, &ops).into()))
+        .await
+        .expect("send");
+    assert_eq!(next_control(&mut writer).await["type"], "durable_ack");
+    // reader consumes the broker fanout
+    let _ = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let bytes = next_binary(&mut reader).await.expect("fanout");
+            if let Ok(sync_gateway::protocol::data::DataFrame::ClientOps(f)) =
+                sync_gateway::protocol::data::DataFrame::decode(&bytes)
+            {
+                if f.batch_id == 1 {
+                    return;
+                }
+            }
+        }
+    })
+    .await;
+
+    // RESTART the broker (persisted volume: stream state survives).
+    let _ = std::process::Command::new("docker")
+        .args(["restart", "concord-nats"])
+        .output();
+    // Wait for JetStream to accept connections again.
+    let nats_back = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if async_nats::connect(NATS_URL).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    })
+    .await;
+    assert!(nats_back.is_ok(), "nats returns after restart");
+    tokio::time::sleep(Duration::from_secs(2)).await; // allow gateway reconnect
+
+    // Cross-gateway realtime RESUMES: a new write flows gw1 → gw2.
+    let ops2 = vec![op_bytes(541, 1), op_bytes(541, 2), op_bytes(541, 3)];
+    writer
+        .send(WsMessage::Binary(client_ops_frame(2, &ops2).into()))
+        .await
+        .expect("send");
+    assert_eq!(
+        next_control(&mut writer).await["type"],
+        "durable_ack",
+        "durable path unaffected by broker restart"
+    );
+    let resumed = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let bytes = match next_binary(&mut reader).await {
+                Ok(b) => b,
+                Err(_) => return false,
+            };
+            if let Ok(sync_gateway::protocol::data::DataFrame::ClientOps(f)) =
+                sync_gateway::protocol::data::DataFrame::decode(&bytes)
+            {
+                if f.batch_id == 2 && f.ops.len() == 3 {
+                    return true;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(resumed, "cross-gateway fanout resumes after broker restart");
+
+    // Durable rows intact: 5 ops, one row per identity.
+    assert_eq!(db_count(&fixture.doc, 540).await, 2);
+    assert_eq!(db_count(&fixture.doc, 541).await, 3);
+
+    gw1.kill();
+    gw2.kill();
+}
+
+// ---------------------------------------------------------------------------
+// P4-M039 — compound gateway + broker disruption
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn compound_gateway_and_broker_failure_recovers_completely() {
+    if !deps_available().await {
+        eprintln!("SKIP: db or nats down");
+        return;
+    }
+    let _ = std::process::Command::new("pkill")
+        .args(["-9", "-f", "target/release/sync-gateway"])
+        .output();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let fixture = seed().await;
+
+    let mut gw1 = GatewayProcess::spawn(9381, 181, Some(NATS_URL));
+    let mut gw2 = GatewayProcess::spawn(9382, 182, Some(NATS_URL));
+    let mut gw3 = GatewayProcess::spawn(9383, 183, Some(NATS_URL));
+    assert!(wait_ready(9381, 20_000).await);
+    assert!(wait_ready(9382, 20_000).await);
+    assert!(wait_ready(9383, 20_000).await);
+
+    // Client A on gw1 (which we will kill); client B on gw2.
+    let mut a = connect(9381).await;
+    let mut b = connect(9382).await;
+    handshake_and_join(&mut a, &fixture.clerk, &fixture.doc.to_string()).await;
+    handshake_and_join(&mut b, &fixture.clerk, &fixture.doc.to_string()).await;
+
+    // A writes (durable).
+    let ops = vec![op_bytes(550, 1), op_bytes(550, 2)];
+    a.send(WsMessage::Binary(client_ops_frame(1, &ops).into()))
+        .await
+        .expect("send");
+    assert_eq!(next_control(&mut a).await["type"], "durable_ack");
+
+    // COMPOUND FAILURE: kill gw1 AND stop NATS simultaneously.
+    gw1.kill();
+    let _ = std::process::Command::new("docker")
+        .args(["stop", "concord-nats"])
+        .output();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // gw2 must stay healthy and keep serving DURABLE writes with no broker.
+    assert!(
+        wait_ready(9382, 5_000).await,
+        "surviving gateway healthy during compound failure"
+    );
+    let ops_b = vec![op_bytes(551, 1), op_bytes(551, 2)];
+    b.send(WsMessage::Binary(client_ops_frame(2, &ops_b).into()))
+        .await
+        .expect("send");
+    assert_eq!(
+        next_control(&mut b).await["type"],
+        "durable_ack",
+        "durable writes continue through gateway+broker compound failure"
+    );
+
+    // RESTORE: NATS back.
+    let _ = std::process::Command::new("docker")
+        .args(["start", "concord-nats"])
+        .output();
+    let restored = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if async_nats::connect(NATS_URL).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    })
+    .await;
+    assert!(restored.is_ok(), "nats restored");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Client C joins gw3 (a gateway that never saw the outage) — full
+    // reconstruction from PostgreSQL: every acknowledged op is present.
+    let mut c = connect(9383).await;
+    handshake_and_join(&mut c, &fixture.clerk, &fixture.doc.to_string()).await;
+    send(
+        &mut c,
+        r#"{"v":1,"type":"sync_request","payload":{"cursor":"0"}}"#.into(),
+    )
+    .await;
+    let mut got = 0;
+    loop {
+        let bytes = next_binary(&mut c).await.expect("catch-up");
+        if let Ok(sync_gateway::protocol::data::DataFrame::SyncBatch(f)) =
+            sync_gateway::protocol::data::DataFrame::decode(&bytes)
+        {
+            got += f.ops.len();
+            if !f.has_more {
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        got, 4,
+        "all 4 acknowledged ops recovered after compound failure"
+    );
+    let done = next_control(&mut c).await;
+    assert_eq!(done["type"], "sync_done");
+
+    // Exactly one durable row per identity across the whole incident.
+    assert_eq!(db_count(&fixture.doc, 550).await, 2);
+    assert_eq!(db_count(&fixture.doc, 551).await, 2);
+
+    // Post-restore realtime: B writes; C (on gw3) receives via the broker.
+    let ops_c = vec![op_bytes(552, 1)];
+    b.send(WsMessage::Binary(client_ops_frame(3, &ops_c).into()))
+        .await
+        .expect("send");
+    assert_eq!(next_control(&mut b).await["type"], "durable_ack");
+    let live = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let bytes = match next_binary(&mut c).await {
+                Ok(b) => b,
+                Err(_) => return false,
+            };
+            if let Ok(sync_gateway::protocol::data::DataFrame::ClientOps(f)) =
+                sync_gateway::protocol::data::DataFrame::decode(&bytes)
+            {
+                if f.batch_id == 3 {
+                    return true;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(live, "realtime fanout restored after full recovery");
+
+    gw2.kill();
+    gw3.kill();
+}
