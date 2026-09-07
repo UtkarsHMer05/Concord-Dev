@@ -763,7 +763,7 @@ async fn lagging_gateway_drains_backlog_without_duplication() {
     // momentarily before gw2's subscriber acks-and-drops them).
     let mut acked = 0;
     for batch in 0..12u64 {
-        let ops = vec![op_bytes(530 + batch as u64, 1)];
+        let ops = vec![op_bytes(530 + batch, 1)];
         writer
             .send(WsMessage::Binary(client_ops_frame(batch, &ops).into()))
             .await
