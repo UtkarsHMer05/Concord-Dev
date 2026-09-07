@@ -2,7 +2,7 @@
 
 Status: Authoritative
 Version: 1.0 (bootstrap)
-Last updated: 2026-09-05
+Last updated: 2026-09-07 (Phase 5: DEC-035..041)
 
 Rules:
 
@@ -913,3 +913,184 @@ retained and will not be removed.
 - **Evidence:** P4-M034 analysis; multi_gateway tests (all convergence
   paths through the broadcast consumer); M042/M044 benchmark runs.
 - **Revisit conditions:** measured broker/CPU amplification at scale.
+
+## DEC-035 — Phase 5 snapshot payload: unchanged C++ v1 inner format inside a versioned server wrapper, stored in PostgreSQL
+
+- **Status:** Accepted
+- **Decision:** A server snapshot = a small wrapper (wrapper format
+  version, document id, durable coverage boundary, covered op count,
+  inner length) + the Phase 2 `Doc::export_snapshot()` byte string
+  VERBATIM, followed by a SHA-256 checksum over the exact stored
+  bytes. Snapshots are stored as `BYTEA` rows in PostgreSQL
+  (`crdt_snapshots`), not an external object store.
+- **Context:** P5-M004 audit — the v1 inner format already carries the
+  item stream (tombstones, origins, LWW registers), the applied-op-id
+  dedup set, pending ops, and per-replica contiguous counters; the
+  browser already imports v1 through WASM. A new inner format would
+  break client compat and duplicate semantic logic.
+- **Alternatives:** a new server-only snapshot format (duplicates the
+  encode/decode path; no client benefit); storing snapshots in S3
+  (rejected by prompt §12 unless measured DB pressure justifies it);
+  storing only deltas (snapshot + tail IS the delta scheme).
+- **Rationale:** zero changes to the semantic authority (C++ core);
+  WASM resync reuses the exact import path; checksum boundary is the
+  stored bytes (one integrity domain); PostgreSQL keeps finalization,
+  metadata, and payload atomic in one database transaction.
+- **Consequences:** wrapper version (currently 1) governs server
+  compatibility; inner version stays 1 until the C++ core itself
+  evolves. Large payloads stress TOAST — measured at M026/M040 before
+  any external-store revisit.
+- **Evidence:** P5-M004 audit (cpp/crdt/src/snapshot.cpp); Phase 2
+  WASM parity harness; M013 corruption tests; M026 payload-size
+  baseline.
+- **Revisit conditions:** measured snapshot size/DB pressure justifying
+  external object storage (prompt §12).
+
+## DEC-036 — Snapshot lifecycle: guarded states with lease-owner finalization; recovery reads FINALIZED only
+
+- **Status:** Accepted
+- **Decision:** Snapshot rows move REQUESTED→BUILDING→VERIFYING→
+  FINALIZED (or →FAILED); FINALIZED→SUPERSEDED is a retention marking.
+  All transitions are compare-and-set SQL guarded on (status,
+  claim_version of the owning job lease). Recovery NEVER reads
+  non-FINALIZED rows; selection walks newest→oldest FINALIZED with
+  per-candidate validation, falling back to full replay.
+- **Context:** P5-M006 lifecycle design; prompt §5/§6 invariants 9–10.
+- **Alternatives:** delete non-finalized attempts eagerly (loses
+  diagnostic evidence; guard still needed); allow VERIFYING reads
+  (breaks invariant 3 — non-verified snapshots must never be used).
+- **Rationale:** immutability + state guards make "finalized" a
+  durable, machine-checkable property; fallback ordering (newest→
+  older→full replay) bounds worst case by the pre-Phase-5 path.
+- **Consequences:** a finalized snapshot can only be superseded
+  (retention), never mutated; competing builds for one boundary get
+  distinct attempt numbers and deterministic winner selection.
+- **Evidence:** M012 repository transition tests; M018 race tests;
+  M019 fallback tests.
+
+## DEC-037 — Maintenance-job ownership: PostgreSQL row claim with versioned lease (claim_version fence)
+
+- **Status:** Accepted
+- **Decision:** Jobs live in `maintenance_jobs` (durable truth).
+  Claiming = compare-and-swap UPDATE on (state, claim_version);
+  heartbeats extend `lease_expires_at` only for the current
+  claim_version; every effectful transition (including snapshot
+  finalization and prune batches) re-checks the claim_version in its
+  WHERE clause — a stale owner whose lease was taken can never
+  finalize (the fence rejects it). Expired-lease jobs are re-queued by
+  the scheduler sweep (retryable classes) or failed terminally.
+- **Context:** P5-M009; prompt §8 non-negotiable 15/18.
+- **Alternatives:** pg advisory locks (not durable across restarts,
+  cannot fence a zombie owner from DB truth); Redis locks (ephemeral
+  tier must not own durability — DEC-033); no fencing (stale-owner
+  finalization becomes possible — violates non-negotiable 18).
+- **Rationale:** the fence lives in the same transaction as the
+  effectful write, so ownership and effect commit atomically; crashes
+  leave recoverable rows, not lost locks. No exactly-once claim is
+  made or needed (idempotent job semantics, non-negotiable 13).
+- **Consequences:** a gateway running a worker whose lease was stolen
+  wastes work but cannot corrupt state; heartbeats add bounded write
+  load (per active job, at lease/3).
+- **Evidence:** M024 claim/lease tests; M046 stale-lease stress tests.
+
+## DEC-038 — Native C++ worker: standalone process with structured stdin/stdout protocol
+
+- **Status:** Accepted
+- **Decision:** A dedicated worker executable wraps the C++ CRDT core,
+  speaking a length-prefixed machine-readable protocol on
+  stdin/stdout (commands: reconstruct-from-ops, export-snapshot,
+  import-snapshot/verify, state-digest, verify-snapshot). The Rust
+  adapter spawns it directly (no shell), with bounded input, bounded
+  captured output, timeouts, cancellation, and child cleanup on
+  shutdown. Exit codes are explicit; payloads never log secrets.
+- **Context:** P5-M014/M015; prompt §8 native-worker policy ("prefer a
+  clean process boundary over fragile in-process FFI").
+- **Alternatives:** in-process FFI (crash domain shared with the
+  gateway; sanitizer/process isolation lost); a long-lived worker
+  pool service (added lifecycle complexity before a measured
+  startup-cost bottleneck — M040 measures worker startup explicitly).
+- **Rationale:** process boundary gives crash isolation, memory
+  bounds, sanitizer-friendly testing, and the same build artifact as
+  the native tests; one-shot invocation keeps the failure model
+  trivial (timeout ⇒ kill ⇒ retryable job failure).
+- **Consequences:** worker startup cost is paid per job — measured
+  at M026/M040; revisit a pool only if startup dominates recovery
+  latency at scale.
+- **Evidence:** M014 worker tests; M015 orchestration tests (timeout,
+  nonzero exit, malformed output, cancellation).
+
+## DEC-039 — Version history: boundary-referencing revisions + restore-as-forward-ops under a maintenance replica
+
+- **Status:** Accepted
+- **Decision:** Revisions reference durable boundaries (`target_seq`)
+  and never embed content; historical reconstruction = nearest
+  covering FINALIZED snapshot + bounded replay. Restore = surgical
+  forward-op batch (deletes + re-inserts computed against current
+  state) ingested through the NORMAL durable path under a reserved
+  maintenance replica id, recorded as an auditable restore_event
+  revision. No document generation/reset primitive; no history
+  rewrite.
+- **Context:** P5-M008/M036; PRD FR-7; docs/HISTORY.md.
+- **Alternatives:** embed per-revision content copies (storage blowup;
+  duplicates snapshot machinery); generation/reset primitive (C++ core
+  format change + pending-client divergence semantics — rejected until
+  tombstone accumulation is a measured problem); destructive restore
+  (violates prompt §7 "forward-moving, auditable").
+- **Rationale:** reuses every existing safety property (durable ACK,
+  broker propagation, CRDT convergence, idempotent dedup) — restore is
+  'just edits'; un-delete-via-reinsert is semantically the tombstone
+  model's forward equivalent.
+- **Consequences:** restore leaves tombstones (bounded by compaction
+  policy); two concurrent restores merge convergently; restore
+  requires OWNER permission.
+- **Evidence:** M036 restore tests; M037 concurrency/authorization
+  tests; HISTORY.md invariants H1–H8.
+
+## DEC-040 — Compaction: staged state machine with transactional floor advance; automatic pruning gated on the M032 equivalence proof
+
+- **Status:** Accepted
+- **Decision:** Compaction is a recoverable state machine (PLANNED →
+  SNAPSHOT_REQUIRED → SNAPSHOT_VERIFIED → PRUNE_READY → PRUNING →
+  COMPLETED) per document, driven by maintenance jobs under DEC-037
+  leases. Pruning deletes only rows `id ≤ boundary` covered by a
+  FINALIZED, differentially-verified snapshot, in bounded batches,
+  each batch advancing `documents.compaction_floor_seq` in the SAME
+  transaction. Automatic pruning ships DISABLED until M032's seeded
+  end-to-end equivalence proof passes, then enabled by configurable
+  policy (M022 thresholds).
+- **Context:** P5-M027/M030; prompt §6 compaction invariants.
+- **Alternatives:** delete-then-verify (violates "never prune first");
+  non-transactional floor updates (crash window leaves floor without
+  coverage — violates §6); archive rows to a shadow table (doubles
+  storage; retention policy on snapshots already bounds history).
+- **Rationale:** every crash point leaves a state where recovery is
+  defined (floor ≤ verified coverage always holds transactionally);
+  the M032 gate makes enabling automatic pruning a measured decision,
+  not a hope.
+- **Consequences:** a pruned op is gone from the log (recoverable via
+  snapshot+tail only for state purposes; historical reconstruction
+  before the floor uses the protected covering snapshot); stale
+  clients resync via M031 protocol.
+- **Evidence:** M030 dry-run/staged pruning tests; M032 equivalence
+  suite; M033 crash-injection matrix.
+
+## DEC-041 — Trigger policy: configurable thresholds, evidence-based defaults (from M026 baselines)
+
+- **Status:** Accepted
+- **Decision:** Snapshot scheduling keys on (ops-since-last-snapshot,
+  durable-bytes-since-snapshot) with minimum interval, cooldown, and
+  bounded pending/running jobs per document and globally. Defaults
+  derive from the M026 replay-cost baseline (not magic numbers) and
+  are configuration-overridable; rationale documented with each
+  threshold.
+- **Context:** P5-M022.
+- **Alternatives:** time-only triggers (idle documents with huge tails
+  never snapshot); every-N-edits triggers without cooldown (snapshot
+  job explosion under bursty editing).
+- **Rationale:** recovery cost is a function of replay distance;
+  thresholds bound that distance by the measured cost curve.
+- **Consequences:** threshold changes require only config edits; the
+  M043/M044 benchmark methodology quantifies the resulting recovery
+  improvement.
+- **Evidence:** M022 policy doc; M026 baselines; M043 headline
+  benchmark.
