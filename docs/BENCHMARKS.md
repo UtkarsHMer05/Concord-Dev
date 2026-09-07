@@ -81,3 +81,32 @@ round-trip + local TCP + WAL commit; the server-side fanout path is
 bottleneck at the Phase 3 target workload; optimization deferred to
 Phase 4 re-baselining under distribution). These are local Docker-network
 numbers — informative, not promotional.
+
+
+---
+
+## Phase 4 — multi-gateway scaling baselines (MEASURED, 2026-09-07)
+
+Workload (examples/loadgen; identical across runs): 12 clients / 4
+documents / 60 ops/s target / 10s / canonical 32-byte ops; client-
+sequential durable-ack loops; in-process release gateways + live NATS
+(JetStream file storage) + Postgres/Redis in Docker; macOS arm64 host.
+Full JSON: private scratch (not committed); summary in the metrics ledger.
+
+| gateways | sent=acked | loss | reconnects | ACK p50 | ACK p95 | ACK p99 |
+|---|---|---|---|---|---|---|
+| 1 | 612/612 | 0 | 0 | 16.1 ms | 23.5 ms | 30.4 ms |
+| 2 | 612/612 | 0 | 0 | 17.6 ms | 27.8 ms | 30.7 ms |
+| 3 | 612/612 | 0 | 0 | 18.4 ms | 28.5 ms | 32.5 ms |
+
+Hot-document fairness (16 clients, 1 doc, 80 ops/s): 816/816 acked,
+p50 20.6 ms, p95 32.5 ms — no starvation; the load-shedding hierarchy
+never engaged (no rejections recorded).
+
+Honest reading: ACK latency growth 1→3 gateways (~2.3 ms) is the
+post-commit broker publish entering the ack path — a small fixed cost per
+batch on the ingress gateway, NOT contention (p95 stays flat-ish).
+Optimization was deferred (P4-M043): no measured bottleneck at the
+Phase 4 target workload. These are local Docker-network numbers —
+informative, not promotional. NO multi-node scalability claim is made
+beyond this table.

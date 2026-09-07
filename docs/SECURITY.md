@@ -1,7 +1,7 @@
-# Concord — Security Model (Phase 3)
+# Concord — Security Model (Phase 3 + 4)
 
-Status: Authoritative (Phase 3 current; Phase 4+ items marked TARGET)
-Version: 1.0
+Status: Authoritative (Phase 4 current; later-phase items marked TARGET)
+Version: 1.1
 Last updated: 2026-09-07
 
 ## 1. Trust boundaries (CURRENT)
@@ -63,3 +63,47 @@ Last updated: 2026-09-07
 
 See docs/AUTHORIZATION.md (Phase 1 product-layer policy) and
 docs/FAILURE_MODEL.md (durability/failure contract).
+
+
+---
+
+## 6. Phase 4 distributed security (CURRENT)
+
+### 6.1 Broker trust boundary
+NATS is an INTERNAL transport, but its payloads are treated as UNTRUSTED
+input: every event passes the same strict envelope validation as hostile
+client frames (schema version, size caps, checksum, per-op structure —
+M015). The consumer:
+- never persists received events (durable rows ONLY flow through the
+  authenticated client-ingest path — forged events die in RAM);
+- routes only to connections already joined to that exact document
+  (no cross-tenant delivery);
+- terminates poisoned messages (`+TERM`, bounded deliveries) with
+  structured class-only logging.
+
+### 6.2 Redis trust boundary
+Ephemeral by contract (DEC-033): presence, rate-limit counters, hints —
+namespaced `concord:<env>:` with TTLs; wipe-tested. No document content,
+ACLs, or operations EVER touch Redis (keyspace audit + FLUSHALL test).
+Redis loss degrades to local per-gateway limits (documented fail-open)
+and absent presence — never to a durable error.
+
+### 6.3 Distributed authorization
+Authorization is re-evaluated on EVERY gateway from PostgreSQL: join check
++ per-batch write recheck inside the ingest transaction. No gateway holds
+cached grants; there is no "alternate gateway" bypass. Sticky sessions
+are NOT used — reconnecting to a different instance re-runs the same
+server-side checks.
+
+### 6.4 Rate limiting + abuse
+Fixed-window budgets per (scope, principal) shared through Redis when
+available (connect 240/min/peer default — GATEWAY_RATE_CONNECT_PER_MIN
+override; writes 2000/min; malformed 50/min). Gateway-hopping cannot
+evade the global budget (cross-instance test). Local fallback keeps
+per-gateway bounds during Redis outages (accepted N× residual, bounded).
+
+### 6.5 Findings (all documented, none high-severity)
+F4-1 local-fallback N× budgets during Redis outage (accepted; DEC-033).
+F4-2 local NATS without authn (dev-only, loopback; Phase 7 hardening).
+F4-3 forged broker events may transiently fan out to already-joined
+clients before dying unpersisted (never durable; signing = later phase).

@@ -1,7 +1,7 @@
 # Concord — Architecture
 
-Status: Authoritative (Phase 3 completion version)
-Version: 1.4
+Status: Authoritative (Phase 4 completion version)
+Version: 1.5
 Last updated: 2026-09-07
 
 This document distinguishes three architecture states at all times:
@@ -15,7 +15,60 @@ Nothing in the TARGET section should be read as an implemented capability.
 
 ---
 
-## 1. CURRENT — Single-gateway realtime synchronization (Phase 3 complete)
+## 0. CURRENT — Distributed multi-gateway collaboration (Phase 4 complete)
+
+Phase 4 distributes the Phase 3 plane: browsers may connect to ANY healthy
+gateway behind the local load balancer; accepted batches propagate across
+gateways via NATS JetStream; Redis provides ephemeral presence + distributed
+rate limiting. PostgreSQL remains the ONLY durable authority; the CRDT
+core is untouched; correctness never requires sticky sessions.
+
+```mermaid
+flowchart TD
+    A["Browser A"] <-->|"WS"| LB["nginx LB (round-robin, WS-upgrade)"]
+    B["Browser B"] <-->|"WS"| LB
+    LB <--> GW1["Gateway 1"]
+    LB <--> GW2["Gateway 2"]
+    LB <--> GW3["Gateway 3"]
+    GW1 <-->|"post-commit publish"| NATS["NATS JetStream<br/>CONCORD_OPS stream<br/>durable pull consumer/gw"]
+    GW2 <--> NATS
+    GW3 <--> NATS
+    GW1 <-->|"presence + rate limits (TTL'd)"| R[("Redis<br/>ephemeral only")]
+    GW2 <--> R
+    GW3 <--> R
+    GW1 <--> PG[("PostgreSQL<br/>durable truth: docs, ACLs, op log")]
+    GW2 <--> PG
+    GW3 <--> PG
+```
+
+### 0.1 Phase 4 components
+
+| Component | Responsibility |
+|---|---|
+| `rust/.../broker` | NATS JetStream transport: idempotent stream/consumer provisioning, batch-granular full-payload events (DEC-031), msg-id dedup, bounded pull, ack-after-processing, poison termination |
+| `rust/.../bus` | Transport-neutral EventPublisher/Subscriber seams (DEC-031/032 behind traits; publish strictly after durable commit — failures degrade realtime only) |
+| `rust/.../ephemeral` | Redis presence (TTL 60s) + fixed-window rate limiting with local fallback (DEC-033); FLUSHALL-safe by design |
+| LB + cluster scripts | nginx round-robin (NO sticky sessions) over 3 host gateway processes; compose owns db/nats/redis |
+| `tests/multi_gateway` | 9 live-process scenarios: cross-gateway both directions, reconnect-any-gateway, crash isolation, storm containment, slow-consumer isolation, lag drain, NATS restart, compound failure |
+| `examples/loadgen` | Reproducible multi-gateway workload generator (JSON output) |
+
+### 0.2 Delivery + failure semantics (implemented + tested)
+- ACK_DURABLE unchanged; the broker publish happens AFTER the commit and
+  is best-effort — FAILURE_MODEL §7 is the test contract.
+- Reconnect-to-any-gateway: all client state is local + PostgreSQL; no
+  server affinity anywhere.
+- Broadcast fan-out + local room filtering (DEC-034): every gateway gets
+  every event; irrelevant events cost one set-membership check. No
+  sharding/consistent hashing (evidence-based decision).
+- Wipe NATS/Redis at will: durable state is untouched; clients converge
+  via DB catch-up (proven by restart/wipe/compound tests).
+
+### 0.3 Honest scaling evidence (MEASURED, docs/BENCHMARKS.md)
+1→2→3 gateways at identical 60 ops/s / 12-client workloads: zero loss at
+every scale; ACK p50 16.1→17.6→18.4 ms (the growth is the post-commit
+publish, not contention). NO linear-scaling claim beyond the data.
+
+## 1. PRIOR STATE — Single-gateway realtime synchronization (Phase 3; superseded by §0)
 
 The CURRENT architecture adds the Phase 3 realtime plane to the Phase 2
 stack: browsers synchronize through a **single self-hosted Rust sync

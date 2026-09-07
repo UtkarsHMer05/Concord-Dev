@@ -112,6 +112,17 @@ docs/PROTOCOL.md §9, docs/SECURITY.md, docs/BENCHMARKS.md.
 
 ## Phase 4 — Distributed multi-gateway architecture
 
+**Status: COMPLETE (2026-09-07).** Three gateways behind a local nginx
+round-robin LB (no sticky sessions); NATS JetStream cross-gateway events
+(batch-granular, msg-id-deduped, post-commit publish, poison-terminated);
+Redis ephemeral tier (TTL presence + distributed rate limiting with local
+fallback; FLUSHALL-safe); broadcast+filter routing (DEC-034, no sharding);
+crash isolation, reconnect storms, slow consumers, lag drain, broker
+restart, and compound gateway+broker failure all E2E-proven; 1v2v3-gateway
+scaling baselines measured honestly (zero loss; ack p50 16.1→18.4 ms);
+distributed security audited (SA-SEC4: no high-severity findings). See
+DEC-031..034, docs/OPERATIONS.md, docs/SECURITY.md §6.
+
 - **Objective:** Move from one sync process to distributed service operation.
 - **Major deliverables:** Multiple gateways; NATS JetStream; Redis for
   justified ephemeral state; cross-gateway collaboration; document routing /

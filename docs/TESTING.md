@@ -1,7 +1,7 @@
 # Concord — Testing
 
 Status: Authoritative
-Version: 1.2 (Phase 3)
+Version: 1.3 (Phase 4)
 Last updated: 2026-09-07
 
 This document records how every layer of Concord is tested, with exact
@@ -217,3 +217,52 @@ unit+golden, db_integration against a Postgres service, ws_integration)
 and the web job (typecheck, lint, unit incl. golden parity) on every
 push/PR. The realtime E2E + benchmarks run locally via
 `scripts/verify-gateway.sh` (documented; deterministic layers in CI).
+
+
+---
+
+## Phase 4 — distributed multi-gateway testing
+
+### Commands
+
+```bash
+# Infra: docker compose up -d db nats redis
+# Full single + distributed gate (everything below in one script):
+./scripts/verify-gateway.sh
+
+# Distributed suites individually (from rust/):
+cargo test --test broker_integration -- --test-threads=1   # 9: JetStream semantics + security vectors
+cargo test --test redis_integration -- --test-threads=1   # 4: presence, distributed limits, fallback, wipe
+cargo test --test multi_gateway -- --test-threads=1        # 9: REAL gateway processes + faults
+
+# Local cluster (3 gateways + nginx LB) for manual/E2E use:
+./scripts/gateway-cluster.sh start   # ws://127.0.0.1:8890/api/v1/sync
+./scripts/gateway-cluster.sh stop
+
+# Scaling / fairness baselines:
+cargo run --release --example loadgen -- --gateways 127.0.0.1:8791,127.0.0.1:8792 \
+  --clients 12 --docs 4 --ops-per-sec 60 --seconds 10 --out run.json
+```
+
+### What each distributed suite proves
+
+- **broker_integration**: stream/consumer provisioning idempotence;
+  cross-consumer delivery; origin suppression; msg-id dedup; redelivery
+  pending/ack semantics; poison termination; forged events never
+  fabricate durable rows; replay-safe at every layer.
+- **redis_integration**: TTL presence lifecycle; a shared global budget
+  across two limiter instances; local fallback on dead Redis; FLUSHALL
+  wipes lose nothing durable, presence rebuilds, strict namespacing.
+- **multi_gateway** (real processes, real sockets): cross-gateway
+  collaboration both directions with exactly-one-durable-row guarantees;
+  reconnect-to-a-different-gateway via the DB catch-up floor; NATS-less
+  degraded durability; gateway kill -9 isolation; 60-connection storm
+  containment; slow-consumer isolation across gateways; lag drain; NATS
+  restart with persisted JetStream; compound gateway+broker failure with
+  full recovery.
+
+### CI
+
+`.github/workflows/phase4-distributed.yml`: Postgres + Redis services plus
+a JetStream-enabled NATS container; fmt/clippy/unit, db/ws regressions,
+broker/redis/multi-gateway suites, and the web job — on every push/PR.
