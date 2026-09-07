@@ -13,6 +13,7 @@ use axum::{Json, Router};
 use serde_json::{json, Value};
 
 use crate::auth::{TokenVerifier, VerifierSource};
+use crate::bus::EventPublisher;
 use crate::config::Config;
 use crate::db::pool::PoolHealth;
 use crate::db::repo::GatewayRepo;
@@ -29,6 +30,10 @@ pub struct AppState {
     pub verifier: Arc<TokenVerifier<VerifierSource>>,
     /// Drain flag (P3-M041): set on SIGTERM/SIGINT before closing.
     pub draining: Arc<AtomicBool>,
+    /// Distributed event bus (P4-M013): publish after durable commit.
+    pub bus: Arc<dyn EventPublisher>,
+    /// This gateway's identity (P4-M010; observability, not correctness).
+    pub gateway_id: u64,
 }
 
 pub fn router(state: AppState) -> Router {

@@ -34,6 +34,18 @@ pub struct Config {
     /// Optional local JWKS file (dev/E2E only; production uses the issuer
     /// over HTTPS). Path, never contents, in config.
     pub jwks_file: Option<String>,
+    // --- Phase 4 distributed configuration (P4-M009) ---
+    /// NATS URL; absent ⇒ single-gateway Phase 3 mode (no broker).
+    pub nats_url: Option<String>,
+    /// NATS subject namespace prefix (default "concord.dev").
+    pub nats_subject_prefix: String,
+    /// Stable per-process gateway identity (P4-M010). Explicit or
+    /// generated; used for logs/origin suppression/metrics — never a
+    /// correctness authority.
+    pub gateway_id: u64,
+    /// Redis URL; absent ⇒ no ephemeral tier (presence disabled, local
+    /// rate limiting only).
+    pub redis_url: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -122,6 +134,24 @@ impl Config {
         // Optional local JWKS file (dev/E2E only; empty or absent = HTTPS).
         let jwks_file = env_optional("GATEWAY_JWKS_FILE").filter(|s| !s.is_empty());
 
+        // --- Phase 4 distributed config ---
+        let nats_url = env_optional("GATEWAY_NATS_URL").filter(|s| !s.is_empty());
+        let nats_subject_prefix = env_optional("GATEWAY_NATS_SUBJECT_PREFIX")
+            .unwrap_or_else(|| "concord.dev".to_string());
+        let gateway_id = match env_optional("GATEWAY_ID") {
+            Some(raw) => raw.parse().map_err(|_| ConfigError::Invalid {
+                key: "GATEWAY_ID",
+                message: "expected a u64".into(),
+            })?,
+            None => {
+                // Stable per-process identity: derive from a fresh UUID's
+                // low 64 bits — unique in practice; not a correctness input.
+                let u = uuid::Uuid::new_v4();
+                u.as_u64_pair().0
+            }
+        };
+        let redis_url = env_optional("GATEWAY_REDIS_URL").filter(|s| !s.is_empty());
+
         if per_connection_queue_capacity == 0 {
             return Err(ConfigError::Invalid {
                 key: "GATEWAY_QUEUE_CAPACITY",
@@ -165,6 +195,10 @@ impl Config {
             idle_timeout,
             db_pool_size,
             jwks_file,
+            nats_url,
+            nats_subject_prefix,
+            gateway_id,
+            redis_url,
         })
     }
 }
@@ -189,6 +223,11 @@ mod tests {
             "GATEWAY_HEARTBEAT_INTERVAL_SECS",
             "GATEWAY_IDLE_TIMEOUT_SECS",
             "GATEWAY_DB_POOL_SIZE",
+            "GATEWAY_JWKS_FILE",
+            "GATEWAY_NATS_URL",
+            "GATEWAY_NATS_SUBJECT_PREFIX",
+            "GATEWAY_ID",
+            "GATEWAY_REDIS_URL",
         ]
         .iter()
         .map(|k| (*k, env::var(k).ok()))
@@ -205,6 +244,11 @@ mod tests {
             "GATEWAY_HEARTBEAT_INTERVAL_SECS",
             "GATEWAY_IDLE_TIMEOUT_SECS",
             "GATEWAY_DB_POOL_SIZE",
+            "GATEWAY_JWKS_FILE",
+            "GATEWAY_NATS_URL",
+            "GATEWAY_NATS_SUBJECT_PREFIX",
+            "GATEWAY_ID",
+            "GATEWAY_REDIS_URL",
         ] {
             env::remove_var(key);
         }
@@ -299,6 +343,49 @@ mod tests {
                 assert_eq!(
                     cfg.allowed_origins,
                     vec!["http://localhost:3000", "https://concord.example.com"]
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn distributed_config_defaults_and_validation() {
+        // Absent NATS/Redis ⇒ single-gateway mode (None); gateway id is
+        // generated (nonzero); subject prefix defaults.
+        with_env(
+            &[
+                ("GATEWAY_NATS_URL", None),
+                ("GATEWAY_REDIS_URL", None),
+                ("GATEWAY_ID", None),
+            ],
+            || {
+                let cfg = Config::from_env().expect("valid");
+                assert!(cfg.nats_url.is_none());
+                assert!(cfg.redis_url.is_none());
+                assert!(cfg.gateway_id != 0, "generated gateway id must be nonzero");
+                assert_eq!(cfg.nats_subject_prefix, "concord.dev");
+            },
+        );
+        // Explicit gateway id is respected; malformed rejected.
+        with_env(&[("GATEWAY_ID", Some("42"))], || {
+            assert_eq!(Config::from_env().expect("valid").gateway_id, 42);
+        });
+        with_env(&[("GATEWAY_ID", Some("not-a-u64"))], || {
+            assert!(matches!(
+                Config::from_env(),
+                Err(ConfigError::Invalid {
+                    key: "GATEWAY_ID",
+                    ..
+                })
+            ));
+        });
+        // Broker URL present ⇒ distributed mode.
+        with_env(
+            &[("GATEWAY_NATS_URL", Some("nats://127.0.0.1:4222"))],
+            || {
+                assert_eq!(
+                    Config::from_env().expect("valid").nats_url.as_deref(),
+                    Some("nats://127.0.0.1:4222")
                 );
             },
         );

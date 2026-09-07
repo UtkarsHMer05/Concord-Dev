@@ -28,6 +28,8 @@ sha2.workspace = true
 hex.workspace = true
 thiserror.workspace = true
 futures-util.workspace = true
+async-nats.workspace = true
+redis.workspace = true
 
 [dev-dependencies]
 tokio-tungstenite.workspace = true

@@ -35,6 +35,10 @@ async fn test_db() -> Option<Db> {
         idle_timeout: std::time::Duration::from_secs(120),
         db_pool_size: 4,
         jwks_file: None,
+        nats_url: None,
+        nats_subject_prefix: "concord.test".to_string(),
+        gateway_id: 1,
+        redis_url: None,
     };
     Db::connect(&config).await.ok() // DB not running: skip (documented gate precondition)
 }
@@ -159,6 +163,10 @@ fn test_config() -> Config {
         idle_timeout: std::time::Duration::from_secs(120),
         db_pool_size: 2,
         jwks_file: None,
+        nats_url: None,
+        nats_subject_prefix: "concord.test".to_string(),
+        gateway_id: 1,
+        redis_url: None,
     }
 }
 

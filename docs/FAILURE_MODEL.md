@@ -130,3 +130,63 @@ Committed rows exist; the ACK frame was never sent.
 A future distributed gateway must keep this contract: broker fanout may add
 `broker_replicated` levels, but `ACK_DURABLE` as defined here remains the
 floor and never lies about the local commit.
+---
+
+## 7. Phase 4 distributed failure contract (CURRENT as of Phase 4)
+
+Non-negotiable invariant (I-1):
+
+> Every operation for which the client received `durable_ack` is committed
+> in PostgreSQL. Any replica can reconstruct full document state from
+> PostgreSQL alone. Broker and Redis are accelerants, never authorities:
+> losing both simultaneously degrades realtime freshness but never durable
+> correctness — every client converges via the Phase 3 catch-up path.
+
+### 7.1 Gateway crash
+One gateway dies (kill -9): its rooms vanish (in-process only); the load
+balancer stops routing to it; clients reconnect with backoff+jitter to any
+healthy gateway and converge via state-summary catch-up. Other gateways
+are unaffected. Tested: M030, M039.
+
+### 7.2 NATS outage / redelivery
+Publish failure never falsifies `ACK_DURABLE` (publish is strictly
+after-commit, best-effort: M013). During outage: local writes + same-
+gateway fanout + durable ACKs continue; cross-gateway realtime degrades
+(pull-based catch-up on demand). On restore: subscriptions resume without
+duplication; redelivered events are deduped by stable operation identity
+(the same (document_id, operation_id) key — DB-enforced; client CRDT is
+additionally idempotent). NATS never defines CRDT order. Tested: M019,
+M020, M036, M038.
+
+### 7.3 Redis outage / full wipe
+Redis holds only presence, rate-limit counters, and hints (M007 keymap).
+Outage: rate limiting falls back to a documented local mode (M024);
+presence degrades (absent ≠ incorrect); durable paths never touch Redis.
+Wipe (FLUSHALL): documents, ACLs, and the operation log are untouched
+(PostgreSQL); presence rebuilds from heartbeats; counters reset to zero
+(re-accumulating). Tested: M037.
+
+### 7.4 Reconnect to a different gateway
+No sticky sessions anywhere: all client state is local (IndexedDB) or
+durable (PostgreSQL). A reconnect lands on any gateway; authorization is
+re-verified; catch-up uses the persisted server cursor; unacked ops
+resend under original identities. Tested: M029.
+
+### 7.5 Broker lag
+A lagging gateway drains its backlog in bounded batches; duplicate
+tolerance makes replay safe; if the backlog is superseded by a room
+catch-up, clients still converge (PostgreSQL floor). Tested: M036.
+
+### 7.6 DB outage (unchanged from §2.7)
+No false ACK; retryable errors; readiness flips. Multi-gateway changes
+nothing — every gateway applies the same rule.
+
+### 7.7 Compound gateway + broker failure
+Both may fail concurrently: acknowledged ops are already in PostgreSQL;
+unacknowledged ops remain client-pending and resend after recovery;
+replicas converge on restore. Tested: M039.
+
+### 7.8 Feedback loops
+Broker-received events enter a SEPARATE ingress path (no re-publish of
+consumer traffic; origin-gateway suppression); duplicate DB rows are
+impossible (unique identity). Tested: M017.

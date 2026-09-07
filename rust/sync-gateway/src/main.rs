@@ -45,9 +45,43 @@ async fn main() {
         .parse()
         .expect("bind host/port are validated by Config");
 
+    // Distributed mode (P4-M011..M014): GATEWAY_NATS_URL set ⇒ connect the
+    // broker (fail-soft: local clients still served — M019) + spawn the
+    // subscription manager. Absent ⇒ Phase 3 single-gateway mode.
+    let gateway_id = config.gateway_id;
+    let registry = SessionRegistry::new();
+    let (bus, broker_handle): (
+        Arc<dyn sync_gateway::bus::EventPublisher>,
+        Option<Arc<sync_gateway::broker::Broker>>,
+    ) = match &config.nats_url {
+        Some(url) => match sync_gateway::broker::Broker::connect(
+            url,
+            &config.nats_subject_prefix,
+            gateway_id,
+        )
+        .await
+        {
+            Ok(broker) => {
+                let broker = Arc::new(broker);
+                (
+                    Arc::new(sync_gateway::bus::NatsPublisher::new(
+                        broker.clone(),
+                        gateway_id,
+                    )),
+                    Some(broker),
+                )
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, error_class = "broker", "NATS unavailable; running local-only (cross-gateway degraded)");
+                (Arc::new(sync_gateway::bus::LocalOnlyPublisher), None)
+            }
+        },
+        None => (Arc::new(sync_gateway::bus::LocalOnlyPublisher), None),
+    };
+
     let state = AppState {
         config: Arc::new(config.clone()),
-        registry: SessionRegistry::new(),
+        registry: registry.clone(),
         repo: Arc::new(GatewayRepo::new(db)),
         verifier: Arc::new(TokenVerifier::new(
             &config.clerk_issuer,
@@ -59,7 +93,17 @@ async fn main() {
             },
         )),
         draining: Arc::new(AtomicBool::new(false)),
+        bus,
+        gateway_id,
     };
+
+    // Broker subscription task: cross-gateway events → local fanout.
+    if let Some(broker) = broker_handle {
+        let subscriber = sync_gateway::bus::NatsSubscriber::new(broker, registry.clone());
+        tokio::spawn(async move {
+            subscriber.run().await;
+        });
+    }
 
     let app = http::router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr)

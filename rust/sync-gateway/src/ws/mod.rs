@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::bus::EventPublisher;
 use crate::http::AppState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, State};
@@ -78,6 +79,8 @@ pub async fn upgrade(
     let repo = app.repo.clone();
     let verifier = app.verifier.clone();
     let draining = app.draining.clone();
+    let bus = app.bus.clone();
+    let gateway_id = app.gateway_id;
     ws.max_message_size(MAX_FRAME_BYTES)
         .max_frame_size(MAX_FRAME_BYTES)
         .on_upgrade(move |socket| {
@@ -87,7 +90,10 @@ pub async fn upgrade(
             let verifier = verifier.clone();
             let draining = draining.clone();
             async move {
-                handle_socket(socket, peer, config, registry, repo, verifier, draining).await;
+                handle_socket(
+                    socket, peer, config, registry, repo, verifier, draining, bus, gateway_id,
+                )
+                .await;
             }
         })
 }
@@ -101,6 +107,8 @@ async fn handle_socket(
     repo: Arc<GatewayRepo>,
     verifier: Arc<TokenVerifier<crate::auth::VerifierSource>>,
     draining: Arc<AtomicBool>,
+    bus: Arc<dyn EventPublisher>,
+    gateway_id: u64,
 ) {
     Metrics::global()
         .active_connections
@@ -149,6 +157,8 @@ async fn handle_socket(
         &repo,
         &verifier,
         &draining,
+        &bus,
+        gateway_id,
         &mut last_activity,
         &mut heartbeat_tick,
     )
@@ -204,6 +214,8 @@ async fn connection_loop(
     repo: &Arc<GatewayRepo>,
     verifier: &Arc<TokenVerifier<crate::auth::VerifierSource>>,
     draining: &Arc<AtomicBool>,
+    bus: &Arc<dyn EventPublisher>,
+    gateway_id: u64,
     last_activity: &mut Instant,
     heartbeat_tick: &mut tokio::time::Interval,
 ) -> Result<(), FlowError> {
@@ -222,11 +234,12 @@ async fn connection_loop(
                 match msg {
                     Ok(Message::Text(text)) => {
                         Metrics::global().inbound_frames_total.fetch_add(1, Ordering::Relaxed);
-                        handle_text(conn, &text, config, registry, repo, verifier, draining).await?;
+                        handle_text(conn, &text, config, registry, repo, verifier, draining, bus, gateway_id)
+                            .await?;
                     }
                     Ok(Message::Binary(bytes)) => {
                         Metrics::global().inbound_frames_total.fetch_add(1, Ordering::Relaxed);
-                        handle_binary(conn, &bytes, registry, repo, draining).await?;
+                        handle_binary(conn, &bytes, registry, repo, draining, bus, gateway_id).await?;
                     }
                     Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {
                         // WebSocket-level keepalive: axum replies automatically.
@@ -264,6 +277,8 @@ async fn handle_text(
     repo: &Arc<GatewayRepo>,
     verifier: &Arc<TokenVerifier<crate::auth::VerifierSource>>,
     draining: &Arc<AtomicBool>,
+    bus: &Arc<dyn EventPublisher>,
+    gateway_id: u64,
 ) -> Result<(), FlowError> {
     if text.len() > MAX_FRAME_BYTES {
         let fatal = send_error(
@@ -402,6 +417,8 @@ async fn handle_text(
                 );
                 return Ok(());
             }
+            tracing::debug!(gateway_id, connection_id = %conn.id, "join via gateway");
+            let _ = bus; // bus flows through binary frames only
             handle_join(conn, join, repo, registry, frame.id).await?;
         }
         Frame::SyncRequest(req) => {
@@ -592,6 +609,8 @@ async fn handle_binary(
     registry: &Arc<SessionRegistry>,
     repo: &Arc<GatewayRepo>,
     draining: &Arc<AtomicBool>,
+    bus: &Arc<dyn EventPublisher>,
+    gateway_id: u64,
 ) -> Result<(), FlowError> {
     if !conn.state.can_send_client_ops() {
         // Illegal in every state except READY (includes Draining).
@@ -687,6 +706,38 @@ async fn handle_binary(
             Metrics::global()
                 .durable_ack_total
                 .fetch_add(1, Ordering::Relaxed);
+
+            // Publish to the distributed bus AFTER the durable commit
+            // (P4-M013): best-effort — a failure never invalidates the ACK
+            // (peers recover via DB catch-up; FAILURE_MODEL §7.2).
+            if !ingest.newly_inserted.is_empty() {
+                let publish_ops: Vec<Vec<u8>> = ops
+                    .ops
+                    .iter()
+                    .zip(ops.identities.iter())
+                    .filter(|(_, id)| ingest.newly_inserted.contains(&id.to_wire()))
+                    .map(|(bytes, _)| bytes.clone())
+                    .collect();
+                if !publish_ops.is_empty() {
+                    if let Err(e) = bus
+                        .publish_batch(
+                            document,
+                            ops.batch_id,
+                            ingest.durable_cursor.max(0) as u64,
+                            publish_ops,
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            gateway_id,
+                            connection_id = %conn.id,
+                            error = %e,
+                            error_class = "broker_publish",
+                            "cross-gateway publish failed (durable ack unaffected)"
+                        );
+                    }
+                }
+            }
 
             // Fan out the batch bytes verbatim to peers (P3-M028).
             if !ingest.newly_inserted.is_empty() {

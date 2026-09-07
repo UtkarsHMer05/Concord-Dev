@@ -157,6 +157,10 @@ fn base_config() -> Config {
         idle_timeout: Duration::from_secs(600),
         db_pool_size: 4,
         jwks_file: None,
+        nats_url: None,
+        nats_subject_prefix: "concord.test".to_string(),
+        gateway_id: 1,
+        redis_url: None,
     }
 }
 
@@ -194,6 +198,8 @@ async fn boot() -> Option<TestServer> {
         repo: repo.clone(),
         verifier,
         draining: Arc::new(AtomicBool::new(false)),
+        bus: Arc::new(sync_gateway::bus::LocalOnlyPublisher),
+        gateway_id: 1,
     };
     let app = http::router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -799,6 +805,10 @@ async fn db_outage_never_fakes_durable_ack_and_readiness_flips() {
         idle_timeout: std::time::Duration::from_secs(600),
         db_pool_size: 2,
         jwks_file: None,
+        nats_url: None,
+        nats_subject_prefix: "concord.test".to_string(),
+        gateway_id: 1,
+        redis_url: None,
     };
     // Startup fails fast — the gateway refuses to run against a dead DB.
     assert!(

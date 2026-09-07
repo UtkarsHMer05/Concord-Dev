@@ -791,3 +791,90 @@ retained and will not be removed.
   repo.rs (recheck inside the transaction); benchmarks (BENCHMARKS.md).
 - **Revisit conditions:** Phase 4 distribution changes authz caching
   economics; delta sync design revives the state vector.
+
+---
+
+## Phase 4 additions (2026-09-07)
+
+## DEC-031 — Phase 4 inter-gateway event envelope: full-payload, versioned, idempotent
+
+- **Status:** Accepted
+- **Decision:** One binary event envelope published per accepted durable
+  BATCH (not per op): `[schema_version u8=1][origin_gateway u64][document_id
+  uuid 16B][event_id u64 (origin's batch counter)][server_cursor u64]
+  [payload_sha256 32B][count u16][op bytes]*` — reusing the wire client_ops
+  framing for the op list. Full payload (not DB reference) so peer gateways
+  fan out without a Postgres round-trip; the server_cursor is advisory.
+- **Alternatives:** reference-only events (peer must query DB per event —
+  adds a read amplification per fanout); per-op events (broker message
+  overhead ×N for a batch committed atomically). Hybrid (payload + cursor)
+  rejected as complexity without Phase 4 benefit.
+- **Rationale:** Batches commit atomically, so batch-granular events
+  preserve atomicity semantics; full payload keeps the realtime path
+  off the DB; identity idempotency (document + operation ids) makes
+  redelivery safe by the SAME mechanisms as Phase 3.
+- **Consequences:** Broker messages are batch-sized (bounded by the
+  protocol batch caps); checksum guards integrity; origin id enables
+  loop suppression.
+- **Evidence:** P4-M005 spec; hardening tests (M015).
+
+## DEC-032 — NATS JetStream topology: one stream, one subject, pull consumer per gateway
+
+- **Status:** Accepted
+- **Decision:**
+  - Stream `CONCORD_OPS` (namespaced `concord.<env>.ops`), subjects
+    `concord.<env>.ops.doc` — ONE subject for all operation events (no
+    per-document subjects, no per-gateway consumers explosion).
+  - File storage, `WorkQueueRetention`? — NO: `LimitsPolicy/InterestRetention`
+    would drop events for absent gateways. Chosen: **`Interest`-based
+    retention is unsafe across gateway restarts; use explicit retention
+    `Limits` with max_age 10m + duplicate window 2m** (events are
+    ephemeral transport, NOT durable truth — PostgreSQL is; a gateway that
+    misses the window recovers via DB catch-up by design).
+  - Consumer: ONE durable PULL consumer **per gateway**
+    (`gw-<gateway-id>`), ExplicitAck, AckWait 30s, MaxDeliver 5, ordered
+    consumption; poison messages (5 failed deliveries) are NATS-terminated
+    (MaxDeliver) and logged — never retried forever, never crash the
+    gateway; the DB catch-up floor makes event loss safe.
+  - Max ack pending bounded (e.g. 256) to cap in-flight event memory.
+- **Alternatives:** per-document subjects (subject explosion with document
+  count — explicitly warned against); push consumers (delivery control
+  belongs to the consumer); WorkQueue (single-consumer semantics prevent
+  multi-gateway fanout); Core NATS at-least-only (no redelivery/ack
+  semantics); streams per environment×gateway (consumer metadata growth).
+- **Rationale:** One stream + one subject + N pull consumers is the
+  minimal topology that gives every gateway every event with independent
+  ack/redelivery positions; short retention keeps JetStream lean BECAUSE
+  PostgreSQL is the durable floor (documented, not assumed).
+- **Consequences:** Every gateway sees every batch event (filters by
+  local room interest before fanout — cheap in-memory check); broker
+  traffic scales O(gateways × accepted batches); lag observability via
+  consumer ack-pending (M040).
+- **Evidence:** P4-M006 spec; stream provisioning test (M012); redelivery
+  tests (M018/M036/M038).
+
+## DEC-033 — Redis scope: ephemeral-only keymap with namespacing + TTLs + fail-open rate limiting
+
+- **Status:** Accepted
+- **Decision:** Redis keys (namespace `concord:<env>:`):
+  - `presence:<doc>:<user>` → hash {gateway, replica, last_seen}, TTL 60s
+    (expiry is the authority; cleanup best-effort).
+  - `ratelimit:<scope>:<principal>` → token-bucket state for connects,
+    write-ops, malformed-frames (per-user / per-IP as configured).
+  - `gw:<id>` liveness hints, TTL 30s.
+  - NO document content, NO ACLs, NO operation payloads — forbidden by
+    design (code-reviewed + wipe test).
+  - Redis loss: rate limiting degrades to PER-GATEWAY LOCAL token buckets
+    (fail-open for limits — availability over strictness — with local
+    caps still bounding abuse per gateway); presence degrades to absent;
+    durable paths never consulted Redis (M024).
+- **Alternatives:** fail-closed rate limiting (a Redis outage would then
+  block all writes — unacceptable: durable correctness must not depend on
+  an ephemeral tier); Redis as fanout transport (mixes ephemeral infra
+  into the durable event path — rejected in DEC-009).
+- **Rationale:** The ephemeral tier must be able to vanish without
+  coordinated recovery; the wipe test (M037) proves it empirically.
+- **Consequences:** A determined abuser landing on different gateways
+  during a Redis outage gets N×local limits (documented residual risk,
+  bounded); presence is eventually-expired, never manually swept.
+- **Evidence:** P4-M007 spec; M022–M024, M037 tests.

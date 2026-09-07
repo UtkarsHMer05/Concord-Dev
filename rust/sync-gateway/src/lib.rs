@@ -4,6 +4,8 @@
 //! binary (`main.rs`) stays thin and integration tests can drive the server.
 
 pub mod auth;
+pub mod broker;
+pub mod bus;
 pub mod config;
 pub mod db;
 pub mod error;

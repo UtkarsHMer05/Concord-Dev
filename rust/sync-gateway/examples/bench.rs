@@ -229,6 +229,10 @@ async fn main() {
         idle_timeout: Duration::from_secs(600),
         db_pool_size: 8,
         jwks_file: None,
+        nats_url: None,
+        nats_subject_prefix: "concord.bench".to_string(),
+        gateway_id: 1,
+        redis_url: None,
     };
     let db = match Db::connect(&config).await {
         Ok(db) => db,
@@ -269,6 +273,8 @@ async fn main() {
         repo: repo.clone(),
         verifier,
         draining: Arc::new(AtomicBool::new(false)),
+        bus: Arc::new(sync_gateway::bus::LocalOnlyPublisher),
+        gateway_id: 1,
     };
     let app = http::router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
