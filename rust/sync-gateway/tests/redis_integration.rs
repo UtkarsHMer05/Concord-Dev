@@ -28,16 +28,18 @@ async fn handle(ns: &str) -> Option<RedisHandle> {
 }
 
 /// FLUSHALL in the wipe test is global — serialize the whole file so the
-/// wipe cannot race the other Redis tests inside this binary.
-static FILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// wipe cannot race the other Redis tests inside this binary. The guard is
+/// intentionally held across awaits (test-only serialization; tests in
+/// this binary must not overlap).
+static FILE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-fn file_lock() -> std::sync::MutexGuard<'static, ()> {
-    FILE_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+async fn file_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    FILE_LOCK.lock().await
 }
 
 #[tokio::test]
 async fn presence_upsert_count_remove_with_ttl() {
-    let _guard = file_lock();
+    let _guard = file_lock().await;
     let ns = format!("it{}", Uuid::new_v4().simple());
     let Some(redis) = handle(&ns).await else {
         eprintln!("SKIP: redis down");
@@ -79,7 +81,7 @@ fn raw_redis_conn() -> redis::Connection {
 
 #[tokio::test]
 async fn distributed_rate_limit_across_instances() {
-    let _guard = file_lock();
+    let _guard = file_lock().await;
     let ns = format!("it{}", Uuid::new_v4().simple());
     let Some(redis) = handle(&ns).await else {
         eprintln!("SKIP: redis down");
@@ -158,7 +160,7 @@ async fn local_fallback_when_redis_is_down() {
 
 #[tokio::test]
 async fn full_wipe_loses_nothing_durable_and_presence_rebuilds() {
-    let _guard = file_lock();
+    let _guard = file_lock().await;
     // M037 (ephemeral side): FLUSHALL clears presence + counters only;
     // they REBUILD from live traffic immediately; nothing durable is
     // stored in Redis by design (document/ACL/op-log never touch it).

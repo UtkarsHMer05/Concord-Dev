@@ -608,23 +608,23 @@ async fn reconnect_storm_is_contained_by_admission_control() {
     let mut accepted = 0;
     let mut rejected = 0;
     for _ in 0..60 {
-        match reqwest::get(format!("http://127.0.0.1:9341/api/v1/health/live")).await {
+        match reqwest::get("http://127.0.0.1:9341/api/v1/health/live").await {
             Ok(_) => accepted += 1, // HTTP (not WS) is unlimited — the WS upgrade path is what we burst next
             Err(_) => rejected += 1,
         }
         // Burst WS upgrades (these DO pass through the connect limiter).
-        let _ = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:9341/api/v1/sync")).await;
+        let _ = tokio_tungstenite::connect_async("ws://127.0.0.1:9341/api/v1/sync").await;
     }
     let _ = accepted;
     // The health endpoint must stay responsive THROUGHOUT the storm.
-    let healthy = reqwest::get(format!("http://127.0.0.1:9341/api/v1/health/ready"))
+    let healthy = reqwest::get("http://127.0.0.1:9341/api/v1/health/ready")
         .await
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     assert!(healthy, "gateway stays healthy during connection storm");
 
     // The limiter's own accounting (rate_limited metric via /metrics).
-    let metrics = reqwest::get(format!("http://127.0.0.1:9341/api/v1/metrics"))
+    let metrics = reqwest::get("http://127.0.0.1:9341/api/v1/metrics")
         .await
         .expect("metrics")
         .text()
