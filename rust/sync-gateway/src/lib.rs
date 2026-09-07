@@ -8,6 +8,7 @@ pub mod broker;
 pub mod bus;
 pub mod config;
 pub mod db;
+pub mod ephemeral;
 pub mod error;
 pub mod http;
 pub mod protocol;

@@ -13,9 +13,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::bus::EventPublisher;
+use crate::ephemeral::ratelimit::RateLimitOutcome;
 use crate::http::AppState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, State};
+use axum::response::IntoResponse;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -74,6 +76,20 @@ pub async fn upgrade(
     State(app): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
 ) -> axum::response::Response {
+    // Admission control (P4-M031/M023): bounded new-connection rate per
+    // peer; distributed when Redis is up, local fallback otherwise.
+    if app
+        .rate_limiter
+        .check(
+            crate::ephemeral::ratelimit::SCOPE_CONNECT,
+            &peer.ip().to_string(),
+        )
+        .await
+        == RateLimitOutcome::Limited
+    {
+        tracing::info!(peer = %peer, "connection rejected: rate limited");
+        return axum::http::StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
     let registry = app.registry.clone();
     let config = app.config.clone();
     let repo = app.repo.clone();
@@ -81,6 +97,7 @@ pub async fn upgrade(
     let draining = app.draining.clone();
     let bus = app.bus.clone();
     let gateway_id = app.gateway_id;
+    let presence = app.presence.clone();
     ws.max_message_size(MAX_FRAME_BYTES)
         .max_frame_size(MAX_FRAME_BYTES)
         .on_upgrade(move |socket| {
@@ -92,6 +109,7 @@ pub async fn upgrade(
             async move {
                 handle_socket(
                     socket, peer, config, registry, repo, verifier, draining, bus, gateway_id,
+                    presence,
                 )
                 .await;
             }
@@ -109,6 +127,7 @@ async fn handle_socket(
     draining: Arc<AtomicBool>,
     bus: Arc<dyn EventPublisher>,
     gateway_id: u64,
+    presence: Option<Arc<crate::ephemeral::presence::PresenceStore>>,
 ) {
     Metrics::global()
         .active_connections
@@ -164,11 +183,17 @@ async fn handle_socket(
     )
     .await;
 
-    // Cleanup: leave room, mark closed, stop writer. `conn` (which holds
-    // an outbound-sender clone) must drop BEFORE awaiting the writer — the
-    // writer exits only when every sender is gone.
+    // Cleanup: leave room, remove presence (best-effort), mark closed,
+    // stop writer. `conn` (which holds an outbound-sender clone) must drop
+    // BEFORE awaiting the writer — the writer exits only when every sender
+    // is gone.
     if let Some(doc) = conn.document {
         registry.leave(doc, connection_id).await;
+        if let Some(store) = &presence {
+            if let Some(user) = conn.user {
+                let _ = store.remove(doc, user.0).await;
+            }
+        }
     }
     conn.state = SessionState::Closed;
     drop(conn);

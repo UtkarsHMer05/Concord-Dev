@@ -34,6 +34,11 @@ pub struct AppState {
     pub bus: Arc<dyn EventPublisher>,
     /// This gateway's identity (P4-M010; observability, not correctness).
     pub gateway_id: u64,
+    /// Distributed rate limiter (P4-M023): None ⇒ local-only fallback
+    /// limiter; Some ⇒ Redis-backed with automatic local fallback.
+    pub rate_limiter: Arc<crate::ephemeral::ratelimit::RateLimiter>,
+    /// Presence store (P4-M022): None ⇒ presence disabled (Phase 3 mode).
+    pub presence: Option<Arc<crate::ephemeral::presence::PresenceStore>>,
 }
 
 pub fn router(state: AppState) -> Router {

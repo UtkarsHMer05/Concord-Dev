@@ -275,6 +275,11 @@ async fn main() {
         draining: Arc::new(AtomicBool::new(false)),
         bus: Arc::new(sync_gateway::bus::LocalOnlyPublisher),
         gateway_id: 1,
+        rate_limiter: Arc::new(sync_gateway::ephemeral::ratelimit::RateLimiter::new(
+            None,
+            sync_gateway::ephemeral::ratelimit::default_policies(),
+        )),
+        presence: None,
     };
     let app = http::router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

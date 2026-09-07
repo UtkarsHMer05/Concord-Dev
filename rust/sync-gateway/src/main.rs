@@ -79,6 +79,40 @@ async fn main() {
         None => (Arc::new(sync_gateway::bus::LocalOnlyPublisher), None),
     };
 
+    // Ephemeral tier (P4-M021..M024): Redis-backed when configured;
+    // absence degrades to local rate limiting + disabled presence.
+    let redis_handle = match &config.redis_url {
+        Some(url) => {
+            match sync_gateway::ephemeral::RedisHandle::connect(
+                &sync_gateway::ephemeral::RedisConfig {
+                    url: url.clone(),
+                    namespace: config.nats_subject_prefix.clone(),
+                },
+            )
+            .await
+            {
+                Ok(handle) => {
+                    tracing::info!("redis ephemeral tier connected");
+                    Some(handle)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, error_class = "redis", "redis unavailable; local rate limiting + presence disabled");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+    let rate_limiter = Arc::new(sync_gateway::ephemeral::ratelimit::RateLimiter::new(
+        redis_handle.clone(),
+        sync_gateway::ephemeral::ratelimit::default_policies(),
+    ));
+    let presence = redis_handle.map(|handle| {
+        Arc::new(sync_gateway::ephemeral::presence::PresenceStore::new(
+            handle,
+        ))
+    });
+
     let state = AppState {
         config: Arc::new(config.clone()),
         registry: registry.clone(),
@@ -95,6 +129,8 @@ async fn main() {
         draining: Arc::new(AtomicBool::new(false)),
         bus,
         gateway_id,
+        rate_limiter,
+        presence,
     };
 
     // Broker subscription task: cross-gateway events → local fanout.
