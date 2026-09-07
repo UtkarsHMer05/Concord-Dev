@@ -30,3 +30,4 @@ if(CONCORD_SANITIZE_THREAD)
 endif()
 
 add_subdirectory(crdt)
+add_subdirectory(worker)

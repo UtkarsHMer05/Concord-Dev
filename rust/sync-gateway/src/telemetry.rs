@@ -32,6 +32,11 @@ pub struct Metrics {
     pub broker_events_consumed_total: AtomicU64,
     pub broker_poison_total: AtomicU64,
     pub rate_limited_total: AtomicU64,
+    /// Phase 5 maintenance counters (P5-M039).
+    pub worker_timeouts: AtomicU64,
+    pub worker_failures_total: AtomicU64,
+    pub snapshots_finalized_total: AtomicU64,
+    pub snapshots_failed_total: AtomicU64,
     /// Recent DB write latencies (µs), capped ring for p50/p95/p99 (M043).
     pub db_write_latency_us: std::sync::Mutex<Vec<u64>>,
 }
@@ -55,6 +60,10 @@ impl Default for Metrics {
             broker_events_consumed_total: AtomicU64::new(0),
             broker_poison_total: AtomicU64::new(0),
             rate_limited_total: AtomicU64::new(0),
+            worker_timeouts: AtomicU64::new(0),
+            worker_failures_total: AtomicU64::new(0),
+            snapshots_finalized_total: AtomicU64::new(0),
+            snapshots_failed_total: AtomicU64::new(0),
             db_write_latency_us: std::sync::Mutex::new(Vec::with_capacity(4096)),
         }
     }
