@@ -878,3 +878,38 @@ retained and will not be removed.
   during a Redis outage gets N×local limits (documented residual risk,
   bounded); presence is eventually-expired, never manually swept.
 - **Evidence:** P4-M007 spec; M022–M024, M037 tests.
+
+## DEC-034 — Phase 4 routing: broadcast fan-out with local room filtering (no sharding, no consistent hashing)
+
+- **Status:** Accepted
+- **Decision:** Every gateway subscribes to ONE subject and receives every
+  accepted-batch event; each gateway filters by local room membership before
+  fanout (in-memory check, no DB read). No per-document subjects, no shard
+  subjects, no consistent hashing, no dynamic per-room subscriptions.
+- **Context:** P4-M034 requires an evidence-based comparison. Analysis:
+  - *Per-document / dynamic room subscriptions*: subscription count grows
+    with active documents × gateways; NATS per-subscription overhead and
+    re-subscription churn on room churn; unbounded metadata growth — the
+    prompt explicitly warns against subject explosion.
+  - *Shard subjects (document → shard → owner gateway)*: introduces
+    routing state, shard reassignment on gateway failure, and a
+    cross-shard delivery path — distributed complexity with no measured
+    bottleneck to justify it at Concord's scale (one host, 3 gateways,
+    measured 1085 ops/s ingest with fanout p50 ≈ 2 ms).
+  - *Broadcast + local filter*: O(gateways) delivery per batch; gateway
+    cost per irrelevant event = one UUID set-membership check (~ns).
+  - *Consistent hashing*: solves a load-skew problem we have not
+    demonstrated (benchmark M042/M044 evidence pending; hot-doc fairness
+    M044 measures whether skew exists at all).
+- **Rationale:** Minimal moving parts; correctness is already global
+  (every gateway can serve any document from PostgreSQL); broadcast keeps
+  the failure model trivial (no routing state to repair after crashes).
+  Message amplification is O(gateways), which is 3 locally and modest at
+  realistic Phase 4 scale.
+- **Consequences:** Broker traffic scales with (accepted batches ×
+  gateways); irrelevant-event filtering is per-gateway CPU, bounded and
+  cheap. Revisit with evidence if gateway count or document fanout cost
+  makes amplification measurable (Phase 5/6 benchmarks decide).
+- **Evidence:** P4-M034 analysis; multi_gateway tests (all convergence
+  paths through the broadcast consumer); M042/M044 benchmark runs.
+- **Revisit conditions:** measured broker/CPU amplification at scale.
