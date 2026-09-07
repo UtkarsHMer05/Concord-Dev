@@ -19,7 +19,10 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <map>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "concord/crdt/doc.hpp"
@@ -42,6 +45,7 @@ constexpr std::uint32_t kCmdExportSnapshot = 2;
 constexpr std::uint32_t kCmdImportVerify = 3;
 constexpr std::uint32_t kCmdDigestAfter = 4;
 constexpr std::uint32_t kCmdVerifySnapshot = 5;
+constexpr std::uint32_t kCmdGenerateOps = 6;
 
 constexpr std::uint32_t kStatusOk = 0;
 constexpr std::uint32_t kStatusMalformed = 1;
@@ -79,6 +83,14 @@ struct Reader {
             value |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[offset + i])) << (8u * i);
         }
         offset += 4;
+        return value;
+    }
+    [[nodiscard]] std::uint64_t u64() {
+        std::uint64_t value = 0;
+        for (std::size_t i = 0; i < 8; ++i) {
+            value |= static_cast<std::uint64_t>(static_cast<unsigned char>(bytes[offset + i])) << (8u * i);
+        }
+        offset += 8;
         return value;
     }
     [[nodiscard]] std::string blob() {
@@ -805,6 +817,323 @@ CONCORD_TEST(maintenance_replica_never_in_output_snapshot) {
     CHECK_EQ(imported.canonical_digest(), h.doc.canonical_digest());
 }
 
+// ---------------------------------------------------------------------------
+// CMD 6 (P5-M014b): deterministic op-stream generation.
+// ---------------------------------------------------------------------------
+struct GeneratedResponse {
+    std::string digest;
+    std::vector<std::string> batches;  // serialize_batch frames, in order
+    std::vector<Operation> ops;         // all ops, decoded and concatenated
+};
+
+// Builds a CMD 6 request body: [u64 seed][u32 op_count][u32 replicas][u32 shape].
+std::string generate_request(std::uint64_t seed, std::uint32_t op_count,
+                             std::uint32_t replica_count, std::uint32_t shape) {
+    Bytes b;
+    b.u32(kCmdGenerateOps);
+    for (int i = 0; i < 8; ++i) {
+        b.data.push_back(static_cast<char>((seed >> (8 * i)) & 0xffu));
+    }
+    b.u32(op_count);
+    b.u32(replica_count);
+    b.u32(shape);
+    return b.data;
+}
+
+// Runs CMD 6 and asserts a well-formed OK response; returns the parsed view.
+GeneratedResponse generate_and_parse(std::uint64_t seed, std::uint32_t op_count,
+                                     std::uint32_t replica_count, std::uint32_t shape) {
+    const WorkerRun run = run_worker(generate_request(seed, op_count, replica_count, shape));
+    CHECK_EQ(run.exit_code, 0);
+    CHECK(run.stderr_bytes.empty());
+
+    GeneratedResponse out;
+    Reader r{run.stdout_bytes};
+    CHECK_EQ(r.u32(), kStatusOk);
+    out.digest = r.blob();
+    const std::uint32_t batch_count = r.u32();
+    out.batches.reserve(batch_count);
+    std::size_t total_ops = 0;
+    for (std::uint32_t i = 0; i < batch_count; ++i) {
+        const std::string batch = r.blob();
+        // Each batch is a complete serialize_batch frame; decode through the
+        // core (the semantic authority) and enforce the ≤512-op batch bound.
+        const std::vector<Operation> ops = parse_batch(batch);
+        CHECK(ops.size() <= 512);
+        total_ops += ops.size();
+        out.ops.insert(out.ops.end(), ops.begin(), ops.end());
+        out.batches.push_back(batch);
+    }
+    CHECK(r.done());
+    CHECK_EQ(total_ops, static_cast<std::size_t>(op_count));
+    return out;
+}
+
+// Wraps one op as a single-op batch frame (the durable-log row shape).
+std::string single_op_batch(const Operation& op) {
+    return serialize_batch(std::vector<Operation>{op});
+}
+
+// CMD 1 reconstruct returning (digest, snapshot).
+std::pair<std::string, std::string> reconstruct_ops(const std::vector<Operation>& ops) {
+    const WorkerRun run = run_worker(snapshot_ops_request(
+        kCmdReconstruct, [&] {
+            std::vector<std::string> batches;
+            batches.reserve(ops.size());
+            for (const Operation& op : ops) {
+                batches.push_back(single_op_batch(op));
+            }
+            return batches;
+        }()));
+    CHECK_EQ(run.exit_code, 0);
+    Reader r{run.stdout_bytes};
+    CHECK_EQ(r.u32(), kStatusOk);
+    const std::string digest = r.blob();
+    const std::string snapshot = r.blob();
+    CHECK(r.done());
+    return {digest, snapshot};
+}
+
+CONCORD_TEST(generate_same_seed_is_byte_identical) {
+    const std::string request = generate_request(0xDEADBEEF12345678ULL, 1000, 3, 0);
+    const WorkerRun first = run_worker(request);
+    const WorkerRun second = run_worker(request);
+    CHECK_EQ(first.exit_code, 0);
+    CHECK_EQ(second.exit_code, 0);
+    CHECK(first.stdout_bytes == second.stdout_bytes);
+    CHECK(first.stderr_bytes.empty());
+    CHECK(second.stderr_bytes.empty());
+}
+
+CONCORD_TEST(generate_different_seeds_produce_distinct_streams) {
+    const GeneratedResponse a = generate_and_parse(1, 300, 2, 0);
+    const GeneratedResponse b = generate_and_parse(2, 300, 2, 0);
+    const GeneratedResponse c = generate_and_parse(3, 300, 2, 0);
+    const GeneratedResponse d = generate_and_parse(4, 300, 2, 0);
+    CHECK(a.digest != b.digest);
+    CHECK(a.digest != c.digest);
+    CHECK(b.digest != c.digest);
+    CHECK(a.digest != d.digest);  // 3 distinct pairs, as required
+    // The op streams differ too, not just the digests.
+    CHECK(!(a.ops == b.ops));
+}
+
+CONCORD_TEST(generate_self_consistent_reconstruct_reproduces_digest) {
+    const GeneratedResponse g = generate_and_parse(20260907ULL, 2000, 3, 0);
+    const auto [digest, snapshot] = reconstruct_ops(g.ops);
+    CHECK_EQ(digest, g.digest);  // applying the returned batches reproduces it
+    // The reconstructed snapshot imports back to the same state.
+    const Doc imported = Doc::import_snapshot(ReplicaId{42}, snapshot);
+    CHECK_EQ(imported.canonical_digest(), g.digest);
+}
+
+CONCORD_TEST(generate_digest_after_equivalence_at_three_splits) {
+    // M020/M021 equivalence in miniature: for K ∈ {1, n/2, n-1}, snapshot
+    // from the first K ops + digest-after of the tail == full-replay digest.
+    const std::uint32_t n = 501;  // odd ⇒ K = 250 and K = 500 exercised
+    const GeneratedResponse g = generate_and_parse(987654321ULL, n, 3, 2);
+    for (const std::size_t K : {std::size_t{1}, static_cast<std::size_t>(n / 2),
+                               static_cast<std::size_t>(n - 1)}) {
+        const std::vector<Operation> head(g.ops.begin(), g.ops.begin() + K);
+        const std::vector<Operation> tail(g.ops.begin() + K, g.ops.end());
+        const auto [head_digest, head_snapshot] = reconstruct_ops(head);
+        (void)head_digest;
+
+        std::vector<std::string> tail_batches;
+        tail_batches.reserve(tail.size());
+        for (const Operation& op : tail) {
+            tail_batches.push_back(single_op_batch(op));
+        }
+        const WorkerRun run = run_worker(digest_after_request(head_snapshot, tail_batches));
+        CHECK_EQ(run.exit_code, 0);
+        Reader r{run.stdout_bytes};
+        CHECK_EQ(r.u32(), kStatusOk);
+        CHECK_EQ(r.blob(), g.digest);
+        CHECK(r.done());
+    }
+}
+
+CONCORD_TEST(generate_never_emits_maintenance_replica) {
+    // By construction the generator's ids carry bit 62 (band 0x4000...) and
+    // can never equal the maintenance constant; assert across 20 seeds.
+    for (std::uint64_t seed = 0; seed < 20; ++seed) {
+        const GeneratedResponse g = generate_and_parse(seed + 1, 100, 2, 0);
+        CHECK(!g.ops.empty());
+        for (const Operation& op : g.ops) {
+            CHECK(op.id.replica.value() != kMaintenanceReplicaValue);
+            CHECK((op.id.replica.value() & (1ULL << 62)) != 0);  // band bit set
+            if (op.left.has_value()) {
+                CHECK(op.left->replica.value() != kMaintenanceReplicaValue);
+            }
+            if (op.right.has_value()) {
+                CHECK(op.right->replica.value() != kMaintenanceReplicaValue);
+            }
+            if (op.target.has_value()) {
+                CHECK(op.target->replica.value() != kMaintenanceReplicaValue);
+            }
+        }
+    }
+}
+
+CONCORD_TEST(generate_all_shapes_self_consistent) {
+    // 10k ops, 3 replicas, each shape: stream applies cleanly through CMD 1
+    // and reproduces the generated digest.
+    for (std::uint32_t shape = 0; shape < 4; ++shape) {
+        const GeneratedResponse g = generate_and_parse(777, 10'000, 3, shape);
+        const auto [digest, snapshot] = reconstruct_ops(g.ops);
+        CHECK_EQ(digest, g.digest);
+        // Multi-replica interleaving actually happened.
+        std::set<std::uint64_t> writers;
+        for (const Operation& op : g.ops) {
+            writers.insert(op.id.replica.value());
+        }
+        CHECK_EQ(writers.size(), 3u);
+        // Rich-op coverage: every shape emits inserts (incl. delimiters),
+        // deletes, and setattrs — shape 1 (insert-heavy) uses a fixed
+        // sprinkle of deletes/attrs on top of the insert floor, so the
+        // collaborative subset is exercised by all shapes.
+        bool saw_delete = false;
+        bool saw_setattr = false;
+        bool saw_delim = false;
+        for (const Operation& op : g.ops) {
+            if (op.type == OpType::Delete) {
+                saw_delete = true;
+            }
+            if (op.type == OpType::SetAttr) {
+                saw_setattr = true;
+            }
+            if (op.kind == ItemKind::Delimiter) {
+                saw_delim = true;
+            }
+        }
+        CHECK(saw_delete);
+        CHECK(saw_setattr);
+        CHECK(saw_delim);
+        // Batching: exact count, ≤512 per batch, empty-stream edge for K.
+        for (const std::string& batch : g.batches) {
+            CHECK(parse_batch(batch).size() <= 512);
+        }
+        (void)snapshot;
+    }
+}
+
+CONCORD_TEST(generate_bounds_and_validation) {
+    // op_count = 0: empty batch list + digest of the empty doc.
+    {
+        const GeneratedResponse g = generate_and_parse(42, 0, 1, 0);
+        CHECK(g.batches.empty());
+        CHECK(g.ops.empty());
+        const Doc empty(ReplicaId{5});
+        CHECK_EQ(g.digest, empty.canonical_digest());
+    }
+    // op_count > 10M: status 4 (rejected before any generation).
+    {
+        Bytes b;
+        b.u32(kCmdGenerateOps);
+        for (int i = 0; i < 8; ++i) {
+            b.data.push_back(static_cast<char>((0xABCDULL >> (8 * i)) & 0xffu));
+        }
+        b.u32(10'000'001);
+        b.u32(1);
+        b.u32(0);
+        const WorkerRun run = run_worker(b.data);
+        CHECK_EQ(run.exit_code, 0);
+        Reader r{run.stdout_bytes};
+        CHECK_EQ(r.u32(), kStatusSizeExceeded);
+        (void)r.blob();
+        CHECK(r.done());
+    }
+    // Malformed bodies: replica_count 0 / >8, shape >3, truncated body,
+    // trailing bytes — all status 1.
+    {
+        struct Case {
+            std::string body;
+            const char* name;
+        };
+        std::vector<Case> cases;
+        for (const auto [reps, shape] : {std::pair{0u, 0u}, std::pair{9u, 0u}, std::pair{1u, 4u}}) {
+            Bytes b;
+            b.u32(kCmdGenerateOps);
+            for (int i = 0; i < 8; ++i) {
+                b.data.push_back('\0');
+            }
+            b.u32(100);
+            b.u32(reps);
+            b.u32(shape);
+            cases.push_back({b.data, "out-of-range parameter"});
+        }
+        Bytes trunc;
+        trunc.u32(kCmdGenerateOps);
+        trunc.data.append(12, '\0');  // only 12 of 20 body bytes
+        cases.push_back({trunc.data, "truncated body"});
+        Bytes trailing = Bytes{};
+        trailing.u32(kCmdGenerateOps);
+        for (int i = 0; i < 8; ++i) {
+            trailing.data.push_back('\0');
+        }
+        trailing.u32(10);
+        trailing.u32(1);
+        trailing.u32(0);
+        trailing.raw("zz");
+        cases.push_back({trailing.data, "trailing bytes"});
+
+        for (const Case& c : cases) {
+            const WorkerRun run = run_worker(c.body);
+            CHECK_EQ(run.exit_code, 0);
+            Reader r{run.stdout_bytes};
+            CHECK_EQ(r.u32(), kStatusMalformed);
+            (void)r.blob();
+            CHECK(r.done());
+        }
+    }
+}
+
+CONCORD_TEST(generate_stream_is_multi_replica_interleaved) {
+    // With 4 replicas the stream must interleave writers (round-robin with
+    // bounded skips) — consecutive same-replica runs stay short, and all
+    // replicas author non-trivial counts of ops.
+    const GeneratedResponse g = generate_and_parse(31337, 2000, 4, 0);
+    CHECK_EQ(g.ops.size(), 2000u);
+    std::map<std::uint64_t, std::size_t> counts;
+    std::size_t max_run = 0;
+    std::size_t run = 0;
+    std::uint64_t prev = 0;
+    for (const Operation& op : g.ops) {
+        const std::uint64_t writer = op.id.replica.value();
+        counts[writer] += 1;
+        if (writer == prev) {
+            run += 1;
+        } else {
+            run = 1;
+            prev = writer;
+        }
+        max_run = std::max(max_run, run);
+    }
+    CHECK_EQ(counts.size(), 4u);
+    for (const auto& [writer, count] : counts) {
+        CHECK(count > 100);  // every replica contributes substantially
+    }
+    // Anchored inserts reference EXISTING earlier ids (causal legality):
+    // track every created id and assert anchors only reference the past.
+    std::set<std::pair<std::uint64_t, std::uint64_t>> seen;
+    for (const Operation& op : g.ops) {
+        seen.insert({op.id.replica.value(), op.id.counter.value()});
+        if (op.left.has_value()) {
+            CHECK(seen.count({op.left->replica.value(), op.left->counter.value()}) == 1);
+        }
+        if (op.right.has_value()) {
+            CHECK(seen.count({op.right->replica.value(), op.right->counter.value()}) == 1);
+        }
+        if (op.target.has_value()) {
+            CHECK(seen.count({op.target->replica.value(), op.target->counter.value()}) == 1);
+        }
+    }
+    CHECK(max_run <= 3);  // rotation: at most a 2-skip produces a 1-2 back-to-back
+    (void)max_run;
+}
+
 int main() {
     return ::concord::testing::run_all();
 }
+
+
