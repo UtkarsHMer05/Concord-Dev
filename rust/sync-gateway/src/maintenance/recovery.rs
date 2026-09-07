@@ -191,7 +191,7 @@ impl RecoverySelector {
         let tail = self
             .tail_after(document, v.coverage_seq)
             .await
-            .map_err(|e| VerificationError::Db(e))?;
+            .map_err(VerificationError::Db)?;
         let recovered = self.workers.digest_after(&v.inner, &tail).await?;
 
         let full_ops = self

@@ -51,9 +51,16 @@ server snapshot wrapper (version 1)
 ├── coverage boundary            u64     (server seq S)
 ├── op count covered              u64
 ├── inner payload len             u64
-├── inner payload                 …       (unchanged C++ v1 snapshot)
-└── wrapper checksum              32B     SHA-256 of everything above
+└── inner payload                 …       (unchanged C++ v1 snapshot)
 ```
+
+The wrapper bytes are exactly what `crdt_snapshots.payload` stores and
+what clients receive in `payload_base64`. The SHA-256 checksum is NOT
+embedded in the wrapper — it travels out of band (the
+`payload_checksum` column server-side; the JSON envelope
+`snapshot_checksum`/`checksum` field client-side) so there is exactly
+one integrity domain: the checksum covers all wrapper bytes, including
+the length fields, with no self-referential bytes inside.
 
 The inner payload is the Phase 2 `Doc::export_snapshot()` byte string,
 unchanged — it already carries the item stream (with tombstones,
