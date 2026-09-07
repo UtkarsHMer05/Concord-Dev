@@ -26,9 +26,11 @@ use crate::auth::TokenVerifier;
 use crate::config::Config;
 use crate::db::repo::{GatewayRepo, RepoError, UserId};
 use crate::protocol::control::{
-    Authenticated, ControlFrame, DurableAck, ErrorFrame, Frame, HelloAck, JoinAccepted,
-    JoinDocument, Ping, Pong, ServerDraining, SyncDone,
+    Authenticated, ControlFrame, DurableAck, ErrorFrame, FetchSnapshot, Frame, HelloAck,
+    JoinAccepted, JoinDocument, Ping, Pong, ServerDraining, SnapshotPayload,
+    SnapshotResyncRequired, SyncDone,
 };
+
 use crate::protocol::data::{DataFrame, SyncBatch};
 use crate::protocol::envelope::OpEnvelope;
 use crate::protocol::error::{error_code_to_str, ProtocolError};
@@ -463,6 +465,62 @@ async fn handle_text(
                 return Ok(());
             };
             let cursor: i64 = req.cursor.parse().unwrap_or(0);
+            // P5-M029/M031: a cursor below the compaction floor cannot
+            // be served by delta catch-up — the pruned ops are gone.
+            // Signal snapshot resync with the covering snapshot's
+            // metadata instead of streaming from the floor (which
+            // would silently produce a divergent replica).
+            if let Some(floor) = crate::maintenance::compaction::get_floor(&repo.db, doc)
+                .await
+                .ok()
+                .flatten()
+            {
+                if cursor < floor.floor_seq {
+                    // Resync decision (P5-M031): the covering snapshot
+                    // must be FINALIZED for this document and pass
+                    // integrity validation before announcing it.
+                    let snapshots = crate::db::snapshots::SnapshotRepo::new(repo.db.clone());
+                    let served = snapshots
+                        .get_by_snapshot_id(floor.snapshot_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .filter(|row| {
+                            row.document_id == doc
+                                && row.status == crate::db::snapshots::status::FINALIZED
+                        })
+                        .and_then(|row| {
+                            snapshots
+                                .validate_integrity(&row, doc)
+                                .ok()
+                                .map(|v| (row, v))
+                        });
+                    if let Some((row, validated)) = served {
+                        send_control(
+                            conn,
+                            Frame::SnapshotResyncRequired(SnapshotResyncRequired {
+                                boundary: floor.floor_seq.to_string(),
+                                snapshot_id: row.snapshot_id.to_string(),
+                                snapshot_checksum: row.payload_checksum.clone(),
+                                snapshot_format_version: row.format_version.to_string(),
+                                coverage_op_count: row.covered_op_count.to_string(),
+                            }),
+                            frame.id,
+                        );
+                        let _ = validated;
+                        return Ok(());
+                    }
+                    // Floor snapshot unreadable: fall back to the error
+                    // path — NEVER stream partial history silently.
+                    send_error(
+                        conn,
+                        ProtocolError::DatabaseUnavailable,
+                        "recovery snapshot unavailable",
+                        frame.id,
+                    );
+                    return Ok(());
+                }
+            }
             stream_catchup(conn, doc, cursor, repo).await;
         }
         Frame::Ping(ping) => {
@@ -471,11 +529,28 @@ async fn handle_text(
         Frame::Pong(_) => {
             // Heartbeat reply — activity already recorded by the loop.
         }
+        // P5-M031: snapshot fetch for stale-client resync. Legal in
+        // Syncing/Ready (the states where a resync can be in flight);
+        // the payload is validated + access-checked before send.
+        Frame::FetchSnapshot(fetch) => {
+            if conn.state != SessionState::Syncing && conn.state != SessionState::Ready {
+                send_error(
+                    conn,
+                    ProtocolError::InvalidState,
+                    "fetch_snapshot requires an active document session",
+                    frame.id,
+                );
+                return Ok(());
+            }
+            handle_fetch_snapshot(conn, fetch, repo).await;
+        }
         // Server->client frames are illegal inbound.
         Frame::HelloAck(_)
         | Frame::Authenticated(_)
         | Frame::JoinAccepted(_)
         | Frame::SyncDone(_)
+        | Frame::SnapshotResyncRequired(_)
+        | Frame::SnapshotPayload(_)
         | Frame::DurableAck(_)
         | Frame::Error(_)
         | Frame::ServerDraining(_) => {
@@ -567,6 +642,112 @@ async fn handle_join(
     // Initial catch-up from the server's high-water mark (bounded pages).
     stream_catchup(conn, document, durable_cursor, repo).await;
     Ok(())
+}
+
+/// Serves `fetch_snapshot` (P5-M031): full access recheck, snapshot
+/// validation, then the wrapper payload base64 on the same session.
+async fn handle_fetch_snapshot(conn: &mut Conn, fetch: FetchSnapshot, repo: &Arc<GatewayRepo>) {
+    let Some(user) = conn.user else { return };
+    let Some(doc) = conn.document else { return };
+    let Ok(snapshot_uuid) = uuid::Uuid::parse_str(&fetch.snapshot_id) else {
+        let fatal = send_error(
+            conn,
+            ProtocolError::MalformedFrame,
+            "invalid snapshot id",
+            None,
+        );
+        let _ = fatal;
+        return;
+    };
+    // Read + document-association + integrity validation, then a fresh
+    // authorization recheck — cross-tenant snapshot reads are refused
+    // indistinguishably from not-found (SA-SEC5 concern).
+    let snapshots = crate::db::snapshots::SnapshotRepo::new(repo.db.clone());
+    let row = match snapshots.get_by_snapshot_id(snapshot_uuid).await {
+        Ok(Some(r)) => r,
+        _ => {
+            let _ = send_error(conn, ProtocolError::Forbidden, "snapshot unavailable", None);
+            return;
+        }
+    };
+    if row.document_id != doc {
+        let _ = send_error(conn, ProtocolError::Forbidden, "snapshot unavailable", None);
+        return;
+    }
+    if repo
+        .document_access(user, doc)
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        crate::telemetry::Metrics::global()
+            .authorization_denied_total
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let _ = send_error(conn, ProtocolError::Forbidden, "snapshot unavailable", None);
+        return;
+    }
+    // Integrity validation is mandatory before serving any payload
+    // (M013 gate; corrupted snapshots fail closed here).
+    if snapshots.validate_integrity(&row, doc).is_err() {
+        let _ = send_error(
+            conn,
+            ProtocolError::DatabaseUnavailable,
+            "snapshot corrupt",
+            None,
+        );
+        return;
+    }
+    // Only FINALIZED snapshots are ever served (lifecycle invariant).
+    if row.status != crate::db::snapshots::status::FINALIZED {
+        let _ = send_error(
+            conn,
+            ProtocolError::DatabaseUnavailable,
+            "snapshot unavailable",
+            None,
+        );
+        return;
+    }
+    let payload_base64 = base64_encode(&row.payload);
+    send_control(
+        conn,
+        Frame::SnapshotPayload(SnapshotPayload {
+            snapshot_id: row.snapshot_id.to_string(),
+            format_version: row.format_version.to_string(),
+            coverage_seq: row.coverage_seq.to_string(),
+            covered_op_count: row.covered_op_count.to_string(),
+            state_digest: row.state_digest.clone(),
+            checksum: row.payload_checksum.clone(),
+            payload_base64,
+        }),
+        None,
+    );
+}
+
+/// Standard base64 (RFC 4648, with padding) — dependency-free: the
+/// payload rides a JSON text frame, so raw bytes must be encoded.
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(triple >> 18) as usize & 0x3f] as char);
+        out.push(TABLE[(triple >> 12) as usize & 0x3f] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[(triple >> 6) as usize & 0x3f] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[triple as usize & 0x3f] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
 }
 
 /// Streams bounded catch-up pages then `sync_done` (READY transition).

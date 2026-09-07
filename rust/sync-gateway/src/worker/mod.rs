@@ -33,6 +33,8 @@ pub mod cmd {
     pub const EXPORT_SNAPSHOT: u32 = 2;
     pub const IMPORT_VERIFY: u32 = 3;
     pub const DIGEST_AFTER: u32 = 4;
+    pub const VERIFY_SNAPSHOT: u32 = 5;
+    pub const GENERATE_OPS: u32 = 6;
 }
 
 /// Worker status codes (mirrors cpp/worker/main.cpp).
@@ -124,11 +126,14 @@ impl WorkerPool {
         self.timeout
     }
 
-    /// Runs one request frame and decodes one response frame.
+    /// Runs one request frame and returns the raw response frame.
     ///
     /// Cancellation-safe: dropping the returned future kills the child
     /// (spawn.kill_on_drop(true)) so no zombie outlives the caller.
-    pub async fn request(&self, command: u32, body: Vec<u8>) -> Result<WorkerOk, WorkerError> {
+    /// Command-specific decoders (e.g. [`Self::generate_ops`]) build on
+    /// this; the generic [`Self::request`] handles the common
+    /// [status][digest (± snapshot)] shape.
+    pub async fn request_frame(&self, command: u32, body: Vec<u8>) -> Result<Vec<u8>, WorkerError> {
         if !self.binary.is_file() {
             return Err(WorkerError::BinaryUnavailable(
                 self.binary.display().to_string(),
@@ -233,7 +238,15 @@ impl WorkerPool {
             });
         }
 
-        decode_response(&stdout_buf)
+        Ok(stdout_buf)
+    }
+
+    /// Generic request: decodes the common
+    /// [status][ok: [digest_len][digest] (± [snapshot_len][snapshot]) |
+    /// error: [msg_len][msg]] response shape.
+    pub async fn request(&self, command: u32, body: Vec<u8>) -> Result<WorkerOk, WorkerError> {
+        let frame = self.request_frame(command, body).await?;
+        decode_response(&frame)
     }
 
     // ----- command wrappers ------------------------------------------------
@@ -264,6 +277,101 @@ impl WorkerPool {
         body.extend_from_slice(&encode_op_batches(tail_op_payloads));
         self.request(cmd::DIGEST_AFTER, body).await
     }
+
+    /// CMD_GENERATE_OPS (6): deterministic seeded rich-op stream.
+    ///
+    /// Response shape: `[status]`, then on ok `[digest_len][digest]`,
+    /// then `[batch_count]` followed by batches of
+    /// `[u32 len][serialize_batch frames]`. The tail is NOT the
+    /// snapshot-shaped `[len][bytes]`, so this method decodes the
+    /// response itself rather than the generic path.
+    pub async fn generate_ops(
+        &self,
+        seed: u64,
+        op_count: u32,
+        replica_count: u32,
+        shape: u32,
+    ) -> Result<GeneratedStream, WorkerError> {
+        let mut body = Vec::with_capacity(20);
+        body.extend_from_slice(&seed.to_le_bytes());
+        body.extend_from_slice(&op_count.to_le_bytes());
+        body.extend_from_slice(&replica_count.to_le_bytes());
+        body.extend_from_slice(&shape.to_le_bytes());
+        let frame = self.request_frame(cmd::GENERATE_OPS, body).await?;
+        // Decode: [u32 status][ok: [u32 digest_len][digest]
+        //   [u32 batch_count] + batches × ([u32 len][bytes])
+        let mut offset = 0usize;
+        let get_u32 = |f: &[u8], o: usize| -> Option<u32> {
+            f.get(o..o + 4)
+                .map(|b| u32::from_le_bytes(b.try_into().expect("4")))
+        };
+        let Some(status_code) = get_u32(&frame, offset) else {
+            return Err(WorkerError::MalformedResponse("short status".into()));
+        };
+        offset += 4;
+        if status_code != status::OK {
+            let Some(msg_len) = get_u32(&frame, offset) else {
+                return Err(WorkerError::MalformedResponse(
+                    "error length missing".into(),
+                ));
+            };
+            offset += 4;
+            let Some(bytes) = frame.get(offset..offset + msg_len as usize) else {
+                return Err(WorkerError::MalformedResponse(
+                    "error message truncated".into(),
+                ));
+            };
+            return Err(WorkerError::Status {
+                status: status_code,
+                message: String::from_utf8_lossy(bytes).trim().to_string(),
+            });
+        }
+        let Some(digest_len) = get_u32(&frame, offset) else {
+            return Err(WorkerError::MalformedResponse(
+                "digest length missing".into(),
+            ));
+        };
+        offset += 4;
+        let Some(digest_bytes) = frame.get(offset..offset + digest_len as usize) else {
+            return Err(WorkerError::MalformedResponse("digest truncated".into()));
+        };
+        let digest = String::from_utf8(digest_bytes.to_vec())
+            .map_err(|_| WorkerError::MalformedResponse("digest not utf-8".into()))?;
+        offset += digest_len as usize;
+        let Some(batch_count) = get_u32(&frame, offset) else {
+            return Err(WorkerError::MalformedResponse("batch count missing".into()));
+        };
+        offset += 4;
+        let mut batches = Vec::with_capacity(batch_count as usize);
+        for _ in 0..batch_count {
+            let Some(len) = get_u32(&frame, offset) else {
+                return Err(WorkerError::MalformedResponse(
+                    "batch length missing".into(),
+                ));
+            };
+            offset += 4;
+            let Some(bytes) = frame.get(offset..offset + len as usize) else {
+                return Err(WorkerError::MalformedResponse("batch truncated".into()));
+            };
+            batches.push(bytes.to_vec());
+            offset += len as usize;
+        }
+        if offset != frame.len() {
+            return Err(WorkerError::MalformedResponse(
+                "trailing bytes in generated stream".into(),
+            ));
+        }
+        Ok(GeneratedStream { digest, batches })
+    }
+}
+
+/// A generated op stream (CMD_GENERATE_OPS): the digest of the final
+/// state after applying all batches in order, plus the batches (each a
+/// complete serialize_batch frame as the worker protocol emits).
+#[derive(Debug, Clone)]
+pub struct GeneratedStream {
+    pub digest: String,
+    pub batches: Vec<Vec<u8>>,
 }
 
 // ----- codec helpers -------------------------------------------------------

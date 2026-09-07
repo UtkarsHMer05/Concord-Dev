@@ -194,20 +194,54 @@ impl RecoverySelector {
             .map_err(VerificationError::Db)?;
         let recovered = self.workers.digest_after(&v.inner, &tail).await?;
 
-        let full_ops = self
-            .tail_after(document, 0)
+        // Oracle: TRUE full replay when the log is intact (no floor);
+        // after compaction, the durable log only holds ops above the
+        // floor, so the independent oracle is a DIFFERENT valid path:
+        // the floor snapshot's coverage + every remaining op — a path
+        // that must converge with the latest-snapshot path. Comparing
+        // against `recover_current` would be vacuous (same selection);
+        // the floor-start path is genuinely independent.
+        let oracle_digest = match super::compaction::get_floor(&self.repo.db, document)
             .await
-            .map_err(VerificationError::Db)?;
-        let full = self.workers.reconstruct(&full_ops).await?;
+            .map_err(|e| VerificationError::Db(e.to_string()))?
+        {
+            None => {
+                let full_ops = self
+                    .tail_after(document, 0)
+                    .await
+                    .map_err(VerificationError::Db)?;
+                self.workers.reconstruct(&full_ops).await?.digest
+            }
+            Some(floor) => {
+                let floor_row = self
+                    .snapshots
+                    .get_by_snapshot_id(floor.snapshot_id)
+                    .await
+                    .map_err(|e| VerificationError::Db(e.to_string()))?
+                    .ok_or(VerificationError::Db("floor snapshot row missing".into()))?;
+                let floor_snapshot = self
+                    .snapshots
+                    .validate_integrity(&floor_row, document)
+                    .map_err(|e| VerificationError::Db(e.to_string()))?;
+                let all_remaining = self
+                    .tail_after(document, 0)
+                    .await
+                    .map_err(VerificationError::Db)?;
+                self.workers
+                    .digest_after(&floor_snapshot.inner, &all_remaining)
+                    .await?
+                    .digest
+            }
+        };
 
-        if recovered.digest != full.digest {
+        if recovered.digest != oracle_digest {
             return Err(VerificationError::Mismatch {
                 document,
                 snapshot_id: v.snapshot_id,
                 boundary: v.coverage_seq,
                 covered: v.covered_op_count,
                 tail: tail.len(),
-                full_digest: full.digest,
+                full_digest: oracle_digest,
                 recovered_digest: recovered.digest,
             });
         }

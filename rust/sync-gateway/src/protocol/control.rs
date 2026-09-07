@@ -47,6 +47,12 @@ pub enum Frame {
     SyncRequest(SyncRequest),
     #[serde(rename = "sync_done")]
     SyncDone(SyncDone),
+    #[serde(rename = "snapshot_resync_required")]
+    SnapshotResyncRequired(SnapshotResyncRequired),
+    #[serde(rename = "fetch_snapshot")]
+    FetchSnapshot(FetchSnapshot),
+    #[serde(rename = "snapshot_payload")]
+    SnapshotPayload(SnapshotPayload),
     #[serde(rename = "durable_ack")]
     DurableAck(DurableAck),
     #[serde(rename = "ping")]
@@ -149,6 +155,50 @@ pub struct SyncRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SyncDone {}
+
+/// s→c (P5-M031): the client's cursor precedes the document's
+/// compaction floor — delta catch-up is impossible; the client must
+/// fetch and import the covering server snapshot, then resume delta
+/// catch-up from the snapshot's boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SnapshotResyncRequired {
+    /// Compaction floor (u64 as decimal string, client-safe).
+    pub boundary: String,
+    /// The covering snapshot's public id.
+    pub snapshot_id: String,
+    /// SHA-256 hex over the wrapper payload bytes the client will
+    /// fetch (out-of-band integrity check; STORAGE.md §3.1).
+    pub snapshot_checksum: String,
+    /// Wrapper format version (decimal string).
+    pub snapshot_format_version: String,
+    /// Ops the covering snapshot represents (decimal string).
+    pub coverage_op_count: String,
+}
+
+/// c→s (P5-M031): fetch a snapshot by id (the resync payload exchange
+/// rides the same authenticated WS session; the payload itself is
+/// delivered as the frame's fields, base64-encoded wrapper bytes).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FetchSnapshot {
+    pub snapshot_id: String,
+}
+
+/// s→c (P5-M031): the requested snapshot, validated server-side before
+/// send (format, document association, checksum) — the client still
+/// re-validates independently (defense in depth, M031.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SnapshotPayload {
+    pub snapshot_id: String,
+    pub format_version: String,
+    pub coverage_seq: String,
+    pub covered_op_count: String,
+    pub state_digest: String,
+    pub checksum: String,
+    pub payload_base64: String,
+}
 
 /// s→c: the batch met the documented persistence contract (ACK_DURABLE,
 /// FAILURE_MODEL §1) — PostgreSQL commit under stable identity, atomic.
@@ -263,6 +313,13 @@ impl ControlFrame {
             "join_accepted" => Frame::JoinAccepted(strict_payload::<JoinAccepted>(payload)?),
             "sync_request" => Frame::SyncRequest(strict_payload::<SyncRequest>(payload)?),
             "sync_done" => Frame::SyncDone(strict_payload::<SyncDone>(payload)?),
+            "snapshot_resync_required" => {
+                Frame::SnapshotResyncRequired(strict_payload::<SnapshotResyncRequired>(payload)?)
+            }
+            "fetch_snapshot" => Frame::FetchSnapshot(strict_payload::<FetchSnapshot>(payload)?),
+            "snapshot_payload" => {
+                Frame::SnapshotPayload(strict_payload::<SnapshotPayload>(payload)?)
+            }
             "durable_ack" => Frame::DurableAck(strict_payload::<DurableAck>(payload)?),
             "ping" => Frame::Ping(strict_payload::<Ping>(payload)?),
             "pong" => Frame::Pong(strict_payload::<Pong>(payload)?),
@@ -298,6 +355,11 @@ impl ControlFrame {
             Frame::JoinAccepted(p) => ("join_accepted", serde_json::to_value(p)),
             Frame::SyncRequest(p) => ("sync_request", serde_json::to_value(p)),
             Frame::SyncDone(p) => ("sync_done", serde_json::to_value(p)),
+            Frame::SnapshotResyncRequired(p) => {
+                ("snapshot_resync_required", serde_json::to_value(p))
+            }
+            Frame::FetchSnapshot(p) => ("fetch_snapshot", serde_json::to_value(p)),
+            Frame::SnapshotPayload(p) => ("snapshot_payload", serde_json::to_value(p)),
             Frame::DurableAck(p) => ("durable_ack", serde_json::to_value(p)),
             Frame::Ping(p) => ("ping", serde_json::to_value(p)),
             Frame::Pong(p) => ("pong", serde_json::to_value(p)),

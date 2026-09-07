@@ -27,8 +27,9 @@ pub mod limits;
 mod tests;
 
 pub use control::{
-    Authenticate, Authenticated, ControlFrame, DurableAck, ErrorFrame, Hello, HelloAck,
-    JoinAccepted, JoinDocument, Ping, Pong, ServerDraining, SyncDone, SyncRequest,
+    Authenticate, Authenticated, ControlFrame, DurableAck, ErrorFrame, FetchSnapshot, Hello,
+    HelloAck, JoinAccepted, JoinDocument, Ping, Pong, ServerDraining, SnapshotPayload,
+    SnapshotResyncRequired, SyncDone, SyncRequest,
 };
 pub use data::{ClientOps, DataFrame, SyncBatch, BATCH_KIND_CLIENT_OPS, BATCH_KIND_SYNC};
 pub use envelope::{OpEnvelope, OpIdentity};
