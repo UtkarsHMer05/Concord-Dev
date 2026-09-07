@@ -16,11 +16,16 @@ pub mod authz;
 pub mod migrations;
 pub mod pool;
 pub mod repo;
+pub mod snapshots;
 
 pub use authz::{DocumentAccess, EffectiveRole};
 pub use migrations::{run_migrations, MigrationError};
 pub use pool::{Db, PoolHealth};
 pub use repo::GatewayRepo;
+pub use snapshots::{
+    validate_integrity, SnapshotIntegrityError, SnapshotRepo, SnapshotRepoError, SnapshotRow,
+    ValidatedSnapshot, SUPPORTED_FORMAT_VERSION,
+};
 
 use std::time::Duration;
 

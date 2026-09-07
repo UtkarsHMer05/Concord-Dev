@@ -3,5 +3,7 @@
 //! lifecycle; the native C++ worker owns CRDT semantics (DEC-038).
 
 pub mod pipeline;
+pub mod recovery;
 
 pub use pipeline::{PipelineError, SnapshotPipeline};
+pub use recovery::{RecoverySelector, RecoverySource, SelectedRecovery, VerificationError};
