@@ -248,6 +248,59 @@ impl GatewayRepo {
             has_more,
         })
     }
+
+    /// Bounded page of operations with server seq in (after_cursor, up_to]
+    /// for snapshot builds and history reconstruction (P5-M016/M035).
+    /// Same ordering/paging contract as [`Self::catchup_page`]; the caller
+    /// fixes the immutable upper boundary (`up_to`) up front so newer
+    /// edits arriving mid-build can never leak into the stream.
+    pub async fn ops_between(
+        &self,
+        document: Uuid,
+        after_cursor: i64,
+        up_to: i64,
+        limit: i64,
+    ) -> Result<CatchupPage, RepoError> {
+        let limit = limit.clamp(1, crate::protocol::MAX_SYNC_PAGE_OPS as i64);
+        if up_to <= after_cursor {
+            return Ok(CatchupPage {
+                ops: Vec::new(),
+                next_cursor: after_cursor,
+                has_more: false,
+            });
+        }
+        let client = self.db.get().await?;
+        let rows = client
+            .query(
+                "SELECT operation_id, id, payload FROM crdt_operations
+                 WHERE document_id = $1 AND id > $2 AND id <= $3
+                 ORDER BY id ASC
+                 LIMIT ($4::bigint + 1)",
+                &[&document, &after_cursor, &up_to, &limit],
+            )
+            .await?;
+        let has_more = rows.len() as i64 > limit;
+        let rows = if has_more {
+            rows[..rows.len() - 1].to_vec()
+        } else {
+            rows
+        };
+        let ops = rows
+            .into_iter()
+            .map(|r| {
+                let op_id: String = r.get("operation_id");
+                let seq: i64 = r.get("id");
+                let payload: Vec<u8> = r.get("payload");
+                (op_id, seq, payload)
+            })
+            .collect::<Vec<_>>();
+        let next_cursor = ops.last().map(|o| o.1).unwrap_or(after_cursor);
+        Ok(CatchupPage {
+            ops,
+            next_cursor,
+            has_more,
+        })
+    }
 }
 
 fn hex_checksum(bytes: &[u8]) -> String {

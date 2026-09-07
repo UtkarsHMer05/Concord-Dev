@@ -12,6 +12,7 @@ pub mod db;
 pub mod ephemeral;
 pub mod error;
 pub mod http;
+pub mod maintenance;
 pub mod protocol;
 pub mod sessions;
 pub mod telemetry;

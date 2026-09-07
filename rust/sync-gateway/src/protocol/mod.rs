@@ -17,8 +17,10 @@ pub mod control;
 pub mod data;
 pub mod envelope;
 pub mod error;
-#[cfg(test)]
-mod golden;
+/// Canonical op fixture builders (P2 golden parity). Public so Phase 5
+/// integration tests can ingest real, valid op bytes through the same
+/// pinned encodings as the parity suites.
+pub mod golden;
 pub mod limits;
 
 #[cfg(test)]

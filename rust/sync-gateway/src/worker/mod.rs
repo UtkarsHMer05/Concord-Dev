@@ -83,7 +83,10 @@ impl WorkerError {
     /// are terminal (retrying the same bytes cannot help); a malformed
     /// response indicates a build mismatch — also terminal.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, WorkerError::TimedOut(_) | WorkerError::Io(_) | WorkerError::Cancelled)
+        matches!(
+            self,
+            WorkerError::TimedOut(_) | WorkerError::Io(_) | WorkerError::Cancelled
+        )
     }
 }
 
@@ -127,7 +130,9 @@ impl WorkerPool {
     /// (spawn.kill_on_drop(true)) so no zombie outlives the caller.
     pub async fn request(&self, command: u32, body: Vec<u8>) -> Result<WorkerOk, WorkerError> {
         if !self.binary.is_file() {
-            return Err(WorkerError::BinaryUnavailable(self.binary.display().to_string()));
+            return Err(WorkerError::BinaryUnavailable(
+                self.binary.display().to_string(),
+            ));
         }
 
         let mut frame = Vec::with_capacity(4 + body.len());
@@ -197,7 +202,9 @@ impl WorkerPool {
                 match read {
                     Err(_) => {
                         let _ = child.start_kill();
-                        Metrics::global().worker_timeouts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        Metrics::global()
+                            .worker_timeouts
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         return Err(WorkerError::TimedOut(started.elapsed()));
                     }
                     Ok(Err(e)) => return Err(WorkerError::Io(e)),
@@ -265,13 +272,30 @@ fn put_u32le(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
-/// [u32 batch_count] + batches × ([u32 len][bytes]).
+/// The durable log stores ONE RAW op per row (version+type header, no
+/// batch prefix — `crdt_operations.payload` / OpEnvelope::bytes). The
+/// worker's batch sections speak `serialize_batch` frames
+/// ([u32 LE op_count][per-op [u32 len][bytes]]), so each payload is
+/// wrapped as a single-op batch frame at the adapter boundary; the
+/// worker re-parses and validates verbatim (M014 protocol).
+fn wrap_single_op_batch(payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + payload.len());
+    put_u32le(&mut out, 1); // count
+    put_u32le(&mut out, payload.len() as u32);
+    out.extend_from_slice(payload);
+    out
+}
+
+/// [u32 batch_count] + batches × ([u32 len][serialize_batch bytes]).
+/// Input entries are raw single-op payloads from the durable log and
+/// are wrapped per [`wrap_single_op_batch`].
 fn encode_op_batches(op_payloads: &[Vec<u8>]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(4 + op_payloads.iter().map(|o| 4 + o.len()).sum::<usize>());
+    let mut out = Vec::with_capacity(4 + op_payloads.iter().map(|o| 12 + o.len()).sum::<usize>());
     put_u32le(&mut out, op_payloads.len() as u32);
     for payload in op_payloads {
-        put_u32le(&mut out, payload.len() as u32);
-        out.extend_from_slice(payload);
+        let wrapped = wrap_single_op_batch(payload);
+        put_u32le(&mut out, wrapped.len() as u32);
+        out.extend_from_slice(&wrapped);
     }
     out
 }
@@ -289,43 +313,62 @@ fn encode_snapshot_only(snapshot: &[u8]) -> Vec<u8> {
 fn decode_response(frame: &[u8]) -> Result<WorkerOk, WorkerError> {
     let mut offset = 0usize;
     let get_u32 = |frame: &[u8], offset: usize| -> Option<u32> {
-        frame.get(offset..offset + 4).map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")))
+        frame
+            .get(offset..offset + 4)
+            .map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")))
     };
     let Some(status_code) = get_u32(frame, offset) else {
-        return Err(WorkerError::MalformedResponse("response shorter than status word".into()));
+        return Err(WorkerError::MalformedResponse(
+            "response shorter than status word".into(),
+        ));
     };
     offset += 4;
     if status_code != status::OK {
         // Error payload: [u32 msg_len][message].
         let Some(msg_len) = get_u32(frame, offset) else {
-            return Err(WorkerError::MalformedResponse("error response missing message length".into()));
+            return Err(WorkerError::MalformedResponse(
+                "error response missing message length".into(),
+            ));
         };
         offset += 4;
         let Some(bytes) = frame.get(offset..offset + msg_len as usize) else {
-            return Err(WorkerError::MalformedResponse("error message shorter than declared".into()));
+            return Err(WorkerError::MalformedResponse(
+                "error message shorter than declared".into(),
+            ));
         };
         let message = String::from_utf8_lossy(bytes).trim().to_string();
-        return Err(WorkerError::Status { status: status_code, message });
+        return Err(WorkerError::Status {
+            status: status_code,
+            message,
+        });
     }
     // OK: [u32 digest_len][digest] (snapshot optional depending on cmd —
     // the caller knows; decode opportunistically).
     let Some(digest_len) = get_u32(frame, offset) else {
-        return Err(WorkerError::MalformedResponse("ok response missing digest length".into()));
+        return Err(WorkerError::MalformedResponse(
+            "ok response missing digest length".into(),
+        ));
     };
     offset += 4;
     let Some(digest_bytes) = frame.get(offset..offset + digest_len as usize) else {
-        return Err(WorkerError::MalformedResponse("digest shorter than declared".into()));
+        return Err(WorkerError::MalformedResponse(
+            "digest shorter than declared".into(),
+        ));
     };
     offset += digest_len as usize;
     let digest = String::from_utf8(digest_bytes.to_vec())
         .map_err(|_| WorkerError::MalformedResponse("digest not utf-8".into()))?;
     let snapshot = if offset < frame.len() {
         let Some(snap_len) = get_u32(frame, offset) else {
-            return Err(WorkerError::MalformedResponse("snapshot length truncated".into()));
+            return Err(WorkerError::MalformedResponse(
+                "snapshot length truncated".into(),
+            ));
         };
         offset += 4;
         let Some(bytes) = frame.get(offset..offset + snap_len as usize) else {
-            return Err(WorkerError::MalformedResponse("snapshot shorter than declared".into()));
+            return Err(WorkerError::MalformedResponse(
+                "snapshot shorter than declared".into(),
+            ));
         };
         offset += snap_len as usize;
         Some(bytes.to_vec())
@@ -333,7 +376,9 @@ fn decode_response(frame: &[u8]) -> Result<WorkerOk, WorkerError> {
         None
     };
     if offset != frame.len() {
-        return Err(WorkerError::MalformedResponse("trailing bytes in response".into()));
+        return Err(WorkerError::MalformedResponse(
+            "trailing bytes in response".into(),
+        ));
     }
     Ok(WorkerOk { digest, snapshot })
 }
@@ -349,7 +394,10 @@ mod tests {
         // (top-level and per-target subdirectory).
         let mut root = std::env::current_dir().expect("cwd");
         for _ in 0..3 {
-            for rel in ["build/native/concord-worker", "build/native/worker/concord-worker"] {
+            for rel in [
+                "build/native/concord-worker",
+                "build/native/worker/concord-worker",
+            ] {
                 let mut path = root.clone();
                 path.push(rel);
                 if path.is_file() {
@@ -373,7 +421,10 @@ mod tests {
         let ok = pool.reconstruct(&[]).await.expect("empty reconstruct");
         assert!(ok.digest.starts_with("sha256:"));
         let snapshot = ok.snapshot.expect("reconstruct returns snapshot");
-        let verify = pool.import_digest(&snapshot).await.expect("import verifies");
+        let verify = pool
+            .import_digest(&snapshot)
+            .await
+            .expect("import verifies");
         assert_eq!(ok.digest, verify.digest, "import must reproduce the digest");
     }
 

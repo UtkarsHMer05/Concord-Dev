@@ -21,6 +21,7 @@ use super::envelope::{validate_op, OpIdentity};
 use super::ProtocolError;
 
 #[derive(Serialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct TextFixture {
     name: &'static str,
     /// Exact wire text (Rust codec output).
@@ -28,6 +29,7 @@ struct TextFixture {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct BinaryFixture {
     name: &'static str,
     /// Exact wire bytes as lowercase hex.
@@ -38,6 +40,7 @@ struct BinaryFixture {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct ErrorFixture {
     name: &'static str,
     code: &'static str,
@@ -45,6 +48,7 @@ struct ErrorFixture {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct EnvelopeFixture {
     name: &'static str,
     /// Canonical Phase 2 operation bytes (hex).
@@ -54,6 +58,7 @@ struct EnvelopeFixture {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct FixtureFile {
     wire_version: u32,
     generated_by: &'static str,
@@ -109,6 +114,7 @@ pub fn golden_delete_op() -> Vec<u8> {
     b
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn fixtures() -> FixtureFile {
     let text_frames = vec![
         TextFixture {
