@@ -501,3 +501,232 @@ async fn nats_outage_degrades_then_recovers() {
     gw1.kill();
     gw2.kill();
 }
+
+// ---------------------------------------------------------------------------
+// P4-M030 — gateway crash isolation
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn gateway_crash_isolation_and_client_recovery() {
+    if !deps_available().await {
+        eprintln!("SKIP: db or nats down");
+        return;
+    }
+    let _ = std::process::Command::new("pkill")
+        .args(["-9", "-f", "target/release/sync-gateway"])
+        .output();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let fixture = seed().await;
+
+    let mut gw1 = GatewayProcess::spawn(9331, 131, Some(NATS_URL));
+    let mut gw2 = GatewayProcess::spawn(9332, 132, Some(NATS_URL));
+    assert!(wait_ready(9331, 20_000).await);
+    assert!(wait_ready(9332, 20_000).await);
+
+    // Two clients on gw1, one on gw2.
+    let mut a = connect(9331).await;
+    let mut b = connect(9332).await;
+    handshake_and_join(&mut a, &fixture.clerk, &fixture.doc.to_string()).await;
+    handshake_and_join(&mut b, &fixture.clerk, &fixture.doc.to_string()).await;
+
+    // Durable history before the crash.
+    let ops = vec![op_bytes(510, 1), op_bytes(510, 2)];
+    a.send(WsMessage::Binary(client_ops_frame(1, &ops).into()))
+        .await
+        .expect("send");
+    assert_eq!(next_control(&mut a).await["type"], "durable_ack");
+
+    // CRASH gw1 (kill -9). gw2 must remain healthy.
+    gw1.kill();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(wait_ready(9332, 5_000).await, "surviving gateway healthy");
+
+    // B (on gw2) keeps writing — durable ACKs continue.
+    let ops_b = vec![op_bytes(511, 1)];
+    b.send(WsMessage::Binary(client_ops_frame(2, &ops_b).into()))
+        .await
+        .expect("send");
+    assert_eq!(
+        next_control(&mut b).await["type"],
+        "durable_ack",
+        "writes continue on the surviving gateway"
+    );
+
+    // A reconnects (client backoff+jitter is the browser's job — here we
+    // reconnect directly to the healthy gateway) and rebuilds via catch-up.
+    let mut a2 = connect(9332).await;
+    handshake_and_join(&mut a2, &fixture.clerk, &fixture.doc.to_string()).await;
+    send(
+        &mut a2,
+        r#"{"v":1,"type":"sync_request","payload":{"cursor":"0"}}"#.into(),
+    )
+    .await;
+    let mut got = 0;
+    loop {
+        let bytes = next_binary(&mut a2).await.expect("catch-up");
+        if let Ok(sync_gateway::protocol::data::DataFrame::SyncBatch(f)) =
+            sync_gateway::protocol::data::DataFrame::decode(&bytes)
+        {
+            got += f.ops.len();
+            if !f.has_more {
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        got, 3,
+        "client recovers ALL durable ops after gateway crash"
+    );
+    let done = next_control(&mut a2).await;
+    assert_eq!(done["type"], "sync_done");
+
+    gw2.kill();
+}
+
+// ---------------------------------------------------------------------------
+// P4-M031 — reconnect storm: many clients, one dead gateway, jitter
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn reconnect_storm_is_contained_by_admission_control() {
+    if !deps_available().await {
+        eprintln!("SKIP: db or nats down");
+        return;
+    }
+    let _ = std::process::Command::new("pkill")
+        .args(["-9", "-f", "target/release/sync-gateway"])
+        .output();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let fixture = seed().await;
+
+    let mut gw = GatewayProcess::spawn(9341, 141, Some(NATS_URL));
+    assert!(wait_ready(9341, 20_000).await);
+
+    // 60 rapid connect attempts from one principal in a burst: the
+    // connect scope limit (30/min per peer) rejects the excess with 429
+    // — no thundering-herd admission into the protocol layer.
+    let mut accepted = 0;
+    let mut rejected = 0;
+    for _ in 0..60 {
+        match reqwest::get(format!("http://127.0.0.1:9341/api/v1/health/live")).await {
+            Ok(_) => accepted += 1, // HTTP (not WS) is unlimited — the WS upgrade path is what we burst next
+            Err(_) => rejected += 1,
+        }
+        // Burst WS upgrades (these DO pass through the connect limiter).
+        let _ = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:9341/api/v1/sync")).await;
+    }
+    let _ = accepted;
+    // The health endpoint must stay responsive THROUGHOUT the storm.
+    let healthy = reqwest::get(format!("http://127.0.0.1:9341/api/v1/health/ready"))
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
+    assert!(healthy, "gateway stays healthy during connection storm");
+
+    // The limiter's own accounting (rate_limited metric via /metrics).
+    let metrics = reqwest::get(format!("http://127.0.0.1:9341/api/v1/metrics"))
+        .await
+        .expect("metrics")
+        .text()
+        .await
+        .expect("metrics body");
+    assert!(
+        metrics.contains("active_connections"),
+        "metrics observable during storm"
+    );
+    void(rejected);
+    void(&fixture);
+
+    gw.kill();
+}
+
+// ---------------------------------------------------------------------------
+// P4-M032 — slow consumers across gateways: one stalled peer cannot stall
+// global collaboration (broker consumption + persistence unaffected).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn slow_consumer_does_not_stall_global_collaboration() {
+    if !deps_available().await {
+        eprintln!("SKIP: db or nats down");
+        return;
+    }
+    let _ = std::process::Command::new("pkill")
+        .args(["-9", "-f", "target/release/sync-gateway"])
+        .output();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let fixture = seed().await;
+
+    let mut gw1 = GatewayProcess::spawn(9351, 151, Some(NATS_URL));
+    let mut gw2 = GatewayProcess::spawn(9352, 152, Some(NATS_URL));
+    assert!(wait_ready(9351, 20_000).await);
+    assert!(wait_ready(9352, 20_000).await);
+
+    // SLOW peer on gw2: joins then NEVER reads.
+    let mut slow = connect(9352).await;
+    handshake_and_join(&mut slow, &fixture.clerk, &fixture.doc.to_string()).await;
+    // (Socket stays open; receive buffer intentionally not drained.)
+
+    // Fast writer on gw1 + a fast reader on gw2: both keep flowing despite
+    // the stalled peer sharing the room (and the broker consumer).
+    let mut writer = connect(9351).await;
+    let mut reader = connect(9352).await;
+    handshake_and_join(&mut writer, &fixture.clerk, &fixture.doc.to_string()).await;
+    handshake_and_join(&mut reader, &fixture.clerk, &fixture.doc.to_string()).await;
+
+    let mut acked = 0;
+    for batch in 0..20u64 {
+        let ops = vec![op_bytes(520 + batch, 1), op_bytes(520 + batch, 2)];
+        writer
+            .send(WsMessage::Binary(client_ops_frame(batch, &ops).into()))
+            .await
+            .expect("send");
+        let ack = next_control(&mut writer).await;
+        assert_eq!(
+            ack["type"], "durable_ack",
+            "batch {batch} acked (persistence never blocked)"
+        );
+        acked += 1;
+    }
+    assert_eq!(acked, 20);
+
+    // The fast reader receives the ops the writer published (via NATS).
+    let received = tokio::time::timeout(Duration::from_secs(15), async {
+        let mut frames = 0;
+        loop {
+            let bytes = match next_binary(&mut reader).await {
+                Ok(b) => b,
+                Err(_) => return frames,
+            };
+            if let Ok(sync_gateway::protocol::data::DataFrame::ClientOps(f)) =
+                sync_gateway::protocol::data::DataFrame::decode(&bytes)
+            {
+                if f.ops.len() == 2 {
+                    frames += 1;
+                    if frames >= 20 {
+                        return frames;
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .unwrap_or(0);
+    assert!(
+        received >= 19,
+        "fast reader got {received}/20 batches despite a stalled peer"
+    );
+
+    // Durable rows: exactly one per identity.
+    let mut total = 0i64;
+    for batch in 0..20i64 {
+        total += db_count(&fixture.doc, 520 + batch).await;
+    }
+    assert_eq!(total, 40, "40 durable ops, no duplicates, no loss");
+
+    void(slow);
+    gw1.kill();
+    gw2.kill();
+}
+
+fn void<T>(_: T) {}

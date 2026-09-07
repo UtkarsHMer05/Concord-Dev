@@ -28,9 +28,9 @@ services:
       retries: 12
 
   # NATS with JetStream enabled (Phase 4 inter-gateway event transport).
-  # -P 5422: override the COPY-statement change in newer images; -js enables
-  # JetStream; -sd sets a named volume for durable stream storage (restart
-  # recovery, M038). Dev only — no authn in local compose (documented).
+  # -js enables JetStream; -sd sets a named volume for durable stream
+  # storage (restart recovery, M038). Dev only — no authn in local compose
+  # (documented; loopback-bound).
   nats:
     image: nats:2.11.6-alpine
     container_name: concord-nats
@@ -42,15 +42,14 @@ services:
     volumes:
       - concord_nats:/data
     healthcheck:
-      # JetStream health endpoint: /jsz returns 200 when JetStream is up.
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8222/healthz"]
       interval: 5s
       timeout: 3s
       retries: 12
 
   # Redis — ephemeral tier only (presence, rate-limit counters, gateway
-  # hints; DEC-033). Dev server without persistence by design: a wipe must
-  # never be a data event (M037 proves it).
+  # hints; DEC-033). No persistence by design: a wipe must never be a data
+  # event (M037 proves it).
   redis:
     image: redis:8.8.2-alpine
     container_name: concord-redis
@@ -66,3 +65,8 @@ services:
 volumes:
   concord_pgdata:
   concord_nats:
+
+# Phase 4 gateway topology: three gateway processes run on the HOST via
+# scripts/gateway-cluster.sh (the release binary is built for the host OS;
+# container images are Phase 7 work) behind an nginx load balancer container
+# (ws://127.0.0.1:8890/api/v1/sync). Infra services above are compose-managed.
