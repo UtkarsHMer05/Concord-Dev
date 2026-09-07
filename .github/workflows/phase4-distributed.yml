@@ -1,0 +1,94 @@
+# Phase 4 distributed gate: fmt/clippy/unit, Postgres+NATS+Redis services,
+# broker + redis + multi-gateway distributed suites, web typecheck/unit.
+# The heavy chaos runs (docker restarts, kill -9 storms) stay local via
+# scripts/verify-cluster.sh (documented in docs/TESTING.md).
+name: phase4-distributed
+on:
+  push:
+    branches: [main, "phase/**"]
+  pull_request:
+
+jobs:
+  distributed:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: concord
+          POSTGRES_PASSWORD: concord_local_dev
+          POSTGRES_DB: concord
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U concord -d concord"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        image: redis:8.8.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      GATEWAY_DATABASE_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+      GATEWAY_CLERK_ISSUER: https://ci-placeholder.clerk.accounts.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      # JetStream-enabled NATS (compose-style services can't pass a custom
+      # command, so it runs as a step container).
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name nats-js -p 4222:4222 -p 8222:8222 nats:2.11.6-alpine -js -sd /data -m 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8222/healthz >/dev/null; then echo "nats healthy"; exit 0; fi
+            sleep 2
+          done
+          echo "nats did not become healthy"; exit 1
+      - name: Create test database
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test" || true
+      - name: fmt + clippy + unit
+        run: |
+          cargo fmt --all --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --lib
+        working-directory: rust
+      - name: DB + WS integration (Phase 3 regressions)
+        run: |
+          cargo test --test db_integration -- --test-threads=1
+          cargo test --test ws_integration -- --test-threads=1
+        working-directory: rust
+      - name: Broker + Redis distributed suites
+        run: |
+          cargo test --test broker_integration -- --test-threads=1
+          cargo test --test redis_integration -- --test-threads=1
+        working-directory: rust
+      - name: Multi-gateway E2E (cross-gateway, faults, drain)
+        run: |
+          cargo build --release
+          cargo test --test multi_gateway -- --test-threads=1
+        working-directory: rust
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Typecheck + lint + unit (protocol parity + sync layer)
+        run: |
+          npm run typecheck
+          npm run lint
+          npx vitest run --project unit

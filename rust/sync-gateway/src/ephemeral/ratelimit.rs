@@ -37,9 +37,11 @@ pub const SCOPE_MALFORMED: &str = "malformed";
 pub fn default_policies() -> Policies {
     [
         (
+            // Connects: a tab may open several sockets across reconnects
+            // and reloads; operators scale via GATEWAY_RATE_CONNECT_PER_MIN.
             SCOPE_CONNECT,
             RateLimitPolicy {
-                max_events: 30,
+                max_events: 240,
                 window: Duration::from_secs(60),
             },
         ),
@@ -160,4 +162,17 @@ impl RateLimiter {
             RateLimitOutcome::Allowed
         }
     }
+}
+
+/// Overrides the connect budget from GATEWAY_RATE_CONNECT_PER_MIN;
+/// absent or invalid keeps the default.
+pub fn policies_with_env_connect(mut policies: Policies) -> Policies {
+    if let Ok(raw) = std::env::var("GATEWAY_RATE_CONNECT_PER_MIN") {
+        if let Ok(max) = raw.parse::<u64>() {
+            if let Some(policy) = policies.get_mut(SCOPE_CONNECT) {
+                policy.max_events = max;
+            }
+        }
+    }
+    policies
 }

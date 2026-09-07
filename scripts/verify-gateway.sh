@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "=== Phase 3 gateway gate ==="
+echo "=== Phase 3+4 gateway gate (single + distributed) ==="
 
 # 1. Rust: fmt + clippy + unit (incl. Rust-side golden fixtures).
 echo "--- rust: fmt/clippy/unit ---"
@@ -42,8 +42,18 @@ npx vitest run --project unit
 echo "--- web: realtime E2E ---"
 npx vitest run --project realtime
 
-# 7. Benchmark baseline rerun (records live in .agent/METRICS_LEDGER.md).
+# 7. Broker + Redis distributed suites (live compose services).
+echo "--- distributed: broker + redis ---"
+( cd rust
+  cargo test --test broker_integration -- --test-threads=1
+  cargo test --test redis_integration -- --test-threads=1 )
+
+# 8. Multi-gateway E2E: REAL processes, faults, restarts, compound failures.
+echo "--- distributed: multi-gateway E2E ---"
+( cd rust && cargo test --test multi_gateway -- --test-threads=1 )
+
+# 9. Benchmark baseline rerun (records live in .agent/METRICS_LEDGER.md).
 echo "--- benchmark rerun ---"
 ( cd rust && ./target/release/examples/bench )
 
-echo "=== Phase 3 gate: ALL GREEN ==="
+echo "=== Phase 4 gate: ALL GREEN ==="
