@@ -87,6 +87,9 @@ pub async fn upgrade(
         .await
         == RateLimitOutcome::Limited
     {
+        crate::telemetry::Metrics::global()
+            .rate_limited_total
+            .fetch_add(1, Ordering::Relaxed);
         tracing::info!(peer = %peer, "connection rejected: rate limited");
         return axum::http::StatusCode::TOO_MANY_REQUESTS.into_response();
     }

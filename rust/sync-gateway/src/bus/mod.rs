@@ -120,6 +120,20 @@ impl NatsSubscriber {
             for message in messages {
                 match BrokerEvent::decode(&message.message.payload) {
                     Ok(event) => {
+                        crate::telemetry::Metrics::global()
+                            .broker_events_consumed_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        // Correlation: the origin's event id + document flow
+                        // through consume → local fanout (M040).
+                        tracing::debug!(
+                            gateway_id = self.broker.gateway_id,
+                            document_id = %event.document_id,
+                            origin_gateway = event.origin_gateway,
+                            event_id = event.event_id,
+                            op_count = event.ops.len(),
+                            server_cursor = event.server_cursor,
+                            "broker event consumed"
+                        );
                         if event.origin_gateway == self.broker.gateway_id {
                             // Own event echoed back — suppress (M017).
                             let _ = message.ack().await;
@@ -165,6 +179,9 @@ impl NatsSubscriber {
                     Err(e) => {
                         // Poison: structured rejection — terminate so NATS
                         // stops redelivering; log with class only.
+                        crate::telemetry::Metrics::global()
+                            .broker_poison_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         tracing::warn!(error = %e, error_class = "broker_poison", "invalid event terminated");
                         let _ = message.ack_with(async_nats::jetstream::AckKind::Term).await;
                     }
