@@ -61,3 +61,58 @@ transport, never truth: PostgreSQL catch-up is the correctness floor.
 ```bash
 ./scripts/verify-gateway.sh   # exit 0 = all suites green
 ```
+
+## Phase 5 — storage lifecycle operations (2026-09-07)
+
+### Native recovery worker
+
+- Built by `./scripts/verify-gateway.sh` (or manually:
+  `cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release &&
+  cmake --build build/native`). Executable:
+  `build/native/worker/concord-worker` — spawned per maintenance
+  request by the gateway with fixed argv, bounded stdin/stdout, wall-
+  clock timeouts, kill-on-drop (no zombies; no shell).
+- Worker protocol commands (1–7): reconstruct, export, import-verify,
+  digest-after, verify, generate (test streams), restore-diff. All
+  responses are deterministic; errors are structured and content-free.
+
+### Maintenance jobs & leases
+
+- Jobs live in `maintenance_jobs` (durable; PostgreSQL is the only
+  coordinator). Every gateway may claim; the compare-and-swap claim +
+  versioned lease (`claim_version` + `lease_expires_at`) fences stale
+  owners: a gateway that loses its lease cannot finalize, complete, or
+  heartbeat. Dead-gateway jobs are re-queued by the expiry sweep.
+- Queue depth is bounded by coalescing: duplicate snapshot requests for
+  the same (document, boundary) collapse into the same pending job.
+- Default limits (per gateway): 2 parallel native workers, 8 in-flight
+  jobs, 90 s leases with heartbeat at lease/3. These are independent of
+  realtime connection limits.
+
+### Snapshot / compaction / recovery metrics (P5-M039)
+
+`maintenance::storage_accounting(document)` exposes, per document:
+op rows + bytes, snapshot count/bytes, finalized count, latest snapshot
+coverage + age, compaction floor, tail op rows, revisions,
+prunable-rows-remaining (nonzero after a partial prune = resumable
+compaction). Gateway counters (`/api/v1/metrics`): worker timeouts,
+worker failures, snapshots finalized/failed.
+
+### Runbooks
+
+- **Corrupt snapshot suspected**: recovery fails closed per candidate
+  and falls back automatically (newest → older → full replay); the
+  corrupt row is logged with its id. Quarantine by marking the row
+  `superseded` (never DELETE a FINALIZED row referenced by a revision
+  or the floor — retention rechecks protection).
+- **Compaction stuck (prunable_rows_remaining > 0)**: safe state by
+  construction — the floor equals committed prune progress. Resume by
+  re-running `prune_to_boundary` (idempotent; refuses when coverage is
+  missing). Investigate worker failures via `maintenance_jobs.last_failure_class`.
+- **Stale client cannot sync**: a client cursor below the floor is
+  served `snapshot_resync_required`; the client fetches + validates the
+  snapshot and resumes delta catch-up. No operator action required;
+  verify the floor snapshot row exists and is `finalized`.
+- **Restore**: owner-triggered, forward-moving, auditable
+  (`crdt_revisions.kind = 'restore_event'`); the restore batch is
+  visible as ordinary durable ops. No history is rewritten.

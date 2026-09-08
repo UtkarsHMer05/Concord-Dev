@@ -15,7 +15,70 @@ Nothing in the TARGET section should be read as an implemented capability.
 
 ---
 
-## 0. CURRENT — Distributed multi-gateway collaboration (Phase 4 complete)
+## 0. CURRENT — Durable, recoverable, history-aware storage (Phase 5 complete)
+
+Phase 5 extends the Phase 4 distributed plane with a durable
+recovery/history subsystem. Everything below is implemented and gated
+(P5 suites; see docs/STORAGE.md, docs/RECOVERY.md, docs/HISTORY.md):
+
+- **Server snapshots** (`crdt_snapshots`): PostgreSQL-stored, versioned
+  wrappers (DEC-035) around the unchanged C++ v1 snapshot bytes, with
+  SHA-256 checksums over the exact stored bytes and a canonical state
+  digest. Lifecycle `building → verifying → finalized | failed`
+  (finalized is immutable and the ONLY state recovery reads; DEC-036).
+- **Native recovery worker** (`concord-worker`, C++20 process,
+  DEC-038): folds the durable op log / imports snapshots /
+  verifies equivalence / generates seeded test streams / computes
+  restore diffs — always bounded, deterministic, content-silent.
+  Rust spawns it per request with fixed argv, bounded IO, timeouts,
+  and kill-on-drop (no shell, no FFI).
+- **Recovery = snapshot + tail** (M020, proven continuously by the
+  differential verifier, M021): a stale client or gateway needs only
+  the newest VALID snapshot plus the post-boundary ops; corrupt newest
+  snapshots fall back to older, then to full replay — recovery never
+  fails due to corruption (fail-closed per candidate, fail-open across
+  candidates).
+- **Compaction** (DEC-040): staged and crash-safe — a FINALIZED,
+  verified snapshot must cover the prune boundary before ANY op-log
+  deletion; pruning runs in transactional batches that advance the
+  per-document compaction floor in the SAME transaction; the stale-
+  client resync protocol (`snapshot_resync_required` → `fetch_snapshot`
+  → `snapshot_payload`) serves the floor snapshot to clients below it.
+- **Version history** (`crdt_revisions`, DEC-039): boundary-referencing
+  revisions (auto checkpoints, named, restore events); read-only
+  historical reconstruction = nearest covering snapshot + bounded
+  replay; RESTORE is forward-moving — a worker-computed diff batch is
+  ingested through the normal durable path (owner-only, auditable,
+  never silently discards acknowledged edits).
+- **Maintenance jobs** (`maintenance_jobs`, DEC-037): durable rows
+  with compare-and-swap claims + versioned leases; heartbeats extend
+  only the current claim; every effectful transition (including
+  snapshot finalization) is fenced by the claim_version — a stale
+  owner can never act after lease transfer. Coalescing enqueue bounds
+  duplicate triggers; scheduler parallelism is bounded independently of
+  realtime limits.
+
+```mermaid
+flowchart LR
+    subgraph PG[("PostgreSQL — durable truth")]
+        OP[("crdt_operations<br/>durable op log")]
+        SN[("crdt_snapshots<br/>immutable finalized")]
+        RV[("crdt_revisions")]
+        JB[("maintenance_jobs<br/>claims + leases")]
+        DC[("documents<br/>compaction floor")]
+    end
+    JB -->|"claim (CAS) + lease fence"| SCH["Scheduler<br/>(bounded, per gateway)"]
+    SCH -->|"ops ≤ boundary"| W["concord-worker (C++ process)<br/>reconstruct / verify / diff"]
+    W -->|"digest + snapshot"| SN
+    SCH -->|"verify → finalize"| SN
+    SCH -->|"staged prune batches<br/>(floor advances atomically)"| OP
+    GW["Sync gateways (Phase 4 plane)"] -->|"ops ingest"| OP
+    GW -->|"sync_request below floor ⇒ resync"| CLI["Browser resync<br/>import snapshot + tail"]
+    RV -->|"reconstruct ≤ boundary"| W
+```
+
+## 0b. CURRENT — Distributed multi-gateway collaboration (Phase 4; the plane Phase 5 extends)
+
 
 Phase 4 distributes the Phase 3 plane: browsers may connect to ANY healthy
 gateway behind the local load balancer; accepted batches propagate across

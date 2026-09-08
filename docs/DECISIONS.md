@@ -1045,6 +1045,18 @@ retained and will not be removed.
   requires OWNER permission.
 - **Evidence:** M036 restore tests; M037 concurrency/authorization
   tests; HISTORY.md invariants H1–H8.
+- **Phase 5 final form (P5-M036 full):** implemented as worker-computed
+  restore diffs (CMD_RESTORE_DIFF: two snapshots → forward-op batch of
+  deletes/re-inserts/attr-syncs under the reserved REST replica,
+  neighbor-anchored for order preservation) INGESTED through the normal
+  durable path — restore is 'just edits'. The worker proves convergence
+  internally (folds A+batch, requires visible-document equality and no
+  new pendings) before returning status 0 — silent partial restore is
+  impossible. Honest deviation: canonical DIGEST equality is
+  CRDT-theoretically unreachable for non-empty diffs (tombstone +
+  applied-set history only appends); the visible-content contract of
+  HISTORY.md §5 is what convergence means, and B's digest is returned
+  as the verification reference.
 
 ## DEC-040 — Compaction: staged state machine with transactional floor advance; automatic pruning gated on the M032 equivalence proof
 

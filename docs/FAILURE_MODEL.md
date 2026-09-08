@@ -190,3 +190,29 @@ replicas converge on restore. Tested: M039.
 Broker-received events enter a SEPARATE ingress path (no re-publish of
 consumer traffic; origin-gateway suppression); duplicate DB rows are
 impossible (unique identity). Tested: M017.
+
+## 8. Phase 5 storage failure contract (CURRENT as of 2026-09-07)
+
+1. **Worker crash/timeout/nonzero exit**: classified retryable vs
+   terminal; the maintenance job retries within bounds; un-finalized
+   snapshot attempts are never visible to recovery. No document state
+   is affected.
+2. **Corrupt snapshot (bit rot, torn writes)**: fails the M013 matrix
+   per candidate; recovery walks newest→older FINALIZED and falls back
+   to full replay. Never serves corrupt state; never aborts recovery.
+3. **Gateway crash mid-job**: lease expires; the sweep re-queues
+   (retryable) or terminally fails (exhausted). The claim fence makes
+   the dead gateway's late actions no-ops.
+4. **Crash mid-compaction**: every prune batch commits with its floor
+   advance in one transaction (floor ≤ verified coverage ALWAYS);
+   resumption completes idempotently; the crash matrix (M033) proves
+   each crash point recoverable. Durable-ACKed ops are either in the
+   log above the floor or covered by the FINALIZED floor snapshot.
+5. **Stale client below the floor**: served `snapshot_resync_required`
+   + the covering snapshot; pending local ops re-apply after import
+   (applied-set dedup makes server-known duplicates no-ops). No
+   legitimate client is ever unrecoverable.
+6. **Restore of a pruned boundary**: refused with a structured error
+   (`RestoreTargetPruned`) — history retention protects revision-
+   referenced snapshots; unpruned restores re-apply as forward ops
+   through the durable path.

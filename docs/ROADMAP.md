@@ -136,8 +136,11 @@ DEC-031..034, docs/OPERATIONS.md, docs/SECURITY.md §6.
   interruption tests (broker, gateway loss) green with durable-update
   integrity.
 
-## Phase 5 — Recovery, snapshots, compaction, history, performance workers
+## Phase 5 — Recovery, snapshots, compaction, history, performance workers — COMPLETE
 
+- **Status:** COMPLETE (all 50 milestones; see docs/STORAGE.md,
+  docs/RECOVERY.md, docs/HISTORY.md, docs/BENCHMARKS.md Phase 5 tables,
+  and .agent private evidence per the completion gate).
 - **Objective:** Build the serious persistence/recovery side.
 - **Major deliverables:** Append-only update lifecycle; snapshot policy;
   recovery path; compaction; version history with revision reconstruction and

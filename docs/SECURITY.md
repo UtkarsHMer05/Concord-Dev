@@ -107,3 +107,48 @@ F4-1 local-fallback N× budgets during Redis outage (accepted; DEC-033).
 F4-2 local NATS without authn (dev-only, loopback; Phase 7 hardening).
 F4-3 forged broker events may transiently fan out to already-joined
 clients before dying unpersisted (never durable; signing = later phase).
+
+## 7. Phase 5 storage integrity (CURRENT as of 2026-09-07)
+
+### 7.1 Snapshot integrity (fail-closed)
+Every snapshot consumer path validates BEFORE trust: format version →
+document association → declared size → SHA-256 over exact stored bytes →
+state-digest shape → wrapper structure → wrapper/row metadata agreement
+(the row/payload-swap defense). Only `finalized` (immutable) rows are
+ever served; corrupt candidates fail closed and recovery falls back to
+older snapshots, then full replay — corruption never aborts recovery
+and never silently serves bad state.
+
+### 7.2 Snapshot serving (WS resync)
+`fetch_snapshot` rechecks document READ access, document association,
+integrity, and FINALIZED status before sending base64 payload; errors
+are uniform (unavailable) — no existence oracle across tenants. The
+client independently re-validates (checksum over wrapper bytes,
+document/coverage agreement) before import — defense in depth.
+
+### 7.3 Maintenance-job ownership
+Claims are compare-and-swap on (state, claim_version) with leases
+computed in PostgreSQL (one clock for all gateways). Heartbeats,
+completions, failures, and snapshot finalizations all carry the
+claim_version and are rejected for stale owners — a gateway that lost
+its lease can never act again on that job (DEC-037; race-tested, M046).
+
+### 7.4 Native worker boundary (DEC-038)
+The worker is a local trusted binary (fixed argv, no shell, bounded
+stdin/stdout/stderr, wall-clock timeouts, kill-on-drop). Its outputs
+are never trusted blindly: every persisted snapshot passes the build
+verification oracles (fresh-instance import + independent re-fold) and
+the M013 integrity matrix before finalization; a worker under operator
+control is inside the trust boundary (local deployment), and the
+pipeline's verify stages would refuse inconsistent output regardless.
+
+### 7.5 History/restore authorization
+Listing/viewing history requires document READ; creating named
+revisions requires EDITOR+; restore requires OWNER. Restores are
+forward-moving auditable events; acknowledged concurrent edits are
+never silently discarded (restores merge as ordinary CRDT batches).
+
+### 7.6 Findings (P5-M045 audit: see runbook disposition)
+Recorded in the private audit report; any HIGH/CRITICAL finding is
+fixed before the release gate (none outstanding at gate time — the
+final-gate checkpoint records the audit verdict).

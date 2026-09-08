@@ -266,3 +266,40 @@ cargo run --release --example loadgen -- --gateways 127.0.0.1:8791,127.0.0.1:879
 `.github/workflows/phase4-distributed.yml`: Postgres + Redis services plus
 a JetStream-enabled NATS container; fmt/clippy/unit, db/ws regressions,
 broker/redis/multi-gateway suites, and the web job — on every push/PR.
+
+## 12. Phase 5 — recovery, snapshots, compaction, history (2026-09-07)
+
+All suites run serialized (`--test-threads=1`) against the live test DB
+(`docker compose up -d db`) and, where marked, the REAL concord-worker
+binary (Release: `cmake -S cpp -B build/native -G Ninja
+-DCMAKE_BUILD_TYPE=Release && cmake --build build/native`).
+
+| Suite (cargo test --test …) | Covers | Count |
+|---|---|---|
+| phase5_migrations | v2 schema on fresh + phase-4-shaped DB; constraint rejection matrix | 4 |
+| phase5_snapshots | snapshot repo lifecycle guards, immutability, M013 integrity matrix, wrapper codec | 17 |
+| phase5_pipeline (worker) | build→verify→finalize at exact boundary; boundary exclusion; snapshot+tail == full replay | 3 |
+| phase5_recovery (worker) | newest-valid→older→full-replay fallback; differential verifier + corruption fallback | 2 |
+| phase5_jobs | coalescing enqueue, claim CAS, heartbeat, stale-owner fence, bounded retry, expiry sweep, full job execution, bounded runner | 7 |
+| phase5_compaction (worker) | dry-run, staged transactional pruning, floor invariants, post-prune recovery | 1 |
+| phase5_equivalence (worker) | M032 gate: 4 seeded histories through build→verify→prune→re-verify + stale-client fold | 1 |
+| phase5_crash (worker) | M033 fault matrix: pre-finalize / post-finalize / mid-prune / post-prune crash points | 1 |
+| phase5_resync (worker, REAL gateway) | M031 E2E: stale cursor → resync signal → fetch → checksum/import → exact-tail catch-up | 1 |
+| phase5_history (worker) | revisions ACL matrix, deterministic reconstruction vs independent oracle, pruning survival, OWNER-only restore, restore-of-restore | 4 |
+| phase5_restore_concurrency (worker) | M037: restore authz matrix + concurrent-edit preservation + auditable events | 1 |
+| phase5_retention (worker) | M038/39: protection matrix (newest/revision/floor survive), purge, accounting agreement | 1 |
+| phase5_races (worker) | M046: 12-way trigger coalescing, dual-claim single-winner, stale-finalizer fence end-to-end, edits-during-compaction, retention race, storm suppression | 6 |
+| web: snapshot-resync (vitest unit) | client wrapper decode + validation matrix + resync orchestration (pending preserved, cursor last) | 51 |
+
+Native worker suites: `./build/native/crdt/tests/concord_crdt_tests`
+(54) and `./build/native/worker/tests/concord_worker_tests` (49+):
+reconstruct/export/import/digest-after equivalence at K∈{1,n/2,n−1},
+determinism (cross-build byte-identical), bounds, seeded generators,
+restore-diff convergence batteries, corruption matrices; ASan/UBSan/TSan
+lanes via the sanitize/tsan build trees.
+
+One command for the full local gate (Phases 3+4+5):
+`./scripts/verify-gateway.sh` (extended with the Phase 5 layer).
+CI mirrors the deterministic subset in
+`.github/workflows/phase5-recovery.yml`; heavy benchmarks
+(recovery-bench) and long stress batteries stay local (documented).

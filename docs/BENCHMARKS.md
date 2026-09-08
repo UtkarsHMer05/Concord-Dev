@@ -154,3 +154,33 @@ Raw per-run evidence: `.agent/METRICS_LEDGER.md` (private). No
 public/resume claim is made from these numbers (baseline-only; the
 P5-M043 headline comparison, if any, will be computed from reproducible
 aggregate values with explicit denominators).
+
+## Phase 5 — headline recovery + compaction storage (MEASURED, 2026-09-07)
+
+Reproducible via `cargo run --release --example recovery-bench`
+(preconditions as above; the M041 optimization round attempted a fold
+acceleration, measured a 4x regression on real streams, and was
+reverted — the shipped code is the original, fully re-gated).
+
+| Race (100k-op history, 5 runs) | p50 | Notes |
+|---|---|---|
+| Full replay (whole log) | 64.90 s | the old-only path |
+| Snapshot + tail (fresh snapshot, 1,000-op tail) | **0.93 s** | import + tail fold |
+| Improvement | **98.6%** | digest verified equal every run |
+
+| Storage (50k-op history, full compaction, newest-snapshot retention) | Value |
+|---|---|
+| op log before | 50,000 rows / 2.63 MB |
+| snapshot retained | 2.65 MB |
+| op log after | 0 rows / 0 bytes |
+| durable bytes remaining | 50.1% |
+| recovery after compaction | 51 ms (import + 0-tail) |
+
+Interpretation: with the trigger policy keeping snapshots fresh
+(5,000-op threshold, docs/STORAGE.md), recovery cost is bounded by the
+snapshot import (milliseconds) plus the bounded tail — the unbounded
+full-replay growth curve is eliminated for connected history. Compaction
+halves durable bytes at this scale while retaining full
+historical-revision capability (protected snapshots per DEC-040 /
+retention rules). All numbers: local machine, exact workload/method in
+the private ledger; no production claims.
