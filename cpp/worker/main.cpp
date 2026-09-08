@@ -16,18 +16,32 @@
 // generation constructs ops through the core's own builder-path shapes
 // and validates them with the core's registry before serializing.
 //
+// Command 7 (P5-M036, DEC-039) computes the RESTORE DIFF: the forward-op
+// batch that converges a current state's visible content to a target
+// (restore-boundary) state. Its generated ops carry a SECOND reserved
+// replica band, kRestoreReplica ("REST") — distinct from
+// kMaintenanceReplica ("SYSC") because restore ops must be ingestible by
+// this same worker (which rejects SYSC-authored ops) to flow back through
+// the normal durable pipeline (see the analysis at kRestoreReplicaValue).
+//
 // Design constraints (production path):
 //   - Deterministic: identical request bytes produce identical response
 //     bytes (no timestamps, no addresses, no container-order leakage).
 //   - Bounded: frames are capped (256 MiB), op counts are capped, and only
-//     one frame plus one Doc is resident at a time.
+//     one frame plus at most two Docs (command 7's two-state diff) is
+//     resident at a time.
 //   - Content-silent errors: messages never echo op/snapshot bytes.
 //   - Core CrdtError exceptions are caught and mapped to status codes; no
 //     exception escapes a handled request.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
+#include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "concord/crdt/doc.hpp"
@@ -73,6 +87,29 @@ constexpr std::uint64_t kMaintenanceReplicaValue = 0x53595343ULL;  // "SYSC"
 constexpr crdt::ReplicaId kMaintenanceReplica{kMaintenanceReplicaValue};
 
 // ---------------------------------------------------------------------------
+// Reserved restore replica id (P5-M036, DEC-039).
+//
+// Value: 0x52455354 ("REST" in ASCII, big-endian) = 1380408148. Distinct from
+// the maintenance replica (0x53595343) on purpose: restore-diff INSERT ops
+// generated here must survive this worker's own reserved-namespace rejection
+// (read_op_batches / apply_batches reject kMaintenanceReplica only), because
+// the forward-restore batch flows back through the normal reconstruct/
+// digest-after path when the restored document is rebuilt from A's ops plus
+// the diff. The same value is pre-staged in the Rust gateway
+// (rust/sync-gateway/src/maintenance/history.rs MAINTENANCE_RESTORE_REPLICA),
+// whose tests pin its distinctness from SYSC.
+//
+// Collision analysis (mirrors the SYSC note above): the only production client
+// id allocator is a full-width random u64 (src/lib/crdt/editor-bridge.ts), so
+// a client could draw 1380408148 with probability ~2^-33 per allocation. The
+// structural mitigation is the ws/gateway-side reserved-band rejection
+// recorded as a TODO in history.rs; from this worker's side the invariant is:
+// kRestoreReplica is never used to author CLIENT input ops (only diff ops
+// generated here), and the batch it emits carries solely this band's ids.
+constexpr std::uint64_t kRestoreReplicaValue = 0x52455354ULL;  // "REST"
+constexpr crdt::ReplicaId kRestoreReplica{kRestoreReplicaValue};
+
+// ---------------------------------------------------------------------------
 // Protocol constants. All integers little-endian (matching the core's
 // canonical encodings, ids.hpp put_u32_le family).
 // ---------------------------------------------------------------------------
@@ -84,6 +121,7 @@ constexpr std::uint32_t kCmdImportVerify = 3;      // snapshot -> digest
 constexpr std::uint32_t kCmdDigestAfter = 4;       // snapshot + tail ops -> digest
 constexpr std::uint32_t kCmdVerifySnapshot = 5;    // snapshot -> digest (alias)
 constexpr std::uint32_t kCmdGenerateOps = 6;       // seed + shape -> ops + digest
+constexpr std::uint32_t kCmdRestoreDiff = 7;       // two snapshots -> forward-restore ops (P5-M036)
 
 // Status codes.
 constexpr std::uint32_t kStatusOk = 0;
@@ -105,6 +143,12 @@ constexpr std::size_t kMaxErrorMessageBytes = 4096;
 constexpr std::uint32_t kMaxGenReplicas = 8;
 constexpr std::uint32_t kGenBatchOps = 512;
 constexpr std::uint32_t kMaxLiveGeneratedItems = 8192;
+
+// Restore-diff bounds (command 7): the emitted forward-op batch is capped at
+// kMaxRestoreDiffOps (status 4 past it); input snapshots stay within the
+// 256 MiB frame rule. One serialize_batch frame can hold 1,000,000 ops
+// (the core's kMaxBatchSize), so the batch always fits a single frame.
+constexpr std::uint64_t kMaxRestoreDiffOps = 1'000'000;
 
 // Exit codes: 0 = request handled (status may still be an error status),
 // 1 = framing failure (unframeable stdin), 2 = internal crash path.
@@ -151,6 +195,11 @@ struct RequestBody {
     std::uint32_t command = 0;
     std::vector<std::string> op_batches;  // each entry: one serialize_batch-encoded payload (ops appended for CMD 1/2/4)
     std::string snapshot;                // CMD 3/4/5
+
+    // CMD 7 (restore_diff): the current state's snapshot (A) and the target
+    // (restore-boundary) state's snapshot (B).
+    std::string snapshot_a;
+    std::string snapshot_b;
 
     // CMD 6 (generate_ops) parameters.
     std::uint64_t gen_seed = 0;
@@ -282,9 +331,11 @@ enum class ParseResult { Ok, Malformed, VersionUnsupported, OpApplyError, SizeEx
     return ParseResult::Ok;
 }
 
-// Reads the [u32 snapshot_len][snapshot bytes] section shared by CMD 3/4/5.
-[[nodiscard]] ParseResult read_snapshot(const std::string& frame, std::size_t& offset,
-                                        RequestBody& body, std::string& error) {
+// Reads the [u32 snapshot_len][snapshot bytes] section shared by CMD 3/4/5/7
+// into an arbitrary slot (CMD 3/4/5 use body.snapshot; CMD 7 reads it twice
+// for snapshots A and B).
+[[nodiscard]] ParseResult read_snapshot_into(const std::string& frame, std::size_t& offset,
+                                             std::string& out, std::string& error) {
     if (offset + 4 > frame.size()) {
         error = "truncated snapshot length";
         return ParseResult::Malformed;
@@ -295,7 +346,7 @@ enum class ParseResult { Ok, Malformed, VersionUnsupported, OpApplyError, SizeEx
         error = "snapshot exceeds frame";
         return ParseResult::SizeExceeded;
     }
-    body.snapshot = frame.substr(offset, snapshot_len);
+    out = frame.substr(offset, snapshot_len);
     offset += snapshot_len;
     return ParseResult::Ok;
 }
@@ -318,14 +369,14 @@ enum class ParseResult { Ok, Malformed, VersionUnsupported, OpApplyError, SizeEx
             return read_op_batches(frame, offset, body, error);
         case kCmdImportVerify:
         case kCmdVerifySnapshot: {
-            const ParseResult result = read_snapshot(frame, offset, body, error);
+            const ParseResult result = read_snapshot_into(frame, offset, body.snapshot, error);
             if (result != ParseResult::Ok) {
                 return result;
             }
             break;  // falls through to trailing check
         }
         case kCmdDigestAfter: {
-            const ParseResult snap_result = read_snapshot(frame, offset, body, error);
+            const ParseResult snap_result = read_snapshot_into(frame, offset, body.snapshot, error);
             if (snap_result != ParseResult::Ok) {
                 return snap_result;
             }
@@ -364,6 +415,21 @@ enum class ParseResult { Ok, Malformed, VersionUnsupported, OpApplyError, SizeEx
             if (body.gen_shape > 3) {
                 error = "unknown shape";
                 return ParseResult::Malformed;
+            }
+            break;
+        }
+        case kCmdRestoreDiff: {
+            // [u32 current_snapshot_len][current snapshot bytes]
+            // [u32 target_snapshot_len][target snapshot bytes]
+            const ParseResult current_result =
+                read_snapshot_into(frame, offset, body.snapshot_a, error);
+            if (current_result != ParseResult::Ok) {
+                return current_result;
+            }
+            const ParseResult target_result =
+                read_snapshot_into(frame, offset, body.snapshot_b, error);
+            if (target_result != ParseResult::Ok) {
+                return target_result;
             }
             break;
         }
@@ -441,8 +507,25 @@ void emit_ok_generated(const std::string& digest, const std::vector<std::string>
     }
 }
 
+// CMD 7 OK response: [u32 0][u32 digest_len][target digest][u32 batch_len]
+// [batch bytes]. The batch is ONE serialize_batch frame holding every
+// emitted op (≤1,000,000 ops fits the core's per-batch cap, so a single
+// frame always suffices and the Rust adapter wraps it as one entry).
+void emit_ok_restore_diff(const std::string& target_digest, const std::string& batch) {
+    std::string out;
+    out.reserve(16 + target_digest.size() + batch.size());
+    put_u32le(out, kStatusOk);
+    put_u32le(out, static_cast<std::uint32_t>(target_digest.size()));
+    out.append(target_digest);
+    put_u32le(out, static_cast<std::uint32_t>(batch.size()));
+    out.append(batch);
+    (void)write_all(out.data(), out.size());
+}
+
 // ---------------------------------------------------------------------------
-// Command execution. Exactly one Doc is resident per request.
+// Command execution. Exactly one Doc is resident per request (commands 1-6);
+// the restore diff (command 7) holds exactly two: the current and target
+// states.
 // ---------------------------------------------------------------------------
 
 // Applies every batch into `doc` in order. Throws CrdtError from the core on
@@ -459,6 +542,567 @@ void emit_ok_generated(const std::string& digest, const std::vector<std::string>
         }
     }
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Command 7: restore diff (P5-M036, DEC-039).
+//
+// Input: snapshot A (the current converged state) + snapshot B (the target
+// restore-boundary state). Output: the forward-op batch that converges A's
+// VISIBLE CONTENT to B's, plus B's canonical digest.
+//
+// ITEM ENUMERATION (access path): Doc keeps `items_` private with no public
+// item iterator; the public surface exposing the full item stream is
+// `canonical_state_bytes()` (digest.cpp) — a stable, versioned, append-only
+// core encoding of exactly: [u32 item count] then per item
+// [u64 replica][u64 counter][left opt id][right opt id][u8 kind][u8 tombstone]
+// [scalar (Text only): u8 len + UTF-8][u32 attr count] then per attr
+// [u64 name_len][name][u8 has_value][u64 value_len][value][u64 lamport]
+// [u64 writer] — followed by the applied-id and summary sections (ignored
+// here). The worker parses these bytes rather than the SNAPSHOT bytes: the
+// snapshot format additionally embeds serialized pending ops and register
+// internals whose re-interpretation would duplicate integration semantics;
+// canonical_state_bytes is the core's DOCUMENTED canonical item encoding
+// (it is the digest input), so consuming it keeps the core the single
+// format owner (DEC-038) — the worker and core are the same semantic domain.
+// The full apply-through-restore (below) additionally validates every emitted
+// op against the real Doc, so a format drift cannot silently corrupt output.
+//
+// DIFF ALGORITHM (documented order + origin-remap rules):
+//
+// 1. DELETE ops FIRST, then INSERT ops, then ATTR-sync ops; within each
+//    class, the emitting state's stream order (deletes: A-stream; inserts
+//    and attr syncs: B-stream) — the canonical stream order is the fixed
+//    deterministic iteration order.
+//    - Deletes: for every item visible in A but tombstoned-or-absent in B:
+//      Delete{replica=REST, sequential fresh counter, lamport=base+1..,
+//      target=item's A OpId}. A->B items ABSENT in A can't exist; only A
+//      items visible and B-tombstoned-or-absent occur, so every delete
+//      target already lives in A.
+// 2. INSERT (re-insertion): un-delete is impossible (DEC-023 tombstones), so
+//    items visible in B but tombstoned-or-absent in A are re-created under
+//    fresh identities in the reserved REST band (counters sequential from 1,
+//    FRESH each call — no worker persistence; the Rust DB unique index makes
+//    accidental re-ingest a harmless duplicate no-op). Lamports are base+i
+//    where base = max(A,B) register lamports: strictly greater than BOTH
+//    snapshots' clocks, so re-inserted attr registers win any LWW merge.
+// 3. ORDERING / ANCHORING. A literal origin remap (rewriting B's left/right
+//    origins) cannot always preserve B's visible order: B may hold two
+//    VISIBLE items with the same left origin (the first is a delete-crossing
+//    gap anchor — after A deleted the intervening item, remapping both to
+//    the same origin leaves them as concurrent siblings, and Doc's
+//    tie-break orders equal-replica siblings REVERSED). Instead each
+//    re-insert is anchored between its nearest NEIGHBORS in B's visible
+//    order: left = the next earlier B-visible item that exists alive in A or
+//    was re-inserted earlier in this batch; right = symmetric next later.
+//    Both endpoints always exist at apply time (left neighbors are applied
+//    earlier — B-stream scan order; right neighbors, when not in A, are
+//    later batch ops, when not in the batch they are A items; null at the
+//    sequence boundary), so every anchor is legal by construction — the
+//    op never rides the pending buffer on the restore path. In-order,
+//    non-conflicting inserts integrate exactly at their anchor boundary,
+//    which reproduces B's visible order by induction (independent
+//    preserves of order compose). This IS the core's own proven shape:
+//    Doc::local_insert_text/stream walk anchors exactly this way.
+//    (Deviation from the task's literal origin-remap sketch — rationale
+//    documented here and in the report; the literal variant fails the
+//    spec's own core property, digest(diff(A,B)) == digest(B), on
+//    delete-crossing sibling runs.)
+// 4. ATTRIBUTES: (a) each re-insert carries B's item registers verbatim as
+//    initial_attrs (value or cleared), by lexicographic name — the AttrMap
+//    iteration order of the canonical encoding; the fresh higher lamports
+//    make them take effect on merge. (b) KEPT items (alive in both) may hold
+//    DIVERGED registers: A's snapshot carries a (lamport, writer) write for
+//    a name B's snapshot never saw (the write happened after B's boundary
+//    and never reached B — B's register is ABSENT, not merely cleared). Each
+//    differing register gets ONE SetAttr carrying B's value (or a clear
+//    when B holds none), under the fresh high lamport, so B's visible
+//    semantics win the LWW merge. Emitted in B-stream order after the
+//    inserts.
+// 5. The batch is validated by FOLDING it into a copy of A's state (the
+//    restore path: A's ops arrive as one frame in the same execute call —
+//    deterministic, content-free on failure): any op the core refuses, or
+//    any pending op that fails to drain, or a visible-content mismatch, is
+//    status 3 with a content-free message (never a silent partial restore).
+// 6. Cap: emitted ops (deletes + inserts) <= 1,000,000, else status 4.
+//    Determinism: fixed iteration order everywhere, no container-order
+//    leakage, fresh-but-sequential identities — same inputs ⇒ byte-identical
+//    output.
+// ---------------------------------------------------------------------------
+
+// A full item parsed out of Doc::canonical_state_bytes() — every field the
+// diff needs (up to the worker's own needs; digests and summaries stay in
+// the core).
+struct DiffItem {
+    crdt::OpId id{};
+    std::optional<crdt::OpId> left;    // origins (informational: neighbor
+    std::optional<crdt::OpId> right;   // anchoring replaces literal remap)
+    crdt::ItemKind kind = crdt::ItemKind::Text;
+    char32_t scalar = 0;
+    bool tombstoned = false;
+    std::map<std::string, std::optional<std::string>> attrs;  // name → value/cleared
+};
+
+// The parsed item stream of one canonical_state_bytes encoding.
+struct DiffState {
+    std::vector<DiffItem> items;  // stream order
+    std::uint64_t max_lamport = 0;  // highest attr-register lamport (0 = none)
+};
+
+// Parses one canonical_state_bytes payload. The bytes were produced by the
+// core from an imported snapshot, so malformed input is impossible by
+// construction; the parser is still total — a short/overshooting read fails
+// closed through the boolean result and maps to a structured status.
+[[nodiscard]] bool parse_canonical_items(const std::string& bytes, DiffState& out,
+                                         std::string& error) {
+    out.items.clear();
+    out.max_lamport = 0;
+
+    std::size_t offset = 0;
+
+    // Borrow the core's own little-endian readers (ids.hpp) — single format
+    // owner, no re-implementation.
+    auto read_u32 = [&](std::uint32_t& value) {
+        return crdt::get_u32_le(bytes, offset, value);
+    };
+    auto read_u64 = [&](std::uint64_t& value) {
+        return crdt::get_u64_le(bytes, offset, value);
+    };
+    auto read_u8 = [&](std::uint8_t& value) {
+        return crdt::get_u8(bytes, offset, value);
+    };
+    auto read_opt_id = [&](std::optional<crdt::OpId>& id) -> bool {
+        std::uint8_t flag = 0;
+        if (!read_u8(flag)) {
+            return false;
+        }
+        if (flag == 0) {
+            id = std::nullopt;
+            return true;
+        }
+        if (flag != 1) {
+            return false;
+        }
+        std::uint64_t replica = 0;
+        std::uint64_t counter = 0;
+        if (!read_u64(replica) || !read_u64(counter) ||
+            !crdt::OpId::is_valid_counter_pair(replica, counter)) {
+            return false;
+        }
+        id = crdt::OpId{crdt::ReplicaId{replica}, crdt::Counter{counter}};
+        return true;
+    };
+    auto read_string = [&](std::string& value) -> bool {
+        std::uint64_t length = 0;
+        if (!read_u64(length) || length > 4096 || bytes.size() < offset + length) {
+            return false;
+        }
+        value.assign(bytes, offset, static_cast<std::size_t>(length));
+        offset += static_cast<std::size_t>(length);
+        return true;
+    };
+
+    std::uint32_t count = 0;
+    if (!read_u32(count)) {
+        error = "truncated item count";
+        return false;
+    }
+    out.items.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        DiffItem item;
+        std::uint64_t replica = 0;
+        std::uint64_t counter = 0;
+        std::uint8_t kind = 0;
+        std::uint8_t tombstone = 0;
+        if (!read_u64(replica) || !read_u64(counter) || !read_opt_id(item.left) ||
+            !read_opt_id(item.right) || !read_u8(kind) || !read_u8(tombstone) ||
+            !crdt::OpId::is_valid_counter_pair(replica, counter) ||
+            (kind != static_cast<std::uint8_t>(crdt::ItemKind::Text) &&
+             kind != static_cast<std::uint8_t>(crdt::ItemKind::Delimiter)) ||
+            tombstone > 1) {
+            error = "bad item record";
+            return false;
+        }
+        item.id = crdt::OpId{crdt::ReplicaId{replica}, crdt::Counter{counter}};
+        item.kind = static_cast<crdt::ItemKind>(kind);
+        item.tombstoned = tombstone == 1;
+        if (item.kind == crdt::ItemKind::Text) {
+            std::uint8_t scalar_length = 0;
+            if (!read_u8(scalar_length) || scalar_length < 1 || scalar_length > 4 ||
+                bytes.size() < offset + scalar_length) {
+                error = "bad item scalar";
+                return false;
+            }
+            std::size_t decoded_offset = 0;
+            bool ok = false;
+            item.scalar = crdt::decode_utf8(std::string(bytes, offset, scalar_length),
+                                            decoded_offset, ok);
+            if (!ok || decoded_offset != scalar_length || item.scalar == 0 ||
+                (item.scalar >= 0xD800 && item.scalar <= 0xDFFF) ||
+                item.scalar > 0x10FFFF) {
+                error = "bad item scalar";
+                return false;
+            }
+            offset += scalar_length;
+        }
+        std::uint32_t attr_count = 0;
+        if (!read_u32(attr_count)) {
+            error = "bad attribute count";
+            return false;
+        }
+        for (std::uint32_t a = 0; a < attr_count; ++a) {
+            std::string name;
+            std::uint8_t has_value = 0;
+            std::string value;
+            std::uint64_t lamport = 0;
+            std::uint64_t writer = 0;
+            if (!read_string(name) || !read_u8(has_value) ||
+                (has_value == 1 && !read_string(value)) || !read_u64(lamport) ||
+                !read_u64(writer) || has_value > 1 || !crdt::Lamport::is_valid(lamport)) {
+                error = "bad attribute record";
+                return false;
+            }
+            out.max_lamport = std::max(out.max_lamport, lamport);
+            item.attrs.emplace(std::move(name),
+                               has_value == 1 ? std::optional<std::string>{value}
+                                             : std::nullopt);
+        }
+        out.items.push_back(std::move(item));
+    }
+    return true;
+}
+
+// The result of computing the restore diff.
+struct RestoreDiffResult {
+    std::uint32_t status = kStatusOk;
+    std::string message;      // on error (content-free)
+    std::string digest_b;     // the TARGET state's canonical digest
+    std::string batch;        // ONE serialize_batch frame with all emitted ops
+};
+
+// Computes the visible-content diff A -> B and emits the forward-op batch.
+// Every failure is a structured status with a content-free message.
+[[nodiscard]] RestoreDiffResult compute_restore_diff(const std::string& snapshot_a,
+                                                     const std::string& snapshot_b) {
+    RestoreDiffResult result;
+
+    // Fold both snapshots into Docs (the core is the semantic authority for
+    // snapshot validity and for the canonical item encodings below).
+    const crdt::Doc doc_a = crdt::Doc::import_snapshot(kMaintenanceReplica, snapshot_a);
+    const crdt::Doc doc_b = crdt::Doc::import_snapshot(kMaintenanceReplica, snapshot_b);
+    result.digest_b = doc_b.canonical_digest();
+
+    // Item streams (through the core's documented canonical encoding).
+    DiffState state_a;
+    DiffState state_b;
+    std::string parse_error;
+    if (!parse_canonical_items(doc_a.canonical_state_bytes(), state_a, parse_error) ||
+        !parse_canonical_items(doc_b.canonical_state_bytes(), state_b, parse_error)) {
+        // Impossible by construction (the core produced the bytes); fail
+        // closed rather than proceeding on a misparsed stream.
+        result.status = kStatusInternal;
+        result.message = "canonical state parse failed";
+        return result;
+    }
+
+    // Visibility membership: id -> tombstoned flag, per state. An id absent
+    // from the map is treated as tombstoned-or-absent (the delete rule).
+    const auto build_vis_index = [](const DiffState& state) {
+        std::unordered_map<crdt::OpId, bool, crdt::OpIdHash> index;
+        index.reserve(state.items.size());
+        for (const DiffItem& item : state.items) {
+            index.emplace(item.id, !item.tombstoned);
+        }
+        return index;
+    };
+    const std::unordered_map<crdt::OpId, bool, crdt::OpIdHash> visible_a =
+        build_vis_index(state_a);
+    const std::unordered_map<crdt::OpId, bool, crdt::OpIdHash> visible_b =
+        build_vis_index(state_b);
+
+    // A-stream position by id (register comparison on kept items).
+    const auto build_pos_index = [](const DiffState& state) {
+        std::unordered_map<crdt::OpId, std::size_t, crdt::OpIdHash> index;
+        index.reserve(state.items.size());
+        for (std::size_t i = 0; i < state.items.size(); ++i) {
+            index.emplace(state.items[i].id, i);
+        }
+        return index;
+    };
+    const std::unordered_map<crdt::OpId, std::size_t, crdt::OpIdHash> a_index =
+        build_pos_index(state_a);
+
+    // Fresh REST identity + clock basis: lamports strictly greater than both
+    // snapshots' register lamports so re-inserted attrs win every LWW merge.
+    std::uint64_t restore_counter = 0;  // counters 1..N sequential, FRESH per call
+    std::uint64_t lamport_clock = std::max(state_a.max_lamport, state_b.max_lamport);
+    const auto next_identity = [&]() {
+        restore_counter += 1;
+        if (restore_counter > crdt::Counter::kMax) {
+            throw crdt::CrdtError(crdt::ErrorCode::CounterOverflow,
+                                  "restore identity counter exhausted");
+        }
+        return crdt::OpId{kRestoreReplica, crdt::Counter{restore_counter}};
+    };
+    const auto next_lamport = [&]() {
+        if (lamport_clock >= crdt::Lamport::kMax) {
+            throw crdt::CrdtError(crdt::ErrorCode::InvalidLamport,
+                                  "lamport clock exhausted for restore diff");
+        }
+        lamport_clock += 1;
+        return crdt::Lamport{lamport_clock};
+    };
+
+    std::vector<crdt::Operation> ops;  // DELETEs first, then INSERTs (spec order)
+    ops.reserve(state_a.items.size() + state_b.items.size());
+
+    // ---- Pass 1: DELETE ops, in A-stream order ----
+    // An A item that exists alive and B-visible stays; an A item visible in
+    // A but tombstoned-or-absent in B is deleted. (Absent-in-B means A saw
+    // an op B never did; the item is in A, so the delete is well-formed.)
+    for (const DiffItem& item : state_a.items) {
+        if (item.tombstoned) {
+            continue;  // already tombstoned in A: nothing to delete
+        }
+        const auto in_b = visible_b.find(item.id);
+        if (in_b != visible_b.end() && in_b->second) {
+            continue;  // same item alive in both: no op
+        }
+        crdt::Operation op;
+        op.type = crdt::OpType::Delete;
+        op.id = next_identity();
+        op.lamport = next_lamport();
+        op.target = item.id;
+        ops.push_back(std::move(op));
+        if (ops.size() > kMaxRestoreDiffOps) {
+            result.status = kStatusSizeExceeded;
+            result.message = "restore diff exceeds operation limit";
+            return result;
+        }
+    }
+
+    // ---- Pass 2: INSERT (re-insert) ops, in B-stream order ----
+    // Re-insertion: un-delete is impossible (DEC-023 tombstones). Every op
+    // is anchored between its nearest stable NEIGHBORS in B's visible order
+    // (see the anchoring rationale in the command header): left = nearest
+    // EARLIER B-visible item that is alive in A or re-inserted earlier in
+    // this batch; right = symmetric nearest LATER item. Because the batch
+    // runs in B-stream order, every left neighbor is already applied, and
+    // right neighbors are either A-live items (present before the batch) or
+    // later batch ops (present when their turn comes) — so anchors always
+    // resolve and no op rides the pending buffer on the restore path.
+    //
+    // `new_ids`: B id -> batch-assigned REST identity (for remapping anchors
+    // that point at earlier batch items). `b_pos`: B id -> position among
+    // B's VISIBLE items (stream order — the neighbor space).
+    std::unordered_map<crdt::OpId, crdt::OpId, crdt::OpIdHash> new_ids;
+    std::vector<crdt::OpId> b_visible;  // B's visible ids, stream order
+    std::unordered_map<crdt::OpId, std::size_t, crdt::OpIdHash> b_pos;
+    b_visible.reserve(state_b.items.size());
+    for (const DiffItem& item : state_b.items) {
+        if (!item.tombstoned) {
+            b_pos.emplace(item.id, b_visible.size());
+            b_visible.push_back(item.id);
+        }
+    }
+
+    // An anchor candidate is resolvable at THIS op's apply time iff it is
+    // alive in A (present before the batch) or was re-inserted EARLIER in
+    // the batch (batch order = B-stream order, so earlier = lower b_pos).
+    const auto is_anchor = [&](const crdt::OpId& id) {
+        const auto a = visible_a.find(id);
+        if (a != visible_a.end() && a->second) {
+            return true;  // alive in A
+        }
+        return new_ids.find(id) != new_ids.end();  // earlier batch insert
+    };
+    // Remap a B-space anchor into the batch's identity space: earlier batch
+    // items are referenced by their fresh REST ids; A-live items keep A's ids.
+    const auto remap = [&](const std::optional<crdt::OpId>& anchor) {
+        if (!anchor.has_value()) {
+            return std::optional<crdt::OpId>{};
+        }
+        const auto mapped = new_ids.find(*anchor);
+        if (mapped != new_ids.end()) {
+            return std::optional<crdt::OpId>{mapped->second};
+        }
+        return anchor;  // alive in A: A's own id
+    };
+
+    std::vector<crdt::Operation> inserts;
+    inserts.reserve(state_b.items.size());
+    for (const DiffItem& item : state_b.items) {
+        if (item.tombstoned) {
+            continue;  // B tombstone: re-insertion is out of scope (that
+                       // item is invisible in B, so A must not show it either)
+        }
+        const auto in_a = visible_a.find(item.id);
+        if (in_a != visible_a.end() && in_a->second) {
+            continue;  // alive in both: keep A's item (attr registers are
+                       // already LWW-merged on both sides; the final fold's
+                       // visible-document check re-verifies convergence)
+        }
+        if (new_ids.size() + 1 > kMaxRestoreDiffOps) {
+            result.status = kStatusSizeExceeded;
+            result.message = "restore diff exceeds operation limit";
+            return result;
+        }
+
+        // Neighbors in B's visible order.
+        const std::size_t pos = b_pos.at(item.id);
+        std::optional<crdt::OpId> left;
+        for (std::size_t i = pos; i > 0; --i) {
+            const crdt::OpId& candidate = b_visible[i - 1];
+            if (is_anchor(candidate)) {
+                left = candidate;
+                break;
+            }
+        }
+        std::optional<crdt::OpId> right;
+        for (std::size_t i = pos + 1; i < b_visible.size(); ++i) {
+            if (is_anchor(b_visible[i])) {
+                right = b_visible[i];
+                break;
+            }
+        }
+
+        crdt::Operation op;
+        op.type = crdt::OpType::Insert;
+        op.id = next_identity();
+        op.lamport = next_lamport();
+        op.left = remap(left);
+        op.right = remap(right);
+        op.kind = item.kind;
+        op.scalar = item.scalar;
+        for (const auto& [name, value] : item.attrs) {
+            // B's registers verbatim (cleared registers carried as nullopt).
+            // The registry check happened at B's snapshot import; the final
+            // fold below re-validates everything the core integrates.
+            op.initial_attrs.push_back(crdt::InitialAttr{name, value});
+        }
+        new_ids.emplace(item.id, op.id);
+        inserts.push_back(std::move(op));
+    }
+
+    // ---- Pass 3: ATTR sync ops on KEPT items, in B-stream order ----
+    // An item alive in both may hold DIVERGED registers: A's snapshot carries
+    // a (lamport, writer) write for a name that B's snapshot never saw (the
+    // op happened after B's boundary and never reached B — B's register is
+    // ABSENT, not merely cleared; both raw states are visible in the
+    // canonical encoding's value-flag). B's visible semantics must WIN, so
+    // the divergence is repaired with one SetAttr per differing register:
+    // set B's value (or clear it when B's register is absent-or-cleared),
+    // under a fresh high lamport (beats A's diverging write in LWW).
+    // Registers where B's value EQUALS A's (or both hold no value) need no
+    // op — the states already agree.
+    std::vector<crdt::Operation> attr_syncs;
+    attr_syncs.reserve(state_b.items.size());
+    for (const DiffItem& b_item : state_b.items) {
+        if (b_item.tombstoned) {
+            continue;  // kept items only (alive in both)
+        }
+        const auto in_a = visible_a.find(b_item.id);
+        if (in_a == visible_a.end() || !in_a->second) {
+            continue;  // not alive in A: either re-inserted (initial_attrs
+                      // already carry B's registers) or deleted — not kept
+        }
+        // A's registers for this item (id -> stream position in state_a).
+        const auto a_it = a_index.find(b_item.id);
+        if (a_it == a_index.end()) {
+            continue;  // cannot happen (alive in A implies present)
+        }
+        const DiffItem& a_item = state_a.items[a_it->second];
+        // Divergent register names: union of A's and B's register keys.
+        std::vector<std::string> names;
+        for (const auto& [name, value] : a_item.attrs) {
+            names.push_back(name);
+        }
+        for (const auto& [name, value] : b_item.attrs) {
+            if (a_item.attrs.find(name) == a_item.attrs.end()) {
+                names.push_back(name);
+            }
+        }
+        std::sort(names.begin(), names.end());
+        for (const std::string& name : names) {
+            const auto b_reg = b_item.attrs.find(name);
+            const auto a_reg = a_item.attrs.find(name);
+            const std::optional<std::string> b_value =
+                b_reg != b_item.attrs.end() ? b_reg->second : std::nullopt;
+            const std::optional<std::string> a_value =
+                a_reg != a_item.attrs.end() ? a_reg->second : std::nullopt;
+            if (b_value == a_value) {
+                continue;  // both unset, or equal values (cleared == cleared)
+            }
+            crdt::Operation op;
+            op.type = crdt::OpType::SetAttr;
+            op.id = next_identity();
+            op.lamport = next_lamport();
+            op.target = b_item.id;
+            op.attr_name = name;
+            op.attr_value = b_value;  // B's winning value; nullopt clears A's
+            attr_syncs.push_back(std::move(op));
+            if (ops.size() + inserts.size() + attr_syncs.size() > kMaxRestoreDiffOps) {
+                result.status = kStatusSizeExceeded;
+                result.message = "restore diff exceeds operation limit";
+                return result;
+            }
+        }
+    }
+
+    // ---- Assemble (deletes first, then inserts, then attr syncs —
+    // documented order). ----
+    const std::size_t total_ops = ops.size() + inserts.size() + attr_syncs.size();
+    if (total_ops > kMaxRestoreDiffOps) {
+        result.status = kStatusSizeExceeded;
+        result.message = "restore diff exceeds operation limit";
+        return result;
+    }
+    ops.insert(ops.end(), inserts.begin(), inserts.end());
+    ops.insert(ops.end(), attr_syncs.begin(), attr_syncs.end());
+
+    // ---- Restore-path validation: fold A + batch; the result must hold ----
+    // exactly B's visible content. A fresh maintenance Doc receives A's
+    // items via snapshot import, then the batch; every anchor resolves
+    // (left neighbors precede, right/batch items exist), so no op may
+    // remain pending — a leftover means the anchors were wrong: status 3,
+    // content-free, never a silent partial restore.
+    crdt::Doc folded = crdt::Doc::import_snapshot(kMaintenanceReplica, snapshot_a);
+    // A's own snapshot may legitimately carry causally-early pendings
+    // from its history (ops whose anchors never arrived). The batch
+    // must add NO NEW pendings — baseline, not absolute zero.
+    const std::size_t pending_baseline = folded.pending_count();
+    for (const crdt::Operation& op : ops) {
+        try {
+            (void)folded.apply_remote(op);
+        } catch (const crdt::CrdtError& e) {
+            result.status = kStatusOpApplyError;
+            result.message = sanitize_message(std::string{"restore batch rejected: "} + e.what());
+            return result;
+        }
+    }
+    if (folded.pending_count() > pending_baseline) {
+        result.status = kStatusOpApplyError;
+        result.message = "restore batch left new undrained pending operations";
+        return result;
+    }
+    // Visible-content equality (not digest equality: A keeps its tombstone
+    // history and its own live-item identities — the visible document is the
+    // restore contract, HISTORY.md §5 step 2).
+    if (folded.visible_document() != doc_b.visible_document()) {
+        result.status = kStatusOpApplyError;
+        result.message = "restore batch does not converge to target content";
+        return result;
+    }
+
+    // Serialize as ONE batch frame (the 1M cap fits the core's kMaxBatchSize).
+    try {
+        result.batch = crdt::serialize_batch(ops);
+    } catch (const crdt::CrdtError& e) {
+        result.status = status_for(e.code());
+        result.message = sanitize_message(e.what());
+        return result;
+    }
+    return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -925,6 +1569,8 @@ struct CommandResult {
     bool snapshot_only = false;  // CMD 2: emit [status][snapshot_len][snapshot]
     bool gen_batches = false;    // CMD 6: emit [digest_len][digest][batch_count][batches]
     std::vector<std::string> batches;  // CMD 6: serialize_batch frames, ≤512 ops each
+    bool restore_diff = false;  // CMD 7: emit [digest_len][target digest][batch_len][batch]
+    std::string diff_batch;     // CMD 7: ONE serialize_batch frame with all ops
 };
 
 [[nodiscard]] CommandResult execute(const RequestBody& body) {
@@ -975,6 +1621,23 @@ struct CommandResult {
                 // Serialize in size-capped chunks; the op vector is released
                 // with the GenerateResult before any batch is written out.
                 result.batches = batch_generated(generated.stream.ops);
+                return result;
+            }
+            case kCmdRestoreDiff: {
+                // The restore-diff machinery throws only through the core's
+                // own guards (snapshot validation, identity exhaustion), so
+                // the shared catch maps those exactly like the other
+                // commands; internal diff failures return structured results.
+                const RestoreDiffResult diff =
+                    compute_restore_diff(body.snapshot_a, body.snapshot_b);
+                if (diff.status != kStatusOk) {
+                    result.status = diff.status;
+                    result.digest = diff.message;
+                    return result;
+                }
+                result.digest = diff.digest_b;
+                result.restore_diff = true;
+                result.diff_batch = diff.batch;
                 return result;
             }
             default:
@@ -1053,7 +1716,9 @@ int run_worker() {
 
     const CommandResult result = execute(body);
     if (result.status == kStatusOk) {
-        if (result.gen_batches) {
+        if (result.restore_diff) {
+            emit_ok_restore_diff(result.digest, result.diff_batch);
+        } else if (result.gen_batches) {
             emit_ok_generated(result.digest, result.batches);
         } else if (result.snapshot_only) {
             emit_ok_snapshot_only(result.snapshot);

@@ -250,7 +250,8 @@ async fn restore_authorization_matrix_and_concurrent_edits() {
         .restore_revision(doc, owner, revision.revision_id)
         .await
         .expect("owner restores");
-    let _ = outcome;
+    let outcome_applied_ops = outcome.applied_ops;
+    assert!(outcome.target_state_digest.starts_with("sha256:"));
 
     // ---- Concurrent edits DURING/after restore: the log never blocks,
     //      no acknowledged edit is lost (R7/H6) ----
@@ -261,10 +262,23 @@ async fn restore_authorization_matrix_and_concurrent_edits() {
     repo.ingest_batch(owner, doc, &concurrent)
         .await
         .expect("concurrent edits durably acked (ingest path intact)");
-    // Every op is queryable.
+    // Every ORIGINAL op is still queryable, and the restore's forward
+    // ops are APPENDED after them (forward-moving, H6: the log only
+    // grows). The diff deletes wave2's extra visible items — those
+    // delete ops are new durable rows, which is exactly restore-as-
+    // forward-ops semantics.
     let page = repo.catchup_page(doc, 0, 64).await.expect("page");
-    let expected_total = 16; // 6 + 6 + 4
-    assert_eq!(page.ops.len(), expected_total, "no acknowledged op lost");
+    assert!(
+        page.ops.len() >= 16,
+        "no acknowledged op lost (have {}, expected >= 16)",
+        page.ops.len()
+    );
+    let restore_op_count = page.ops.len() - 16;
+    assert!(
+        outcome_applied_ops >= restore_op_count,
+        "restore diff ops must be durable-logged ({})",
+        outcome_applied_ops
+    );
 
     // Restore event recorded; a second restore (restore-of-restore) is
     // just another event — auditable, convergent.

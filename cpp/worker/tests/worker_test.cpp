@@ -17,6 +17,7 @@
 //   - maintenance-replica exclusion.
 #include "test_harness.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -28,6 +29,7 @@
 #include "concord/crdt/doc.hpp"
 #include "concord/crdt/errors.hpp"
 #include "concord/crdt/serialize.hpp"
+#include "concord/crdt/validation.hpp"
 
 using namespace concord::crdt;
 
@@ -1130,6 +1132,609 @@ CONCORD_TEST(generate_stream_is_multi_replica_interleaved) {
     }
     CHECK(max_run <= 3);  // rotation: at most a 2-skip produces a 1-2 back-to-back
     (void)max_run;
+}
+
+// ---------------------------------------------------------------------------
+// CMD 7 (P5-M036, DEC-039): restore diff — forward ops from state A to state B.
+// ---------------------------------------------------------------------------
+constexpr std::uint32_t kCmdRestoreDiff = 7;
+constexpr std::uint64_t kRestoreReplicaValue = 0x52455354ULL;  // "REST"
+
+// Wraps each op as its own single-op batch frame (the durable-log row shape).
+std::vector<std::string> single_op_batches_for(const std::vector<Operation>& ops) {
+    std::vector<std::string> out;
+    out.reserve(ops.size());
+    for (const Operation& op : ops) {
+        out.push_back(serialize_batch(std::vector<Operation>{op}));
+    }
+    return out;
+}
+
+// In-process fold of snapshot + batch through the CORE (the semantic
+// authority), returning the resulting Doc — used where the protocol only
+// carries digests (CMD 4) but the test needs the visible document.
+Doc fold_snapshot_with_batch(const std::string& snapshot, const std::string& batch) {
+    Doc doc = Doc::import_snapshot(ReplicaId{76}, snapshot);
+    const std::vector<Operation> ops = parse_batch(batch);
+    (void)doc.apply_batch(ops);
+    return doc;
+}
+
+// CMD 7 request: [u32 current_snapshot_len][current snapshot]
+//                 [u32 target_snapshot_len][target snapshot].
+std::string restore_diff_request(const std::string& current_snapshot,
+                                 const std::string& target_snapshot) {
+    Bytes b;
+    b.u32(kCmdRestoreDiff);
+    b.blob(current_snapshot);
+    b.blob(target_snapshot);
+    return b.data;
+}
+
+// CMD 7 OK response view: [status][target digest][ONE serialize_batch frame].
+// A status-0 response means the worker already FOLDED A + batch and verified
+// the result converges to B's visible content (the in-worker contract).
+struct DiffResponse {
+    std::string target_digest;
+    std::string batch;               // one serialize_batch frame
+    std::vector<Operation> ops;     // decoded, in emitted order
+};
+
+DiffResponse parse_diff_ok(const WorkerRun& run) {
+    Reader r{run.stdout_bytes};
+    CHECK_EQ(r.u32(), kStatusOk);
+    DiffResponse out;
+    out.target_digest = r.blob();
+    out.batch = r.blob();
+    CHECK(r.done());
+    out.ops = parse_batch(out.batch);
+    return out;
+}
+
+// Runs CMD 7 and asserts the OK path; returns the parsed view.
+DiffResponse run_restore_diff(const std::string& snap_a, const std::string& snap_b) {
+    const WorkerRun run = run_worker(restore_diff_request(snap_a, snap_b));
+    CHECK_EQ(run.exit_code, 0);
+    CHECK(run.stderr_bytes.empty());
+    return parse_diff_ok(run);
+}
+
+// Reconstructs a snapshot + digest from op batches via CMD 1.
+std::pair<std::string, std::string> reconstruct_state(const std::vector<std::string>& batches) {
+    const WorkerRun run = run_worker(snapshot_ops_request(kCmdReconstruct, batches));
+    CHECK_EQ(run.exit_code, 0);
+    Reader r{run.stdout_bytes};
+    CHECK_EQ(r.u32(), kStatusOk);
+    const std::string digest = r.blob();
+    const std::string snapshot = r.blob();
+    CHECK(r.done());
+    return {digest, snapshot};
+}
+
+// Folds snapshot + one batch through CMD 4 and returns the resulting digest.
+std::string digest_after_fold(const std::string& snapshot, const std::string& batch) {
+    const WorkerRun run = run_worker(digest_after_request(snapshot, {batch}));
+    CHECK_EQ(run.exit_code, 0);
+    Reader r{run.stdout_bytes};
+    CHECK_EQ(r.u32(), kStatusOk);
+    const std::string digest = r.blob();
+    CHECK(r.done());
+    return digest;
+}
+
+// Asserts two snapshots hold the SAME VISIBLE CONTENT through the core's own
+// public view (the restore contract is visible semantics, HISTORY.md §5 —
+// digests legitimately differ because the forward batch APPENDS tombstones
+// and REST identities to A's history rather than shrinking it; DEC-023).
+void check_visible_equal(const std::string& snapshot_x, const std::string& snapshot_y,
+                        const char* context) {
+    const Doc x = Doc::import_snapshot(ReplicaId{77}, snapshot_x);
+    const Doc y = Doc::import_snapshot(ReplicaId{78}, snapshot_y);
+    CHECK_EQ(x.visible_document().size(), y.visible_document().size());
+    CHECK(x.visible_document() == y.visible_document());  // message: context
+    (void)context;
+}
+
+// ---------------------------------------------------------------------------
+// Test group 1: identity — diff(A,B) applied to A converges A to B's VISIBLE
+// content (THE core property), across seeded difference shapes.
+// ---------------------------------------------------------------------------
+CONCORD_TEST(restore_diff_identity_deletion_heavy) {
+    // A = 200-op generated stream (shape 0: mixed churn — always emits
+    // deletes in the diff); B = same seed's first 100 ops (an earlier
+    // boundary — A's history strictly contains B's).
+    const GeneratedResponse full = generate_and_parse(12345, 200, 3, 0);
+    const GeneratedResponse half = generate_and_parse(12345, 100, 3, 0);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+    CHECK(digest_a != digest_b);
+
+    const DiffResponse diff = run_restore_diff(snap_a, snap_b);
+    CHECK_EQ(diff.target_digest, digest_b);
+    CHECK(!diff.ops.empty());
+    // Deletes exist (A has extra visible items to remove).
+    bool saw_delete = false;
+    for (const Operation& op : diff.ops) {
+        if (op.type == OpType::Delete) {
+            saw_delete = true;
+        }
+    }
+    CHECK(saw_delete);
+
+    // Apply through the real pipeline (CMD 4), then export (CMD 2 from ops
+    // is not available for snapshot+ops; use reconstruct on A's ops + batch)
+    // and compare visible content to B.
+    std::vector<std::string> all = single_op_batches_for(full.ops);
+    all.push_back(diff.batch);
+    const auto [digest_after, snap_after] = reconstruct_state(all);
+    check_visible_equal(snap_after, snap_b, "deletion-heavy identity");
+    (void)digest_after;
+}
+
+CONCORD_TEST(restore_diff_identity_insertion_heavy) {
+    // Shape 1: insert-heavy — the diff is mostly deletes of A's extra
+    // inserts (B = earlier prefix with FEWER items), plus attr syncs.
+    const GeneratedResponse full = generate_and_parse(777, 150, 3, 1);
+    const GeneratedResponse half = generate_and_parse(777, 75, 3, 1);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+
+    const DiffResponse diff = run_restore_diff(snap_a, snap_b);
+    CHECK_EQ(diff.target_digest, digest_b);
+
+    std::vector<std::string> all = single_op_batches_for(full.ops);
+    all.push_back(diff.batch);
+    const auto [snap_digest, snap_after] = reconstruct_state(all);
+    (void)snap_digest;
+    check_visible_equal(snap_after, snap_b, "insertion-heavy identity");
+}
+
+CONCORD_TEST(restore_diff_identity_attr_heavy) {
+    // Shape 3: attr-heavy — B's kept items mostly need register syncs.
+    const GeneratedResponse full = generate_and_parse(2026, 200, 3, 3);
+    const GeneratedResponse half = generate_and_parse(2026, 100, 3, 3);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+
+    const DiffResponse diff = run_restore_diff(snap_a, snap_b);
+    CHECK_EQ(diff.target_digest, digest_b);
+    bool saw_setattr = false;
+    for (const Operation& op : diff.ops) {
+        if (op.type == OpType::SetAttr) {
+            saw_setattr = true;
+        }
+    }
+    CHECK(saw_setattr);
+
+    std::vector<std::string> all = single_op_batches_for(full.ops);
+    all.push_back(diff.batch);
+    const auto [snap_digest, snap_after] = reconstruct_state(all);
+    (void)snap_digest;
+    check_visible_equal(snap_after, snap_b, "attr-heavy identity");
+}
+
+CONCORD_TEST(restore_diff_identity_mixed_shapes) {
+    // Every generator shape × several boundaries: the status-0 contract IS
+    // the identity proof (the worker folds A + batch internally and compares
+    // visible documents) — re-prove it externally through CMD 1.
+    for (const std::uint32_t shape : {0u, 1u, 2u, 3u}) {
+        for (const std::uint32_t k : {50u, 99u, 120u}) {
+            const GeneratedResponse full = generate_and_parse(4242 + shape, 150, 3, shape);
+            const GeneratedResponse half = generate_and_parse(4242 + shape, k, 3, shape);
+            const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+            const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+            const DiffResponse diff = run_restore_diff(snap_a, snap_b);
+            CHECK_EQ(diff.target_digest, digest_b);
+            std::vector<std::string> all = single_op_batches_for(full.ops);
+            all.push_back(diff.batch);
+            const auto [snap_digest, snap_after] = reconstruct_state(all);
+            (void)snap_digest;
+            check_visible_equal(snap_after, snap_b, "mixed-shape identity");
+        }
+    }
+}
+
+CONCORD_TEST(restore_diff_identity_equal_states_empty_batch) {
+    // B == A: the batch must be EMPTY and the target digest equals A's.
+    const GeneratedResponse full = generate_and_parse(31337, 120, 3, 0);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const DiffResponse diff = run_restore_diff(snap_a, snap_a);
+    CHECK_EQ(diff.target_digest, digest_a);
+    CHECK(diff.ops.empty());
+    CHECK_EQ(diff.batch.size(), 4u);  // serialize_batch of zero ops: just the count
+    // Applying the empty batch changes nothing.
+    CHECK_EQ(digest_after_fold(snap_a, diff.batch), digest_a);
+}
+
+// ---------------------------------------------------------------------------
+// Test group 2: round trip through the existing commands — A from a 200-op
+// stream, B from the first 100 ops of the same stream; ops_A + diff must
+// reconstruct (CMD 1) to B's visible content.
+// ---------------------------------------------------------------------------
+CONCORD_TEST(restore_diff_round_trip_prefix_boundary) {
+    const GeneratedResponse full = generate_and_parse(987654321ULL, 200, 3, 0);
+    const GeneratedResponse half = generate_and_parse(987654321ULL, 100, 3, 0);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+
+    const DiffResponse diff = run_restore_diff(snap_a, snap_b);
+    CHECK_EQ(diff.target_digest, digest_b);
+
+    // Round trip 1: reconstruct(ops_A + diff batch) — B's visible content.
+    std::vector<std::string> all = single_op_batches_for(full.ops);
+    all.push_back(diff.batch);
+    const auto [digest_rt, snap_rt] = reconstruct_state(all);
+    (void)digest_rt;
+    check_visible_equal(snap_rt, snap_b, "prefix boundary round trip");
+
+    // Round trip 2 (test 7): the reconstructed state re-exports and
+    // re-imports stably (CMD 3 digest == CMD 1 digest).
+    const WorkerRun verify = run_worker(snapshot_request(kCmdImportVerify, snap_rt));
+    Reader vr{verify.stdout_bytes};
+    CHECK_EQ(vr.u32(), kStatusOk);
+    CHECK_EQ(vr.blob(), digest_rt);
+    CHECK(vr.done());
+}
+
+CONCORD_TEST(restore_diff_forward_direction_reinserts) {
+    // A = prefix (older), B = full (newer): every B-only visible item must be
+    // re-INSERTED (fresh REST identities, B-stream order) — the un-delete /
+    // never-seen path. Attr syncs flow forward too.
+    const GeneratedResponse full = generate_and_parse(5150, 180, 3, 0);
+    const GeneratedResponse half = generate_and_parse(5150, 90, 3, 0);
+    const auto [digest_old, snap_old] = reconstruct_state(single_op_batches_for(half.ops));
+    const auto [digest_new, snap_new] = reconstruct_state(single_op_batches_for(full.ops));
+
+    const DiffResponse diff = run_restore_diff(snap_old, snap_new);
+    CHECK_EQ(diff.target_digest, digest_new);
+    bool saw_insert = false;
+    for (const Operation& op : diff.ops) {
+        if (op.type == OpType::Insert) {
+            saw_insert = true;
+        }
+    }
+    CHECK(saw_insert);
+
+    std::vector<std::string> all = single_op_batches_for(half.ops);
+    all.push_back(diff.batch);
+    const auto [digest_rt, snap_rt] = reconstruct_state(all);
+    (void)digest_rt;
+    check_visible_equal(snap_rt, snap_new, "forward direction re-inserts");
+}
+
+// ---------------------------------------------------------------------------
+// Test group 3: duplicate apply is harmless (inserts dedup by identity;
+// deletes re-tombstone; setattrs are LWW-stable).
+// ---------------------------------------------------------------------------
+CONCORD_TEST(restore_diff_duplicate_apply_is_harmless) {
+    const GeneratedResponse full = generate_and_parse(600613, 160, 3, 0);
+    const GeneratedResponse half = generate_and_parse(600613, 80, 3, 0);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+
+    const DiffResponse diff = run_restore_diff(snap_a, snap_b);
+
+    // Once: snapshot + batch. Twice: snapshot + batch + batch (duplicate).
+    const WorkerRun once = run_worker(digest_after_request(snap_a, {diff.batch}));
+    Reader r1{once.stdout_bytes};
+    CHECK_EQ(r1.u32(), kStatusOk);
+    const std::string digest_once = r1.blob();
+    CHECK(r1.done());
+
+    const WorkerRun twice = run_worker(digest_after_request(snap_a, {diff.batch, diff.batch}));
+    Reader r2{twice.stdout_bytes};
+    CHECK_EQ(r2.u32(), kStatusOk);
+    const std::string digest_twice = r2.blob();
+    CHECK(r2.done());
+
+    // Duplicate application is a byte-stable no-op on the digest.
+    CHECK_EQ(digest_once, digest_twice);
+    // And the visible content still equals B's (core fold, the authority).
+    const Doc folded = fold_snapshot_with_batch(snap_a, diff.batch);
+    const Doc target = Doc::import_snapshot(ReplicaId{79}, snap_b);
+    CHECK(folded.visible_document() == target.visible_document());
+}
+
+// ---------------------------------------------------------------------------
+// Test group 4: interop — the batch flows back through the EXISTING pipeline:
+// CMD_RECONSTRUCT folds ops_A + diff_ops, and no op claims the maintenance
+// replica (only the REST band).
+// ---------------------------------------------------------------------------
+CONCORD_TEST(restore_diff_batch_ingestible_and_reserved_bands) {
+    const GeneratedResponse full = generate_and_parse(112233, 140, 3, 0);
+    const GeneratedResponse half = generate_and_parse(112233, 70, 3, 0);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+
+    const DiffResponse diff = run_restore_diff(snap_a, snap_b);
+    CHECK(!diff.ops.empty());
+
+    // The batch decodes through the core's strict parse (structure valid).
+    const std::vector<Operation> ops = parse_batch(diff.batch);
+    CHECK_EQ(ops.size(), diff.ops.size());
+    // Every op identity carries the REST band, never SYSC, never zero.
+    for (const Operation& op : ops) {
+        CHECK_EQ(op.id.replica.value(), kRestoreReplicaValue);
+        CHECK(op.id.replica.value() != kMaintenanceReplicaValue);
+        CHECK(op.id.counter.value() >= 1);
+        // Anchors and targets never reference the reserved bands either.
+        if (op.left.has_value()) {
+            CHECK(op.left->replica.value() != kMaintenanceReplicaValue);
+        }
+        if (op.right.has_value()) {
+            CHECK(op.right->replica.value() != kMaintenanceReplicaValue);
+        }
+        if (op.target.has_value()) {
+            CHECK(op.target->replica.value() != kMaintenanceReplicaValue);
+        }
+        // Core validation accepts every emitted op.
+        validate_operation(op);
+    }
+    // Identities are sequential from 1 (fresh, deterministic basis) and
+    // lamports are unique and strictly increasing across the batch. The
+    // LWW-winning invariant (emitted registers beat every register in either
+    // input state) follows from the worker's clock basis — max register
+    // lamport across both snapshots — and is proven end-to-end by the
+    // convergence tests: every attr-synced/re-inserted register WINS.
+    for (std::size_t i = 0; i < ops.size(); ++i) {
+        CHECK_EQ(ops[i].id.counter.value(), i + 1);
+    }
+    for (std::size_t i = 1; i < ops.size(); ++i) {
+        CHECK(ops[i].lamport.value() > ops[i - 1].lamport.value());
+    }
+
+    // The batch ingests through CMD 1 alongside A's ops (no reserved-replica
+    // rejection — the REST band passes the worker's own guard).
+    std::vector<std::string> all = single_op_batches_for(full.ops);
+    all.push_back(diff.batch);
+    const WorkerRun run = run_worker(snapshot_ops_request(kCmdReconstruct, all));
+    CHECK_EQ(run.exit_code, 0);
+    Reader r{run.stdout_bytes};
+    CHECK_EQ(r.u32(), kStatusOk);
+    (void)r.blob();  // digest
+    const std::string snapshot = r.blob();
+    CHECK(r.done());
+    check_visible_equal(snapshot, snap_b, "interop reconstruct");
+}
+
+CONCORD_TEST(restore_diff_ops_never_use_maintenance_replica_across_seeds) {
+    // Scan across seeds: the REST band is the ONLY identity writer.
+    for (std::uint64_t seed = 1; seed <= 6; ++seed) {
+        const GeneratedResponse full = generate_and_parse(seed * 100, 120, 3, 0);
+        const GeneratedResponse half = generate_and_parse(seed * 100, 60, 3, 0);
+        const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+        const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+        const DiffResponse diff = run_restore_diff(snap_a, snap_b);
+        CHECK(!diff.ops.empty());
+        for (const Operation& op : diff.ops) {
+            CHECK_EQ(op.id.replica.value(), kRestoreReplicaValue);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test group 5: determinism — same request bytes ⇒ identical response bytes.
+// ---------------------------------------------------------------------------
+CONCORD_TEST(restore_diff_deterministic_response_bytes) {
+    const GeneratedResponse full = generate_and_parse(9090, 130, 3, 2);
+    const GeneratedResponse half = generate_and_parse(9090, 65, 3, 2);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+    (void)digest_b;
+
+    const std::string request = restore_diff_request(snap_a, snap_b);
+    const WorkerRun first = run_worker(request);
+    const WorkerRun second = run_worker(request);
+    CHECK_EQ(first.exit_code, 0);
+    CHECK_EQ(second.exit_code, 0);
+    CHECK(first.stdout_bytes == second.stdout_bytes);
+    CHECK(first.stderr_bytes.empty());
+    CHECK(second.stderr_bytes.empty());
+
+    const DiffResponse diff = parse_diff_ok(first);
+    // Deterministic identity basis: counters restart at 1 on every call.
+    if (!diff.ops.empty()) {
+        CHECK_EQ(diff.ops.front().id.counter.value(), 1u);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test group 6: corrupt inputs — truncated/garbage snapshots yield structured
+// statuses, never crashes.
+// ---------------------------------------------------------------------------
+CONCORD_TEST(restore_diff_truncated_snapshots_structured_errors) {
+    const GeneratedResponse full = generate_and_parse(4004, 100, 3, 0);
+    const GeneratedResponse half = generate_and_parse(4004, 50, 3, 0);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+    (void)digest_a;
+    (void)digest_b;
+
+    // Truncate A at many lengths: structured error (never exit != 0).
+    for (std::size_t cut = 0; cut < snap_a.size(); cut += 37) {
+        const WorkerRun run =
+            run_worker(restore_diff_request(snap_a.substr(0, cut), snap_b));
+        CHECK_EQ(run.exit_code, 0);
+        Reader r{run.stdout_bytes};
+        const std::uint32_t status = r.u32();
+        if (cut == 0) {
+            CHECK_EQ(status, kStatusMalformed);  // empty snapshot
+        } else {
+            CHECK(status == kStatusMalformed || status == kStatusVersionUnsupported ||
+                  status == kStatusOpApplyError || status == kStatusSizeExceeded);
+        }
+        const std::string message = r.blob();
+        CHECK(message.size() <= 4096);
+        CHECK(r.done());
+    }
+    // Truncate B.
+    for (std::size_t cut = 1; cut < snap_b.size(); cut += 29) {
+        const WorkerRun run =
+            run_worker(restore_diff_request(snap_a, snap_b.substr(0, cut)));
+        CHECK_EQ(run.exit_code, 0);
+        Reader r{run.stdout_bytes};
+        const std::uint32_t status = r.u32();
+        CHECK(status != kStatusOk);
+        const std::string message = r.blob();
+        CHECK(message.size() <= 4096);
+        CHECK(r.done());
+    }
+    // Garbage bytes as A.
+    const WorkerRun garbage =
+        run_worker(restore_diff_request(std::string(64, '\x01'), snap_b));
+    CHECK_EQ(garbage.exit_code, 0);
+    {
+        Reader r{garbage.stdout_bytes};
+        CHECK(r.u32() != kStatusOk);
+        (void)r.blob();
+        CHECK(r.done());
+    }
+    // Version-flip on either snapshot -> status 2.
+    {
+        std::string flipped_a = snap_a;
+        flipped_a[0] = static_cast<char>(9);
+        const WorkerRun run = run_worker(restore_diff_request(flipped_a, snap_b));
+        Reader r{run.stdout_bytes};
+        CHECK_EQ(r.u32(), 2u);
+        (void)r.blob();
+        CHECK(r.done());
+    }
+    {
+        std::string flipped_b = snap_b;
+        flipped_b[0] = static_cast<char>(9);
+        const WorkerRun run = run_worker(restore_diff_request(snap_a, flipped_b));
+        Reader r{run.stdout_bytes};
+        CHECK_EQ(r.u32(), 2u);
+        (void)r.blob();
+        CHECK(r.done());
+    }}
+
+CONCORD_TEST(restore_diff_malformed_request_bodies) {
+    const GeneratedResponse full = generate_and_parse(4004, 60, 3, 0);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+
+    struct Case {
+        std::string body;
+        const char* name;
+    };
+    std::vector<Case> cases;
+    {   // Missing the second snapshot entirely.
+        Bytes b;
+        b.u32(kCmdRestoreDiff);
+        b.blob(snap_a);
+        cases.push_back({b.data, "missing target snapshot"});
+    }
+    {   // Trailing bytes after both snapshots.
+        Bytes b;
+        b.u32(kCmdRestoreDiff);
+        b.blob(snap_a);
+        b.blob(snap_a);
+        b.raw("xx");
+        cases.push_back({b.data, "trailing bytes"});
+    }
+    {   // Declared snapshot length exceeds the frame -> size status.
+        Bytes b;
+        b.u32(kCmdRestoreDiff);
+        b.u32(static_cast<std::uint32_t>(snap_a.size() + 1));
+        b.raw(snap_a);
+        const WorkerRun run = run_worker(b.data);
+        CHECK_EQ(run.exit_code, 0);
+        Reader r{run.stdout_bytes};
+        CHECK_EQ(r.u32(), kStatusSizeExceeded);
+        (void)r.blob();
+        CHECK(r.done());
+    }
+    for (const Case& c : cases) {
+        const WorkerRun run = run_worker(c.body);
+        CHECK_EQ(run.exit_code, 0);
+        Reader r{run.stdout_bytes};
+        CHECK_EQ(r.u32(), kStatusMalformed);  // message context: c.name
+        (void)r.blob();
+        CHECK(r.done());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test group 7: fold(A_ops + diff) then export → import → digest stability,
+// plus the snapshot + batch (CMD 4) tail path.
+// ---------------------------------------------------------------------------
+CONCORD_TEST(restore_diff_reexport_digest_stability) {
+    const GeneratedResponse full = generate_and_parse(8899, 170, 3, 0);
+    const GeneratedResponse half = generate_and_parse(8899, 85, 3, 0);
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(half.ops));
+
+    const DiffResponse diff = run_restore_diff(snap_a, snap_b);
+
+    // Reconstruct from ops_A + diff; the snapshot returned must re-import to
+    // the same digest (CMD 3) and hold B's visible content.
+    std::vector<std::string> all = single_op_batches_for(full.ops);
+    all.push_back(diff.batch);
+    const auto [digest_rt, snap_rt] = reconstruct_state(all);
+
+    const WorkerRun verify = run_worker(snapshot_request(kCmdImportVerify, snap_rt));
+    Reader vr{verify.stdout_bytes};
+    CHECK_EQ(vr.u32(), kStatusOk);
+    CHECK_EQ(vr.blob(), digest_rt);
+    CHECK(vr.done());
+    check_visible_equal(snap_rt, snap_b, "re-export stability");
+
+    // The snapshot + batch tail path (CMD 4) reaches the same state.
+    const std::string digest_tail = digest_after_fold(snap_a, diff.batch);
+    CHECK_EQ(digest_tail, digest_rt);
+    (void)digest_b;
+}
+
+CONCORD_TEST(restore_diff_empty_document_edges) {
+    // Empty -> empty: empty batch, equal digests.
+    const auto [digest_empty, snap_empty] = reconstruct_state({});
+    const DiffResponse same = run_restore_diff(snap_empty, snap_empty);
+    CHECK_EQ(same.target_digest, digest_empty);
+    CHECK(same.ops.empty());
+
+    // Empty -> content: everything re-inserted; the whole visible document
+    // of B must appear (null-anchored first items included).
+    const GeneratedResponse full = generate_and_parse(61, 80, 3, 0);
+    const auto [digest_b, snap_b] = reconstruct_state(single_op_batches_for(full.ops));
+    const DiffResponse from_empty = run_restore_diff(snap_empty, snap_b);
+    CHECK_EQ(from_empty.target_digest, digest_b);
+    bool saw_insert = false;
+    for (const Operation& op : from_empty.ops) {
+        CHECK(op.type == OpType::Insert);
+        saw_insert = true;
+    }
+    CHECK(saw_insert);
+    // Applied: visible content equals B's.
+    const std::string digest_applied = digest_after_fold(snap_empty, from_empty.batch);
+    const WorkerRun reexport = run_worker(digest_after_request(snap_empty, {from_empty.batch}));
+    Reader rr{reexport.stdout_bytes};
+    CHECK_EQ(rr.u32(), kStatusOk);
+    (void)rr.blob();
+    CHECK(rr.done());
+    (void)digest_applied;
+    // Prove visible equality via reconstruct of the batch alone.
+    const auto [digest_only, snap_only] = reconstruct_state({from_empty.batch});
+    (void)digest_only;
+    check_visible_equal(snap_only, snap_b, "empty to content");
+
+    // Content -> empty: delete-everything batch; visible content collapses.
+    const auto [digest_a, snap_a] = reconstruct_state(single_op_batches_for(full.ops));
+    const DiffResponse to_empty = run_restore_diff(snap_a, snap_empty);
+    CHECK_EQ(to_empty.target_digest, digest_empty);
+    bool saw_delete = false;
+    for (const Operation& op : to_empty.ops) {
+        if (op.type == OpType::Delete) {
+            saw_delete = true;
+        }
+    }
+    CHECK(saw_delete);
+    std::vector<std::string> all = single_op_batches_for(full.ops);
+    all.push_back(to_empty.batch);
+    const auto [digest_rt, snap_rt] = reconstruct_state(all);
+    (void)digest_rt;
+    const Doc folded = Doc::import_snapshot(ReplicaId{82}, snap_rt);
+    CHECK(folded.visible_document().size() == 1);  // the implicit empty root block
+    CHECK(folded.visible_document().front().chars.empty());
 }
 
 int main() {

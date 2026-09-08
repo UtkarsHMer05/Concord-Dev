@@ -93,6 +93,8 @@ pub enum HistoryError {
     Snapshot(#[from] SnapshotRepoError),
     #[error(transparent)]
     Worker(#[from] WorkerError),
+    #[error("restore op failed structural validation: {0}")]
+    OpValidation(String),
     #[error(transparent)]
     Job(#[from] crate::maintenance::jobs::JobError),
     /// Direct pool access for revision rows (the typed repos live in
@@ -190,6 +192,20 @@ pub struct RestoreOutcome {
     /// True when an existing finalized snapshot at the exact boundary
     /// was reused instead of building a new one.
     pub reused_existing_snapshot: bool,
+    /// Forward-ops restore (P5-M036 full form): ops newly ingested by
+    /// the restore batch (0 when the target already IS the current
+    /// visible state).
+    pub applied_ops: usize,
+    /// Duplicate identities in the restore batch (idempotent re-restore
+    /// or racing retries resolve to no-ops).
+    pub duplicate_ops: usize,
+}
+
+/// Metadata for the applied restore-op batch (internal bookkeeping).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RestoreAppliedOps {
+    pub applied: usize,
+    pub duplicates: usize,
 }
 
 /// Insert parameters (bundled to keep the helper's argument count
@@ -769,6 +785,44 @@ impl RevisionService {
         let (current_state_digest, _) =
             self.reconstruct_at_boundary(document, now_boundary).await?;
 
+        // ---- Forward-ops stage (P5-M036, DEC-039; worker CMD_RESTORE_DIFF).
+        // The worker computes the item-level diff CURRENT→TARGET and
+        // PROVES convergence internally (status 0 = folded A+batch
+        // equals B's visible content) — silent partial restore is
+        // impossible. The diff ops carry the reserved REST replica and
+        // are ingested through the NORMAL durable path (authz recheck +
+        // unique identities + commit), so active clients receive them
+        // as an ordinary batch: restore is 'just edits' (HISTORY.md).
+        let current_inner = self.export_state_inner(document, now_boundary).await?;
+        let target_inner = self.export_state_inner(document, boundary).await?;
+        let diff = self
+            .workers
+            .restore_diff(&current_inner, &target_inner)
+            .await?;
+        let diff_ops = split_batch_frame(&diff.batch);
+
+        // Ingest as the OWNER's durable batch: transactional, unique
+        // identities (retries harmless), and — importantly — the
+        // existing durable-ACK machinery treats it exactly like a
+        // client batch. (The actor is the OWNER — checked above.)
+        let mut ingest_meta = RestoreAppliedOps::default();
+        if !diff_ops.is_empty() {
+            let mut envelopes = Vec::with_capacity(diff_ops.len());
+            for p in &diff_ops {
+                let env = crate::protocol::envelope::validate_op(p)
+                    .map_err(|e| HistoryError::OpValidation(format!("{e:?}")))?;
+                envelopes.push(env);
+            }
+            let ingested = self
+                .repo
+                .ingest_batch(actor, document, &envelopes)
+                .await?;
+            ingest_meta = RestoreAppliedOps {
+                applied: ingested.newly_inserted.len(),
+                duplicates: ingested.duplicates.len(),
+            };
+        }
+
         let restore_event = self
             .insert_revision(NewRevision {
                 document,
@@ -788,8 +842,11 @@ impl RevisionService {
             boundary,
             anchor_snapshot = %anchor_snapshot_id,
             mechanism = ?mechanism,
+            applied_ops = ingest_meta.applied,
+            duplicate_ops = ingest_meta.duplicates,
+            target_digest = %diff.target_digest,
             actor = %actor.0,
-            "restore recorded (snapshot-anchored, DEC-039 Phase 5 form)"
+            "restore applied (forward-ops, DEC-039 full form)"
         );
 
         Ok(RestoreOutcome {
@@ -799,8 +856,66 @@ impl RevisionService {
             target_state_digest,
             current_state_digest,
             reused_existing_snapshot: mechanism == RestoreMechanism::ReusedSnapshot,
+            applied_ops: ingest_meta.applied,
+            duplicate_ops: ingest_meta.duplicates,
         })
     }
+
+    /// Exports the state at an UNPRUNED boundary as inner snapshot
+    /// bytes (worker fold of the log prefix ≤ boundary; the export
+    /// shape CMD 1 emits). The boundary must be reconstructable —
+    /// callers have already validated that.
+    async fn export_state_inner(
+        &self,
+        document: Uuid,
+        boundary: i64,
+    ) -> Result<Vec<u8>, HistoryError> {
+        // Fold ops ≤ boundary from the covering snapshot (validated) or
+        // from empty; then export via the worker's reconstruct (which
+        // returns the inner snapshot). Using ops_between keeps this
+        // exact: (0, boundary].
+        let page = crate::protocol::MAX_SYNC_PAGE_OPS as i64;
+        let mut ops = Vec::new();
+        let mut cursor = 0i64;
+        loop {
+            let page_ops = self.repo.ops_between(document, cursor, boundary, page).await?;
+            if page_ops.ops.is_empty() {
+                break;
+            }
+            ops.extend(page_ops.ops.into_iter().map(|(_, _, p)| p));
+            cursor = page_ops.next_cursor;
+            if !page_ops.has_more {
+                break;
+            }
+        }
+        let folded = self
+            .workers
+            .reconstruct(&ops)
+            .await
+            .map_err(HistoryError::Worker)?;
+        Ok(folded
+            .snapshot
+            .expect("reconstruct always returns a snapshot"))
+    }
+}
+
+/// Splits ONE serialize_batch frame into per-op payloads (each DB row /
+/// envelope stores one raw op).
+fn split_batch_frame(frame: &[u8]) -> Vec<Vec<u8>> {
+    let mut ops = Vec::new();
+    if frame.is_empty() {
+        return ops;
+    }
+    let mut offset = 0usize;
+    let count = u32::from_le_bytes(frame[0..4].try_into().expect("4")) as usize;
+    offset += 4;
+    for _ in 0..count {
+        let len = u32::from_le_bytes(frame[offset..offset + 4].try_into().expect("4")) as usize;
+        offset += 4;
+        ops.push(frame[offset..offset + len].to_vec());
+        offset += len;
+    }
+    ops
 }
 
 #[cfg(test)]

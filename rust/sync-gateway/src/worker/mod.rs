@@ -35,6 +35,7 @@ pub mod cmd {
     pub const DIGEST_AFTER: u32 = 4;
     pub const VERIFY_SNAPSHOT: u32 = 5;
     pub const GENERATE_OPS: u32 = 6;
+    pub const RESTORE_DIFF: u32 = 7;
 }
 
 /// Worker status codes (mirrors cpp/worker/main.cpp).
@@ -363,6 +364,75 @@ impl WorkerPool {
         }
         Ok(GeneratedStream { digest, batches })
     }
+
+
+    /// CMD_RESTORE_DIFF (7): computes the forward-op batch that converges
+    /// the CURRENT state (snapshot A) to the TARGET state (snapshot B)'s
+    /// visible content. Response shape (dedicated, like generate_ops):
+    /// `[status][ok: [digest_len][target digest][batch_len][batch bytes]
+    /// | error: [msg_len][msg]]` — the batch is ONE serialize_batch frame.
+    ///
+    /// The worker re-folds A + batch internally and refuses (status 3)
+    /// unless it converges to B's visible content, so status 0 IS the
+    /// convergence proof (P5-M036; restore ops carry the reserved REST
+    /// replica 0x52455354).
+    pub async fn restore_diff(
+        &self,
+        current_snapshot: &[u8],
+        target_snapshot: &[u8],
+    ) -> Result<RestoreDiff, WorkerError> {
+        let mut body = Vec::with_capacity(8 + current_snapshot.len() + target_snapshot.len());
+        put_u32le(&mut body, current_snapshot.len() as u32);
+        body.extend_from_slice(current_snapshot);
+        put_u32le(&mut body, target_snapshot.len() as u32);
+        body.extend_from_slice(target_snapshot);
+        let frame = self.request_frame(cmd::RESTORE_DIFF, body).await?;
+        let mut offset = 0usize;
+        let get_u32 = |f: &[u8], o: usize| -> Option<u32> {
+            f.get(o..o + 4)
+                .map(|b| u32::from_le_bytes(b.try_into().expect("4")))
+        };
+        let Some(status_code) = get_u32(&frame, offset) else {
+            return Err(WorkerError::MalformedResponse("short status".into()));
+        };
+        offset += 4;
+        if status_code != status::OK {
+            let Some(msg_len) = get_u32(&frame, offset) else {
+                return Err(WorkerError::MalformedResponse("error length missing".into()));
+            };
+            offset += 4;
+            let Some(bytes) = frame.get(offset..offset + msg_len as usize) else {
+                return Err(WorkerError::MalformedResponse("error message truncated".into()));
+            };
+            return Err(WorkerError::Status {
+                status: status_code,
+                message: String::from_utf8_lossy(bytes).trim().to_string(),
+            });
+        }
+        let Some(digest_len) = get_u32(&frame, offset) else {
+            return Err(WorkerError::MalformedResponse("digest length missing".into()));
+        };
+        offset += 4;
+        let Some(digest_bytes) = frame.get(offset..offset + digest_len as usize) else {
+            return Err(WorkerError::MalformedResponse("digest truncated".into()));
+        };
+        let digest = String::from_utf8(digest_bytes.to_vec())
+            .map_err(|_| WorkerError::MalformedResponse("digest not utf-8".into()))?;
+        offset += digest_len as usize;
+        let Some(batch_len) = get_u32(&frame, offset) else {
+            return Err(WorkerError::MalformedResponse("batch length missing".into()));
+        };
+        offset += 4;
+        let Some(batch) = frame.get(offset..offset + batch_len as usize) else {
+            return Err(WorkerError::MalformedResponse("batch truncated".into()));
+        };
+        let batch = batch.to_vec();
+        offset += batch_len as usize;
+        if offset != frame.len() {
+            return Err(WorkerError::MalformedResponse("trailing bytes in restore diff".into()));
+        }
+        Ok(RestoreDiff { target_digest: digest, batch })
+    }
 }
 
 /// A generated op stream (CMD_GENERATE_OPS): the digest of the final
@@ -372,6 +442,16 @@ impl WorkerPool {
 pub struct GeneratedStream {
     pub digest: String,
     pub batches: Vec<Vec<u8>>,
+}
+
+/// One computed restore diff: the target state's canonical digest
+/// (verification reference) and the forward-op batch frame.
+#[derive(Debug, Clone)]
+pub struct RestoreDiff {
+    /// Canonical digest of the TARGET state (the convergence reference).
+    pub target_digest: String,
+    /// The complete serialize_batch frame of forward restore ops.
+    pub batch: Vec<u8>,
 }
 
 // ----- codec helpers -------------------------------------------------------
