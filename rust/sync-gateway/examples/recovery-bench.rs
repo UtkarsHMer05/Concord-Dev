@@ -345,6 +345,229 @@ async fn main() {
     // the tail is a meaningful replay distance. 5 runs each for p50/p95.
     run_size(&db, &workers, 10_000, 0.5, 5).await;
     run_size(&db, &workers, 100_000, 0.5, 5).await;
+    headline_scenario(&db, &workers).await;
+    storage_scenario(&db, &workers).await;
 
     println!("\nbenchmark complete — record into .agent/METRICS_LEDGER.md");
+}
+
+/// P5-M043 headline scenario: the production-shaped recovery race —
+/// full replay vs snapshot+tail where the snapshot is FRESH (tiny
+/// tail: 1% of history), which is what the trigger policy actually
+/// maintains. This is the fair "before/after" the M026 50%-tail
+/// numbers understate.
+async fn headline_scenario(db: &Db, workers: &WorkerPool) {
+    let total_ops = 100_000usize;
+    let tail_ops = 1_000usize; // 1% — the trigger-policy steady state
+    let tag = "headline";
+    let (owner, doc) = fixture(db, tag).await;
+    let repo = GatewayRepo::new(db.clone());
+    let snapshots = SnapshotRepo::new(db.clone());
+    let pipeline = SnapshotPipeline::new(repo.clone(), snapshots.clone(), workers.clone());
+
+    let generated = workers
+        .generate_ops(total_ops as u64, total_ops as u32, 3, 0)
+        .await
+        .expect("generate");
+    let ops = split_batches_to_ops(&generated.batches);
+    assert_eq!(ops.len(), total_ops);
+
+    for chunk in ops.chunks(512) {
+        let envelopes = chunk
+            .iter()
+            .map(|p| sync_gateway::protocol::envelope::validate_op(p).expect("valid op"))
+            .collect::<Vec<_>>();
+        repo.ingest_batch(owner, doc, &envelopes)
+            .await
+            .expect("ingest");
+    }
+
+    // Snapshot at (total - tail): fresh tail = 1k ops.
+    let snap_at = total_ops - tail_ops;
+    let boundary_seq = {
+        let client = db.get().await.expect("pool");
+        let row = client
+            .query_one(
+                "SELECT id FROM crdt_operations WHERE document_id = $1
+                 ORDER BY id ASC LIMIT 1 OFFSET $2",
+                &[&doc, &(snap_at as i64)],
+            )
+            .await
+            .expect("boundary");
+        row.get::<_, i64>("id")
+    };
+    let job = Uuid::new_v4();
+    let (snapshot_id, _digest, validated) = pipeline
+        .build_at_boundary(doc, boundary_seq, job, 1)
+        .await
+        .expect("build");
+
+    let all: Vec<Vec<u8>> = {
+        let mut out = Vec::new();
+        let mut cursor = 0i64;
+        loop {
+            let page = repo.catchup_page(doc, cursor, 1024).await.expect("page");
+            if page.ops.is_empty() {
+                break;
+            }
+            out.extend(page.ops.into_iter().map(|(_, _, p)| p));
+            cursor = page.next_cursor;
+            if !page.has_more {
+                break;
+            }
+        }
+        out
+    };
+    assert_eq!(all.len(), total_ops);
+
+    let mut full_samples = Vec::new();
+    let mut snaptail_samples = Vec::new();
+    let expected_digest = {
+        let mut expected = String::new();
+        for _ in 0..5 {
+            let t = Instant::now();
+            let full = workers.reconstruct(&all).await.expect("full");
+            full_samples.push(t.elapsed().as_micros());
+            expected = full.digest;
+        }
+        expected
+    };
+
+    for _ in 0..5 {
+        let tail: Vec<Vec<u8>> = {
+            let mut out = Vec::new();
+            let mut cursor = boundary_seq;
+            loop {
+                let page = repo.catchup_page(doc, cursor, 1024).await.expect("page");
+                if page.ops.is_empty() {
+                    break;
+                }
+                out.extend(page.ops.into_iter().map(|(_, _, p)| p));
+                cursor = page.next_cursor;
+                if !page.has_more {
+                    break;
+                }
+            }
+            out
+        };
+        let t = Instant::now();
+        let recovered = workers
+            .digest_after(&validated.inner, &tail)
+            .await
+            .expect("snapshot+tail");
+        snaptail_samples.push(t.elapsed().as_micros());
+        assert_eq!(recovered.digest, expected_digest, "correctness every run");
+    }
+
+    let (f50, _, _) = percentiles(full_samples);
+    let (s50, _, _) = percentiles(snaptail_samples);
+    let improvement = 100.0 - (s50 as f64 / f50 as f64) * 100.0;
+    println!(
+        "\n=== P5-M043 headline: 100k history, fresh snapshot, {tail_ops}-op tail (5 runs) ==="
+    );
+    println!(
+        "full replay p50        : {f50} µs ({:.1} ms)",
+        f50 as f64 / 1000.0
+    );
+    println!(
+        "snapshot+tail p50      : {s50} µs ({:.1} ms)",
+        s50 as f64 / 1000.0
+    );
+    println!("improvement            : {improvement:.1}% (correctness digest verified every run)");
+    let _ = snapshot_id;
+
+    cleanup(db, owner, doc).await;
+}
+
+/// P5-M044 storage scenario: compaction's storage effect with the full
+/// denominator — op rows/bytes before, snapshot payload bytes, rows/
+/// bytes after safe prune (floor = snapshot boundary), and the
+/// post-prune recovery latency (snapshot+tail with tail 0).
+async fn storage_scenario(db: &Db, workers: &WorkerPool) {
+    let total_ops = 50_000usize;
+    let tag = "storage";
+    let (owner, doc) = fixture(db, tag).await;
+    let repo = GatewayRepo::new(db.clone());
+    let snapshots = SnapshotRepo::new(db.clone());
+    let pipeline = SnapshotPipeline::new(repo.clone(), snapshots.clone(), workers.clone());
+
+    let generated = workers
+        .generate_ops(total_ops as u64, total_ops as u32, 3, 0)
+        .await
+        .expect("generate");
+    let ops = split_batches_to_ops(&generated.batches);
+    for chunk in ops.chunks(512) {
+        let envelopes = chunk
+            .iter()
+            .map(|p| sync_gateway::protocol::envelope::validate_op(p).expect("valid op"))
+            .collect::<Vec<_>>();
+        repo.ingest_batch(owner, doc, &envelopes)
+            .await
+            .expect("ingest");
+    }
+
+    let before = sync_gateway::maintenance::storage_accounting(db, doc)
+        .await
+        .expect("accounting before");
+
+    // Snapshot at the FULL boundary (tail 0) then prune everything.
+    let boundary = repo.durable_cursor(doc).await.expect("high-water");
+    let job = Uuid::new_v4();
+    let (snapshot_id, _digest, validated) = pipeline
+        .build_at_boundary(doc, boundary, job, 1)
+        .await
+        .expect("build");
+    assert!(snapshots
+        .transition_building_to_verifying(snapshot_id)
+        .await
+        .expect("transition"));
+    let _ = pipeline.verify(doc, snapshot_id).await.expect("verify");
+    assert!(pipeline
+        .finalize(snapshot_id, None)
+        .await
+        .expect("finalize"));
+
+    let deleted = sync_gateway::maintenance::prune_to_boundary(db, &snapshots, doc, boundary, 5000)
+        .await
+        .expect("prune");
+    assert_eq!(deleted, total_ops as i64);
+
+    let after = sync_gateway::maintenance::storage_accounting(db, doc)
+        .await
+        .expect("accounting after");
+    let snapshot_bytes = after.snapshot_bytes;
+
+    // Recovery latency after compaction: snapshot import + empty tail.
+    let inner = validated.inner.clone();
+    let t = Instant::now();
+    let recovered = workers.digest_after(&inner, &[]).await.expect("recover");
+    let recovery_us = t.elapsed().as_micros();
+
+    println!(
+        "\n=== P5-M044 storage: {total_ops}-op history, full compaction (retention: newest snapshot kept) ==="
+    );
+    println!(
+        "op log before  : {rows} rows / {bytes} bytes",
+        rows = before.op_rows,
+        bytes = before.op_bytes
+    );
+    println!(
+        "snapshot kept  : {snapshot_bytes} bytes ({} snapshots retained)",
+        after.snapshot_count
+    );
+    println!(
+        "op log after   : {rows} rows / {bytes} bytes",
+        rows = after.op_rows,
+        bytes = after.op_bytes
+    );
+    println!(
+        "storage reduction under retention policy: {:.1}% of durable bytes remain",
+        ((snapshot_bytes as f64 + after.op_bytes as f64)
+            / (before.op_bytes as f64 + snapshot_bytes as f64))
+            * 100.0
+    );
+    println!("recovery latency after compaction: {recovery_us} µs (import + 0-tail)");
+    assert!(recovered.digest.starts_with("sha256:"));
+
+    cleanup(db, owner, doc).await;
 }
