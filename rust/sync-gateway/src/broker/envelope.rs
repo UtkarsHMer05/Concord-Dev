@@ -87,7 +87,12 @@ impl BrokerEvent {
     /// Strict decode (M015): every bound checked before allocation; op
     /// envelopes structurally validated; checksum verified.
     pub fn decode(bytes: &[u8]) -> Result<Self, BrokerEventError> {
-        if bytes.len() < 74 {
+        // 1 + 8 + 16 + 8 + 8 + 32 + 2 = 75: the full fixed header INCLUDING
+        // the two op_count bytes. (Found by P6-M018 fuzzing: the previous
+        // `< 74` bound let a 74-byte frame through and panicked reading the
+        // second op_count byte at index 74 — an out-of-bounds panic on
+        // untrusted internal input.)
+        if bytes.len() < 75 {
             return Err(BrokerEventError::Truncated);
         }
         if bytes.len() > MAX_EVENT_BYTES {
