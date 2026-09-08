@@ -813,10 +813,7 @@ impl RevisionService {
                     .map_err(|e| HistoryError::OpValidation(format!("{e:?}")))?;
                 envelopes.push(env);
             }
-            let ingested = self
-                .repo
-                .ingest_batch(actor, document, &envelopes)
-                .await?;
+            let ingested = self.repo.ingest_batch(actor, document, &envelopes).await?;
             ingest_meta = RestoreAppliedOps {
                 applied: ingested.newly_inserted.len(),
                 duplicates: ingested.duplicates.len(),
@@ -878,7 +875,10 @@ impl RevisionService {
         let mut ops = Vec::new();
         let mut cursor = 0i64;
         loop {
-            let page_ops = self.repo.ops_between(document, cursor, boundary, page).await?;
+            let page_ops = self
+                .repo
+                .ops_between(document, cursor, boundary, page)
+                .await?;
             if page_ops.ops.is_empty() {
                 break;
             }

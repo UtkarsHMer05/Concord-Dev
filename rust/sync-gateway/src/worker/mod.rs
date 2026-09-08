@@ -365,7 +365,6 @@ impl WorkerPool {
         Ok(GeneratedStream { digest, batches })
     }
 
-
     /// CMD_RESTORE_DIFF (7): computes the forward-op batch that converges
     /// the CURRENT state (snapshot A) to the TARGET state (snapshot B)'s
     /// visible content. Response shape (dedicated, like generate_ops):
@@ -398,11 +397,15 @@ impl WorkerPool {
         offset += 4;
         if status_code != status::OK {
             let Some(msg_len) = get_u32(&frame, offset) else {
-                return Err(WorkerError::MalformedResponse("error length missing".into()));
+                return Err(WorkerError::MalformedResponse(
+                    "error length missing".into(),
+                ));
             };
             offset += 4;
             let Some(bytes) = frame.get(offset..offset + msg_len as usize) else {
-                return Err(WorkerError::MalformedResponse("error message truncated".into()));
+                return Err(WorkerError::MalformedResponse(
+                    "error message truncated".into(),
+                ));
             };
             return Err(WorkerError::Status {
                 status: status_code,
@@ -410,7 +413,9 @@ impl WorkerPool {
             });
         }
         let Some(digest_len) = get_u32(&frame, offset) else {
-            return Err(WorkerError::MalformedResponse("digest length missing".into()));
+            return Err(WorkerError::MalformedResponse(
+                "digest length missing".into(),
+            ));
         };
         offset += 4;
         let Some(digest_bytes) = frame.get(offset..offset + digest_len as usize) else {
@@ -420,7 +425,9 @@ impl WorkerPool {
             .map_err(|_| WorkerError::MalformedResponse("digest not utf-8".into()))?;
         offset += digest_len as usize;
         let Some(batch_len) = get_u32(&frame, offset) else {
-            return Err(WorkerError::MalformedResponse("batch length missing".into()));
+            return Err(WorkerError::MalformedResponse(
+                "batch length missing".into(),
+            ));
         };
         offset += 4;
         let Some(batch) = frame.get(offset..offset + batch_len as usize) else {
@@ -429,9 +436,14 @@ impl WorkerPool {
         let batch = batch.to_vec();
         offset += batch_len as usize;
         if offset != frame.len() {
-            return Err(WorkerError::MalformedResponse("trailing bytes in restore diff".into()));
+            return Err(WorkerError::MalformedResponse(
+                "trailing bytes in restore diff".into(),
+            ));
         }
-        Ok(RestoreDiff { target_digest: digest, batch })
+        Ok(RestoreDiff {
+            target_digest: digest,
+            batch,
+        })
     }
 }
 
