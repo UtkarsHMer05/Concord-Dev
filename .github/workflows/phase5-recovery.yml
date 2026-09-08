@@ -1,0 +1,118 @@
+# Phase 5 recovery gate: native worker build/tests (incl. restore-diff),
+# snapshot/revision/job migrations, snapshot repository + integrity
+# matrix, build/verify/finalize pipeline, recovery selection/fallback +
+# differential verifier, compaction floor/staged pruning + crash
+# matrix, stale-client resync E2E (real gateway process), revision/
+# history/restore authorization, retention, and race stress. Very long
+# benchmark/stress runs (recovery-bench, seeded 100k batteries) stay
+# local via scripts/verify-gateway.sh + recovery-bench (documented in
+# docs/TESTING.md).
+name: phase5-recovery
+on:
+  push:
+    branches: [main, "phase/**"]
+  pull_request:
+
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: concord
+          POSTGRES_PASSWORD: concord_local_dev
+          POSTGRES_DB: concord
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U concord -d concord"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      GATEWAY_DATABASE_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+      GATEWAY_CLERK_ISSUER: https://ci-placeholder.clerk.accounts.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Create the test database
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test" || true
+      - name: Native worker build + core/worker suites (P5 gate layer 1)
+        run: |
+          cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native
+          ./build/native/crdt/tests/concord_crdt_tests
+          ./build/native/worker/tests/concord_worker_tests
+      - name: fmt + clippy
+        run: |
+          cargo fmt --all --check
+          cargo clippy --all-targets -- -D warnings
+        working-directory: rust
+      - name: Unit tests (worker adapter + protocol golden)
+        run: cargo test --lib
+        working-directory: rust
+      - name: Migration tests (fresh + phase-4-shaped + constraint matrix)
+        run: cargo test --test phase5_migrations -- --test-threads=1
+        working-directory: rust
+      - name: Snapshot repository + M013 integrity matrix
+        run: cargo test --test phase5_snapshots -- --test-threads=1
+        working-directory: rust
+      - name: Build/verify/finalize pipeline + snapshot+tail equivalence
+        run: cargo test --test phase5_pipeline -- --test-threads=1
+        working-directory: rust
+      - name: Recovery selection/fallback + differential verifier
+        run: cargo test --test phase5_recovery -- --test-threads=1
+        working-directory: rust
+      - name: Job scheduler: claim/lease/heartbeat + bounded concurrency
+        run: cargo test --test phase5_jobs -- --test-threads=1
+        working-directory: rust
+      - name: Compaction floor + dry-run + staged pruning
+        run: cargo test --test phase5_compaction -- --test-threads=1
+        working-directory: rust
+      - name: Seeded compaction-equivalence gate (M032)
+        run: cargo test --test phase5_equivalence -- --test-threads=1
+        working-directory: rust
+      - name: Crash-safe compaction fault matrix (M033)
+        run: cargo test --test phase5_crash -- --test-threads=1
+        working-directory: rust
+      - name: Stale-client snapshot resync E2E (real gateway process)
+        run: cargo test --test phase5_resync -- --test-threads=1
+        working-directory: rust
+      - name: Revisions + historical reconstruction + restore (M034-36)
+        run: cargo test --test phase5_history -- --test-threads=1
+        working-directory: rust
+      - name: Restore authorization + concurrency (M037)
+        run: cargo test --test phase5_restore_concurrency -- --test-threads=1
+        working-directory: rust
+      - name: Retention protection + storage accounting (M038/39)
+        run: cargo test --test phase5_retention -- --test-threads=1
+        working-directory: rust
+      - name: Lease/claim/stale-owner race stress (M046)
+        run: cargo test --test phase5_races -- --test-threads=1
+        working-directory: rust
+      - name: Phase 3/4 regressions (op-log + ws + distributed)
+        run: |
+          cargo test --test db_integration -- --test-threads=1
+          cargo test --test ws_integration -- --test-threads=1
+        working-directory: rust
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Typecheck + unit (incl. client snapshot-resync suite)
+        run: |
+          npm run typecheck
+          npx vitest run --project unit

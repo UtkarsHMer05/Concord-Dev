@@ -56,4 +56,33 @@ echo "--- distributed: multi-gateway E2E ---"
 echo "--- benchmark rerun ---"
 ( cd rust && ./target/release/examples/bench )
 
-echo "=== Phase 4 gate: ALL GREEN ==="
+# 10. Phase 5 recovery gate: native worker build + suites, then every
+#     phase5 integration suite (serialized against the live test DB).
+echo "--- phase 5: native worker gate ---"
+( cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+  cmake --build build/native
+  ./build/native/crdt/tests/concord_crdt_tests
+  ./build/native/worker/tests/concord_worker_tests )
+
+echo "--- phase 5: recovery suites ---"
+( cd rust
+  cargo test --test phase5_migrations -- --test-threads=1
+  cargo test --test phase5_snapshots -- --test-threads=1
+  cargo test --test phase5_pipeline -- --test-threads=1
+  cargo test --test phase5_recovery -- --test-threads=1
+  cargo test --test phase5_jobs -- --test-threads=1
+  cargo test --test phase5_compaction -- --test-threads=1
+  cargo test --test phase5_equivalence -- --test-threads=1
+  cargo test --test phase5_crash -- --test-threads=1
+  cargo test --test phase5_resync -- --test-threads=1
+  cargo test --test phase5_history -- --test-threads=1
+  cargo test --test phase5_restore_concurrency -- --test-threads=1
+  cargo test --test phase5_retention -- --test-threads=1
+  cargo test --test phase5_races -- --test-threads=1 )
+
+# 11. Phase 5 web: client resync suite (unit project).
+echo "--- phase 5: web resync suite ---"
+source "$HOME/.nvm/nvm.sh" && nvm use 24 >/dev/null
+npx vitest run --project unit
+
+echo "=== Phase 4+5 gate: ALL GREEN ==="
