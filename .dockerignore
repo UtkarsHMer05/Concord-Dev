@@ -1,0 +1,8 @@
+# P6-M027 — docker build context hygiene for the gateway image.
+#
+# The gateway Dockerfile copies the rust/ workspace; the build must NOT
+# ship the host target/ tree (GBs, host-specific artifacts) — cargo
+# rebuilds inside the image. rust-toolchain.toml MUST come through (the
+# workspace pins 1.98.1 and Cargo manifests reference tests/ paths that
+# must exist for manifest parsing).
+rust/target
