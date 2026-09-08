@@ -15,7 +15,13 @@
 
 option(CONCORD_FUZZ_STANDALONE "Build fuzz targets with the standalone driver" ON)
 
-set(CONCORD_FUZZ_TARGETS fuzz_op_decode fuzz_snapshot_decode fuzz_op_apply)
+set(CONCORD_FUZZ_TARGETS
+  fuzz_op_decode
+  fuzz_snapshot_decode
+  fuzz_op_apply
+  fuzz_recovery_stream
+  fuzz_worker_protocol
+)
 
 if(NOT CONCORD_FUZZ_STANDALONE)
   foreach(target ${CONCORD_FUZZ_TARGETS})
