@@ -1106,3 +1106,47 @@ retained and will not be removed.
   improvement.
 - **Evidence:** M022 policy doc; M026 baselines; M043 headline
   benchmark.
+
+## DEC-042 — M045 security-fix round: fetch throttling, revision-basis protection, payload size on the wire
+
+- **Status:** Accepted (2026-09-08)
+- **Decision:** Three fixes from the SA-SEC5 adversarial audit, all
+  regression-pinned (`phase5_security.rs`):
+  1. **SEC5-1** — a `fetch` rate-limit scope (30/min/connection) shared
+     by `fetch_snapshot` and the `sync_request` resync decision: both are
+     full-payload read + hash + base64 serve paths; one budget bounds the
+     whole class. Enforcement is at the WS handler, per connection id.
+  2. **SEC5-2** — pruning may never advance above the lowest revision
+     target (`RetentionProtected`); the guard is re-checked inside every
+     prune transaction under the documents row lock, and revision
+     creation validates its boundary against the compaction floor and
+     the durable high-water (FOR SHARE on the documents row) so the
+     prune/create interleaving is safe in both orders. The compaction
+     floor is FK-bound to its snapshot (migration v3), and retention
+     marking/purge takes the same documents lock.
+  3. **SEC5-3** — `snapshot_payload` carries `payloadSize` (decimal
+     string) so the client's declared-size check is live on the WS
+     transport; the server refuses snapshots whose base64 form would
+     exceed the 8 MiB frame cap (`payload_too_large`) instead of
+     queueing an undeliverable frame.
+- **Context:** P5-M045 audit (private report
+  `.agent/subagents/phase-5/security-review.md`); the resync client flow
+  is wired end-to-end through SyncSession (signal → fetch → validate →
+  import → re-apply pending → resume), E2E-tested against the real
+  gateway (realtime suite).
+- **Alternatives:** served-bytes budget instead of a frame count
+  (rejected: fixed windows per count are simpler and the per-frame cost
+  is roughly uniform); blanket floor-pinning of all revisions against
+  pruning (rejected: makes compaction useless for documents with old
+  checkpoints — the min-target rule protects reconstruction exactly);
+  leaving `payloadSize` to a future HTTP envelope (rejected: the size
+  check is cheap and the audit flagged the dead-defense risk).
+- **Rationale:** every fix closes a path where an authenticated actor
+  (or an unlucky race) could amplify reads or silently degrade the
+  history/durability contract.
+- **Consequences:** legitimate resync flows are unaffected (a handful of
+  fetches per session); `write`/`malformed` scopes remain
+  policy-defined but unenforced at the frame layer (documented target,
+  unchanged from Phase 4).
+- **Evidence:** `phase5_security.rs` (4 regression tests), realtime E2E
+  resync test, retention/compaction/history suite extensions.

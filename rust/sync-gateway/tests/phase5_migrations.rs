@@ -113,11 +113,11 @@ async fn phase5_tables_and_columns_exist() {
 }
 
 #[tokio::test]
-async fn phase5_migration_version_is_two_and_idempotent() {
+async fn phase5_migration_version_is_three_and_idempotent() {
     let Some(db) = test_db().await else { return };
     run_migrations(&db).await.expect("first apply");
     let v1 = current_version(&db).await.expect("version");
-    assert_eq!(v1, 2, "both gateway migrations must be applied");
+    assert_eq!(v1, 3, "all gateway migrations must be applied");
     run_migrations(&db).await.expect("re-apply");
     let v2 = current_version(&db).await.expect("version after re-apply");
     assert_eq!(v1, v2, "re-apply must be a no-op");
@@ -132,11 +132,14 @@ async fn phase5_applies_on_phase4_shaped_database() {
     let mut client = db.get().await.expect("pool");
     // Simulate a Phase 4 database: only migration 1 recorded (the
     // pre-Phase-5 state). Rolling the registry back is only safe in
-    // the isolated test DB; tables from v2 are dropped so the apply
-    // truly recreates them.
+    // the isolated test DB; tables from v2/v3 are dropped so the apply
+    // truly recreates them. The v3 floor FK must be dropped before its
+    // columns go away.
     let tx = client.transaction().await.expect("tx");
     tx.batch_execute(
-        "DELETE FROM gateway_schema_migrations WHERE version = 2;
+        "DELETE FROM gateway_schema_migrations WHERE version >= 2;
+         ALTER TABLE documents
+           DROP CONSTRAINT IF EXISTS documents_floor_snapshot_fk;
          DROP TABLE IF EXISTS crdt_snapshots, crdt_revisions, maintenance_jobs;
          ALTER TABLE documents
            DROP COLUMN IF EXISTS compaction_floor_seq,
@@ -149,11 +152,25 @@ async fn phase5_applies_on_phase4_shaped_database() {
     run_migrations(&db).await.expect("apply on phase-4 shape");
     let client = db.get().await.expect("pool");
     let v = current_version(&db).await.expect("version");
-    assert_eq!(v, 2);
+    assert_eq!(v, 3);
     // Phase 1/3/4 tables untouched by the apply.
     for table in ["users", "organizations", "documents", "crdt_operations"] {
         assert!(table_exists(&client, table).await);
     }
+    // Migration v3: the floor snapshot is FK-bound (a retention purge can
+    // never strand a dangling documents.compaction_floor_snapshot_id).
+    let row = client
+        .query_one(
+            "SELECT COUNT(*) AS n FROM information_schema.table_constraints
+             WHERE constraint_schema = 'public'
+               AND constraint_type = 'FOREIGN KEY'
+               AND constraint_name = 'documents_floor_snapshot_fk'",
+            &[],
+        )
+        .await
+        .expect("fk query");
+    let n: i64 = row.get("n");
+    assert_eq!(n, 1, "documents_floor_snapshot_fk missing after apply");
 }
 
 #[tokio::test]

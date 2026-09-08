@@ -62,14 +62,21 @@ leases.
 
 1. Client sends `sync_request{cursor}` with `cursor < floor`.
 2. Gateway replies `snapshot_resync_required{boundary, snapshot_id}`.
-3. Client fetches the snapshot (validated: format, document, checksum)
-   and imports it into the WASM CRDT while PRESERVING its own pending,
-   not-yet-durable local ops (they stay in the IndexedDB outbox).
+3. Client fetches the snapshot (`fetch_snapshot` → `snapshot_payload`;
+   the payload frame carries the declared wrapper size — the client's
+   size and checksum defenses run BEFORE import; the read path is
+   rate-limited by the shared `fetch` scope) and imports it into the
+   WASM CRDT while PRESERVING its own pending, not-yet-durable local
+   ops (they stay in the IndexedDB outbox).
 4. Client sets its cursor to the snapshot boundary and replays its
    pending ops locally (they were never in the server log), then
    requests normal delta catch-up from the boundary.
 5. Pending ops resubmit under ORIGINAL identities; the server's
    unique index + the snapshot's applied-set make duplicates harmless.
+
+The full flow (signal → fetch → validate → import → re-apply pending →
+resume catch-up) is wired through the browser SyncSession and E2E-tested
+against a live gateway in the realtime suite.
 
 No legitimate client becomes permanently unrecoverable: any client can
 always fall back to full snapshot resync, and any gateway can always

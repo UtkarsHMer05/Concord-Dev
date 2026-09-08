@@ -15,6 +15,12 @@
 
 import { identityFromOpBytes, type OpIdentityString } from "./identities";
 import { PendingOpStore } from "./pending-store";
+import {
+  performSnapshotResync,
+  type SnapshotEnvelope,
+  SnapshotResyncError,
+} from "./snapshot-resync";
+import type { SnapshotPayload, SnapshotResyncRequired } from "./protocol";
 import { SyncTransport, type ConnectionStatus } from "./transport";
 
 export interface CrdtEnginePort {
@@ -26,6 +32,20 @@ export interface CrdtEnginePort {
   localSummary(): Promise<string>;
   /** Subscribes to locally generated canonical op bytes. */
   onLocalOps(handler: (ops: Uint8Array[]) => void): () => void;
+}
+
+/**
+ * Snapshot-resync extension of the engine port (P5-M031). The resync
+ * flow REPLACES the local engine base with the server snapshot, so the
+ * port must expose atomic import + the unsynced-op set (which the flow
+ * captures before import and re-applies after — a client never loses
+ * its own unacked work to a resync).
+ */
+export interface ResyncEnginePort extends CrdtEnginePort {
+  /** Replaces the local engine base with the inner snapshot bytes. */
+  importSnapshot(inner: Uint8Array): Promise<void>;
+  /** The UNSYNCED outbox set (pending + sent, never durably acked). */
+  unackedOps(): Promise<Uint8Array[]>;
 }
 
 export interface SyncSessionOptions {
@@ -59,6 +79,13 @@ export class SyncSession {
   private pendingFlush: Uint8Array[] = [];
   /** Sets of op identities currently marked sent, by batch id. */
   private sentBatches = new Map<string, OpIdentityString[]>();
+  /**
+   * Snapshot resync (P5-M031): the signal the server last sent while the
+   * fetch was in flight. A payload that does not match the outstanding
+   * signal (envelope↔signal cross-check) is rejected — a stale or
+   * mismatched payload can never replace the local base.
+   */
+  private resyncSignal: SnapshotResyncRequired | null = null;
 
   constructor(private readonly options: SyncSessionOptions) {
     this.lastCursor = options.getCursor();
@@ -83,6 +110,13 @@ export class SyncSession {
         },
         onJoinAccepted: () => this.requestCatchup(),
         onSyncDone: () => void this.onReady(),
+        // Stale-client resync (P5-M031): a cursor below the compaction
+        // floor cannot be served by delta catch-up. The server points
+        // us at the covering snapshot; we fetch, validate
+        // (checksum-before-trust), import atomically, re-apply our own
+        // unacked ops, then resume catch-up from the boundary.
+        onSnapshotResyncRequired: (signal) => void this.beginSnapshotResync(signal),
+        onSnapshotPayload: (payload) => void this.handleSnapshotPayload(payload),
         onError: (code, message) => {
           // database_unavailable / server_draining keep pending ops; the
           // transport reconnects. Non-fatal errors never clear the outbox.
@@ -197,6 +231,88 @@ export class SyncSession {
     }
     await store.markSent(ids);
     this.sentBatches.set(batchId.toString(), ids);
+  }
+
+  // ------------------------------------------------------------------ resync (P5-M031)
+
+  /** The server demands snapshot resync (cursor below the compaction
+   * floor). Records the signal and fetches the covering snapshot. The
+   * engine port must support resync (importSnapshot + unackedOps) —
+   * otherwise the session logs loudly and reconnects (a future catch-up
+   * attempt re-triggers the signal; no silent divergence). */
+  private beginSnapshotResync(signal: SnapshotResyncRequired): void {
+    const engine = this.options.engine as ResyncEnginePort;
+    if (
+      typeof engine.importSnapshot !== "function" ||
+      typeof engine.unackedOps !== "function"
+    ) {
+      console.error("[sync] engine port lacks snapshot-resync support; ignoring resync signal");
+      return;
+    }
+    this.resyncSignal = signal;
+    this.transport.fetchSnapshot(signal.snapshotId);
+  }
+
+  /** The fetched snapshot arrived: cross-check against the outstanding
+   * signal, validate integrity (checksum-before-trust), import
+   * atomically, re-apply unacked local ops, resume catch-up. */
+  private async handleSnapshotPayload(payload: SnapshotPayload): Promise<void> {
+    const signal = this.resyncSignal;
+    this.resyncSignal = null;
+    if (signal === null || this.disposed) {
+      return; // unsolicited payload: ignore (never replace the base unasked)
+    }
+    const engine = this.options.engine as ResyncEnginePort;
+    // Envelope adaptation: the WS frame IS the envelope source (the
+    // snake_case HTTP-shape fields the validator expects; SEC5-3 made
+    // payload_size a wire field so the size check is live here).
+    const envelope: SnapshotEnvelope = {
+      snapshotId: payload.snapshotId,
+      formatVersion: Number(payload.formatVersion),
+      coverageSeq: payload.coverageSeq,
+      coveredOpCount: payload.coveredOpCount,
+      checksum: payload.checksum,
+      payloadBase64: payload.payloadBase64,
+      stateDigest: payload.stateDigest,
+      payloadSize: payload.payloadSize,
+    };
+    // Signal↔payload agreement: the fetched snapshot must be exactly the
+    // one the server announced (id, checksum, boundary, op count) — a
+    // mismatched payload is a protocol fault, never an import trigger.
+    if (
+      payload.snapshotId !== signal.snapshotId ||
+      payload.checksum !== signal.snapshotChecksum ||
+      payload.coverageSeq !== signal.boundary ||
+      payload.coveredOpCount !== signal.coverageOpCount ||
+      payload.formatVersion !== signal.snapshotFormatVersion
+    ) {
+      console.error("[sync] snapshot payload does not match the resync signal; ignoring");
+      this.requestCatchup(); // re-requests catch-up → server re-signals
+      return;
+    }
+    try {
+      await performSnapshotResync({
+        expectedDocumentId: this.options.documentId,
+        envelope,
+        engine,
+        setCursor: (cursor) => {
+          this.lastCursor = cursor;
+          this.options.setCursor(cursor);
+        },
+        getCursor: () => this.lastCursor,
+      });
+    } catch (error) {
+      if (error instanceof SnapshotResyncError) {
+        // Corrupt/incompatible snapshot: fail closed — the cursor is
+        // unchanged, so the next catch-up re-triggers the resync signal
+        // (and the server's fetch budget bounds the retry loop).
+        console.error(`[sync] snapshot resync rejected: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+    // Base replaced: resume delta catch-up from the snapshot boundary.
+    this.requestCatchup();
   }
 
   // ------------------------------------------------------------------ inbound

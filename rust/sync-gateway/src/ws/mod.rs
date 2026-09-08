@@ -103,6 +103,7 @@ pub async fn upgrade(
     let bus = app.bus.clone();
     let gateway_id = app.gateway_id;
     let presence = app.presence.clone();
+    let rate_limiter = app.rate_limiter.clone();
     ws.max_message_size(MAX_FRAME_BYTES)
         .max_frame_size(MAX_FRAME_BYTES)
         .on_upgrade(move |socket| {
@@ -111,10 +112,20 @@ pub async fn upgrade(
             let repo = repo.clone();
             let verifier = verifier.clone();
             let draining = draining.clone();
+            let rate_limiter = rate_limiter.clone();
             async move {
                 handle_socket(
-                    socket, peer, config, registry, repo, verifier, draining, bus, gateway_id,
+                    socket,
+                    peer,
+                    config,
+                    registry,
+                    repo,
+                    verifier,
+                    draining,
+                    bus,
+                    gateway_id,
                     presence,
+                    rate_limiter,
                 )
                 .await;
             }
@@ -133,6 +144,7 @@ async fn handle_socket(
     bus: Arc<dyn EventPublisher>,
     gateway_id: u64,
     presence: Option<Arc<crate::ephemeral::presence::PresenceStore>>,
+    rate_limiter: Arc<crate::ephemeral::ratelimit::RateLimiter>,
 ) {
     Metrics::global()
         .active_connections
@@ -183,6 +195,7 @@ async fn handle_socket(
         &draining,
         &bus,
         gateway_id,
+        &rate_limiter,
         &mut last_activity,
         &mut heartbeat_tick,
     )
@@ -246,6 +259,7 @@ async fn connection_loop(
     draining: &Arc<AtomicBool>,
     bus: &Arc<dyn EventPublisher>,
     gateway_id: u64,
+    rate_limiter: &Arc<crate::ephemeral::ratelimit::RateLimiter>,
     last_activity: &mut Instant,
     heartbeat_tick: &mut tokio::time::Interval,
 ) -> Result<(), FlowError> {
@@ -264,7 +278,7 @@ async fn connection_loop(
                 match msg {
                     Ok(Message::Text(text)) => {
                         Metrics::global().inbound_frames_total.fetch_add(1, Ordering::Relaxed);
-                        handle_text(conn, &text, config, registry, repo, verifier, draining, bus, gateway_id)
+                        handle_text(conn, &text, config, registry, repo, verifier, draining, bus, gateway_id, rate_limiter)
                             .await?;
                     }
                     Ok(Message::Binary(bytes)) => {
@@ -309,6 +323,7 @@ async fn handle_text(
     draining: &Arc<AtomicBool>,
     bus: &Arc<dyn EventPublisher>,
     gateway_id: u64,
+    rate_limiter: &Arc<crate::ephemeral::ratelimit::RateLimiter>,
 ) -> Result<(), FlowError> {
     if text.len() > MAX_FRAME_BYTES {
         let fatal = send_error(
@@ -478,7 +493,21 @@ async fn handle_text(
                 if cursor < floor.floor_seq {
                     // Resync decision (P5-M031): the covering snapshot
                     // must be FINALIZED for this document and pass
-                    // integrity validation before announcing it.
+                    // integrity validation before announcing it. The
+                    // resync read path (floor snapshot fetch +
+                    // validate) shares the fetch budget — a stale
+                    // cursor replayed in a loop is the same
+                    // read-amplification primitive as fetch spam
+                    // (SEC5-1) and is throttled identically.
+                    if !conn_allows_snapshot_read(conn, rate_limiter).await {
+                        let fatal = send_error(
+                            conn,
+                            ProtocolError::RateLimited,
+                            "snapshot reads rate limited",
+                            frame.id,
+                        );
+                        return if fatal { Err(FlowError::Close) } else { Ok(()) };
+                    }
                     let snapshots = crate::db::snapshots::SnapshotRepo::new(repo.db.clone());
                     let served = snapshots
                         .get_by_snapshot_id(floor.snapshot_id)
@@ -541,6 +570,19 @@ async fn handle_text(
                     frame.id,
                 );
                 return Ok(());
+            }
+            // SEC5-1 fix: every fetch is a full-payload DB read + hash +
+            // base64 serve — throttle per connection (shared budget
+            // with the sync_request resync path so both read paths
+            // are bounded by one scope).
+            if !conn_allows_snapshot_read(conn, rate_limiter).await {
+                let fatal = send_error(
+                    conn,
+                    ProtocolError::RateLimited,
+                    "snapshot reads rate limited",
+                    frame.id,
+                );
+                return if fatal { Err(FlowError::Close) } else { Ok(()) };
             }
             handle_fetch_snapshot(conn, fetch, repo).await;
         }
@@ -646,6 +688,8 @@ async fn handle_join(
 
 /// Serves `fetch_snapshot` (P5-M031): full access recheck, snapshot
 /// validation, then the wrapper payload base64 on the same session.
+/// Rate-limited by the caller (SEC5-1: `fetch` scope, shared with the
+/// sync_request resync path).
 async fn handle_fetch_snapshot(conn: &mut Conn, fetch: FetchSnapshot, repo: &Arc<GatewayRepo>) {
     let Some(user) = conn.user else { return };
     let Some(doc) = conn.document else { return };
@@ -708,6 +752,29 @@ async fn handle_fetch_snapshot(conn: &mut Conn, fetch: FetchSnapshot, repo: &Arc
         );
         return;
     }
+    // Oversize guard (SEC5-3 fix, audit V7): the payload rides a JSON
+    // text frame as base64 (~4/3× the raw bytes). A snapshot whose
+    // ENCODED size exceeds the frame cap can never be delivered —
+    // it would overflow the wire limit and silently die in the
+    // outbound queue. Refuse deterministically instead: the client
+    // sees a size error, never a truncated frame. The +2 KiB margin
+    // covers the frame's JSON metadata overhead.
+    const B64: usize = 4;
+    const RAW: usize = 3;
+    const JSON_OVERHEAD_MARGIN: usize = 2 * 1024;
+    let encoded_estimate = row
+        .payload_size
+        .saturating_mul(B64 as i64 / RAW as i64)
+        .saturating_add(JSON_OVERHEAD_MARGIN as i64);
+    if encoded_estimate > MAX_FRAME_BYTES as i64 {
+        let _ = send_error(
+            conn,
+            ProtocolError::PayloadTooLarge,
+            "snapshot exceeds frame limit",
+            None,
+        );
+        return;
+    }
     let payload_base64 = base64_encode(&row.payload);
     send_control(
         conn,
@@ -719,9 +786,37 @@ async fn handle_fetch_snapshot(conn: &mut Conn, fetch: FetchSnapshot, repo: &Arc
             state_digest: row.state_digest.clone(),
             checksum: row.payload_checksum.clone(),
             payload_base64,
+            payload_size: row.payload_size.to_string(),
         }),
         None,
     );
+}
+
+/// Per-connection budget for snapshot read paths (fetch_snapshot +
+/// sync_request resync signals — SEC5-1). The principal is the
+/// connection id: budgets are per session, matching the per-tab
+/// amplification model (a reconnect gets a fresh connection id, and
+/// the connect scope already bounds reconnect churn).
+async fn conn_allows_snapshot_read(
+    conn: &Conn,
+    rate_limiter: &Arc<crate::ephemeral::ratelimit::RateLimiter>,
+) -> bool {
+    match rate_limiter
+        .check(
+            crate::ephemeral::ratelimit::SCOPE_SNAPSHOT_FETCH,
+            &conn.id.to_string(),
+        )
+        .await
+    {
+        RateLimitOutcome::Allowed => true,
+        RateLimitOutcome::Limited => {
+            crate::telemetry::Metrics::global()
+                .rate_limited_total
+                .fetch_add(1, Ordering::Relaxed);
+            tracing::info!(connection_id = %conn.id, "snapshot read rate limited");
+            false
+        }
+    }
 }
 
 /// Standard base64 (RFC 4648, with padding) — dependency-free: the

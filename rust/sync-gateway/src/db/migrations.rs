@@ -180,6 +180,29 @@ const MIGRATIONS: &[Migration] = &[
             ADD COLUMN IF NOT EXISTS compaction_floor_snapshot_id UUID;
     "#,
     },
+    // Phase 5 (P5-M045, SEC5-2 fix round): the floor-snapshot reference
+    // gains its missing FK so retention can never leave documents
+    // dangling (the DELETE paths in maintenance/retention.rs are the
+    // only crdt_snapshots deleters and now refuse floor-referenced
+    // rows under lock; the FK is the schema-level backstop). The
+    // (document_id, target_seq) index already exists from migration 2
+    // (crdt_revisions_boundary_idx) — nothing new needed there.
+    // Idempotency note: PostgreSQL has no ADD CONSTRAINT IF NOT
+    // EXISTS; the DROP IF EXISTS + ADD pattern is the idempotent form
+    // and is safe here because the constraint definition is identical
+    // on every run.
+    Migration {
+        version: 3,
+        name: "phase5 floor fk + indexes",
+        sql: r#"
+        ALTER TABLE documents
+            DROP CONSTRAINT IF EXISTS documents_floor_snapshot_fk;
+        ALTER TABLE documents
+            ADD CONSTRAINT documents_floor_snapshot_fk
+            FOREIGN KEY (compaction_floor_snapshot_id)
+            REFERENCES crdt_snapshots(snapshot_id);
+    "#,
+    },
 ];
 
 /// Applies all pending migrations idempotently. Safe to run on an empty

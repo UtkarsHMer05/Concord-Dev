@@ -95,11 +95,14 @@ async fn cleanup(db: &Db, owner: UserId, doc: Uuid) {
     let client = db.get().await.expect("pool");
     let _ = client
         .batch_execute(&format!(
-            "DELETE FROM crdt_revisions WHERE document_id = '{doc}';
+            // FK order (migration v3): the floor reference must be
+            // cleared BEFORE the snapshot rows it points at are
+            // deleted, or the whole batch aborts silently.
+            "UPDATE documents SET compaction_floor_seq = NULL,
+                 compaction_floor_snapshot_id = NULL WHERE id = '{doc}';
+             DELETE FROM crdt_revisions WHERE document_id = '{doc}';
              DELETE FROM crdt_snapshots WHERE document_id = '{doc}';
              DELETE FROM crdt_operations WHERE document_id = '{doc}';
-             UPDATE documents SET compaction_floor_seq = NULL,
-                 compaction_floor_snapshot_id = NULL WHERE id = '{doc}';
              DELETE FROM documents WHERE id = '{doc}';
              DELETE FROM users WHERE id = '{}';",
             owner.0
@@ -151,6 +154,29 @@ async fn retention_protects_referenced_and_newest_snapshots() {
     let Some(workers) = live_worker_pool() else {
         return;
     };
+    // Panicked earlier runs leave debris under the same fixture title;
+    // start from a clean slate (test-DB-only, document-scoped). The
+    // floor FK (migration v3) requires clearing floor references
+    // BEFORE deleting the snapshots they point at.
+    {
+        let client = db.get().await.expect("pool");
+        client
+            .batch_execute(
+                "UPDATE documents SET compaction_floor_seq = NULL,
+                     compaction_floor_snapshot_id = NULL
+                 WHERE title = 'p5-retain';
+                 DELETE FROM crdt_revisions WHERE document_id IN
+                     (SELECT id FROM documents WHERE title = 'p5-retain');
+                 DELETE FROM crdt_snapshots WHERE document_id IN
+                     (SELECT id FROM documents WHERE title = 'p5-retain');
+                 DELETE FROM crdt_operations WHERE document_id IN
+                     (SELECT id FROM documents WHERE title = 'p5-retain');
+                 DELETE FROM documents WHERE title = 'p5-retain';
+                 DELETE FROM users WHERE clerk_user_id LIKE 'retain_%';",
+            )
+            .await
+            .expect("debris purge");
+    }
     let (owner, doc) = fixture(&db).await;
     let repo = GatewayRepo::new(db.clone());
     let snapshots = SnapshotRepo::new(db.clone());
@@ -244,27 +270,59 @@ async fn retention_protects_referenced_and_newest_snapshots() {
     assert_eq!(bytes, 0);
     assert!(snapshots.get_by_snapshot_id(s2).await.expect("f").is_some());
 
-    // Move the floor to s3 (prune below b3 makes s3 the floor).
+    // Revision protection (SEC5-2 fix): pruning to b3 is now REFUSED
+    // because the revision at b1 must keep its op basis — prove it…
+    assert!(matches!(
+        prune_to_boundary(&db, &snapshots, doc, b3, 10).await,
+        Err(sync_gateway::maintenance::CompactionError::RetentionProtected { .. })
+    ));
+    // …then conclude the retention scenario by removing the scenario's
+    // revision (its protection was the point) and prune below b3.
+    let client = db.get().await.expect("pool");
+    client
+        .execute("DELETE FROM crdt_revisions WHERE document_id = $1", &[&doc])
+        .await
+        .expect("drop scenario revision");
     let deleted = prune_to_boundary(&db, &snapshots, doc, b3, 10)
         .await
         .expect("prune");
     assert!(deleted > 0);
-    // Now s2 is unprotected: purge deletes exactly s2's row.
-    let (n, bytes) = purge_unreferenced(&db, doc).await.expect("purge");
-    assert_eq!(n, 1);
-    assert!(bytes > 0);
-    assert!(snapshots.get_by_snapshot_id(s2).await.expect("f").is_none());
-    // s1 (revision) and s3 (newest + floor) survive.
+    // s2 was marked superseded above; the floor now sits at b3. The
+    // hardened in-tx protection predicate (P5-M045) REFUSES to purge
+    // s2: its coverage b2 lies at/below the floor, and any snapshot at
+    // or below the floor could be needed by the resync path. The purge
+    // fails loud (Protected) instead of deleting the row.
+    match purge_unreferenced(&db, doc).await {
+        Err(sync_gateway::maintenance::RetentionError::Protected(refused)) => {
+            assert_eq!(
+                refused, s2,
+                "the below-floor superseded snapshot is the one refused"
+            );
+        }
+        Ok((n, _)) => panic!("below-floor snapshot must not be purgeable (deleted {n})"),
+        Err(other) => panic!("unexpected purge error: {other:?}"),
+    }
+    // s2 SURVIVES (row present, still superseded); s1 (revision) and
+    // s3 (newest + floor) survive too.
+    let s2_row = snapshots
+        .get_by_snapshot_id(s2)
+        .await
+        .expect("fetch s2")
+        .expect("s2 survives the refused purge");
+    assert_eq!(s2_row.status, "superseded");
     assert!(snapshots.get_by_snapshot_id(s1).await.expect("f").is_some());
     assert!(snapshots.get_by_snapshot_id(s3).await.expect("f").is_some());
 
-    // Accounting (M039) reflects the end state.
+    // Accounting (M039) reflects the end state: all three snapshot rows
+    // remain (s2 protected below the floor), two of them finalized. The
+    // scenario revision was dropped above (its protection was the
+    // point), so revision_count is 0.
     let accounting = storage_accounting(&db, doc).await.expect("accounting");
-    assert_eq!(accounting.snapshot_count, 2, "s1 + s3 remain");
+    assert_eq!(accounting.snapshot_count, 3, "s1 + s2 + s3 remain");
     assert_eq!(accounting.finalized_snapshots, 2);
     assert_eq!(accounting.compaction_floor, Some(b3));
     assert_eq!(accounting.latest_snapshot_coverage, Some(b3));
-    assert_eq!(accounting.revision_count, 1);
+    assert_eq!(accounting.revision_count, 0);
     assert_eq!(
         accounting.prunable_rows_remaining, 0,
         "clean prune leaves nothing below the floor"
@@ -276,4 +334,149 @@ async fn retention_protects_referenced_and_newest_snapshots() {
     assert_eq!(accounting.tail_op_rows, 0);
 
     cleanup(&db, owner, doc).await;
+}
+
+/// P5-M045 race closure (retention side): once a document has a
+/// compaction floor, retention can neither mark nor purge the floor
+/// snapshot NOR any older snapshot whose coverage sits at/below the
+/// floor — the stale-client resync path may need any of them. The
+/// in-transaction recheck (documents FOR UPDATE + row-locked snapshot
+/// + coverage_seq ≤ COALESCE(floor, -1) refusal) is what enforces it;
+/// this test pins the observable with the floor set by a REAL prune.
+#[tokio::test]
+async fn retention_cannot_mark_or_purge_the_floor_or_below() {
+    let Some(db) = test_db().await else { return };
+    let Some(workers) = live_worker_pool() else {
+        return;
+    };
+    let (owner, doc) = fixture(&db).await;
+    let repo = GatewayRepo::new(db.clone());
+    let snapshots = SnapshotRepo::new(db.clone());
+    let pipeline = SnapshotPipeline::new(repo.clone(), snapshots.clone(), workers.clone());
+
+    // Three boundaries: 4, 8, 12 ops → snapshots s1 @ b1, s2 @ b2,
+    // s3 @ b3 (all finalized).
+    let envelopes: Vec<_> = ops_at(4, 800, 0x9A11)
+        .iter()
+        .map(|p| validate_op(p).expect("v"))
+        .collect();
+    let b1 = repo
+        .ingest_batch(owner, doc, &envelopes)
+        .await
+        .expect("i1")
+        .durable_cursor;
+    let s1 = finalized_snapshot_at(&pipeline, doc, b1, 1).await;
+    let envelopes2: Vec<_> = ops_at(4, 810, 0x9A12)
+        .iter()
+        .map(|p| validate_op(p).expect("v"))
+        .collect();
+    let b2 = repo
+        .ingest_batch(owner, doc, &envelopes2)
+        .await
+        .expect("i2")
+        .durable_cursor;
+    let s2 = finalized_snapshot_at(&pipeline, doc, b2, 1).await;
+    let envelopes3: Vec<_> = ops_at(4, 820, 0x9A13)
+        .iter()
+        .map(|p| validate_op(p).expect("v"))
+        .collect();
+    let b3 = repo
+        .ingest_batch(owner, doc, &envelopes3)
+        .await
+        .expect("i3")
+        .durable_cursor;
+    let s3 = finalized_snapshot_at(&pipeline, doc, b3, 1).await;
+
+    // A REAL prune to b2: the floor advances to b2 pinning s2 as the
+    // floor snapshot (ops ≤ b2 are deleted). No revisions exist, so
+    // the prune is eligible.
+    let deleted = prune_to_boundary(&db, &snapshots, doc, b2, 10)
+        .await
+        .expect("prune to b2");
+    assert_eq!(deleted, 8, "ops 1..b2 pruned");
+    let floor = sync_gateway::maintenance::get_floor(&db, doc)
+        .await
+        .expect("floor")
+        .expect("floor set");
+    assert_eq!(floor.floor_seq, b2);
+    assert_eq!(floor.snapshot_id, s2);
+
+    // The hostile scenario: s1 (coverage b1 ≤ floor b2) and s2 (the
+    // floor itself) are both unreferenced by any revision and both
+    // non-newest (s3 is the newest finalized). A naive retention pass
+    // would mark BOTH superseded and then purge them — destroying the
+    // resync path's floor. The fixed retention must refuse both.
+    let marked = mark_superseded_unreferenced(&db, doc)
+        .await
+        .expect("mark respects floor");
+    assert!(
+        marked.is_empty(),
+        "nothing at/below the floor may be marked (got {marked:?})"
+    );
+    for id in [s1, s2, s3] {
+        let row = snapshots
+            .get_by_snapshot_id(id)
+            .await
+            .expect("fetch")
+            .expect("row");
+        assert_eq!(row.status, "finalized", "snapshot {id} must stay finalized");
+    }
+
+    // Belt-and-braces direct purge: even with rows FORCED superseded
+    // via SQL (bypassing the mark guard), the purge's in-tx recheck
+    // must refuse — s1 is below the floor's coverage and s2 IS the
+    // floor. (Purge aborts with Protected on the first refused id.)
+    {
+        let client = db.get().await.expect("pool");
+        let forced = vec![s1, s2];
+        client
+            .execute(
+                "UPDATE crdt_snapshots SET status = 'superseded'
+                 WHERE snapshot_id = ANY($1)",
+                &[&forced],
+            )
+            .await
+            .expect("force superseded");
+    }
+    match purge_unreferenced(&db, doc).await {
+        Ok((n, _)) => panic!("purge must refuse floor/below-floor rows (deleted {n})"),
+        Err(sync_gateway::maintenance::RetentionError::Protected(id)) => {
+            assert!(
+                id == s1 || id == s2,
+                "refusal must target the floor or below-floor snapshot, got {id}"
+            );
+        }
+        Err(other) => panic!("unexpected error: {other:?}"),
+    }
+    // Nothing was deleted despite the forced status.
+    assert!(snapshots.get_by_snapshot_id(s1).await.expect("f").is_some());
+    assert!(snapshots.get_by_snapshot_id(s2).await.expect("f").is_some());
+
+    // Recovery still works end-to-end through the pinned floor.
+    let selector =
+        sync_gateway::maintenance::RecoverySelector::new(repo.clone(), snapshots.clone(), workers);
+    selector
+        .verify_equivalence(doc)
+        .await
+        .expect("equivalence holds with the floor protected");
+
+    let _ = b3;
+    // Teardown: clear the floor BEFORE the snapshot rows it references
+    // (migration v3's FK rejects the other order), then remove the
+    // fixture. Same shape as the shared cleanup() helper.
+    {
+        let client = db.get().await.expect("pool");
+        let _ = client
+            .batch_execute(&format!(
+                "UPDATE documents SET compaction_floor_seq = NULL,
+                     compaction_floor_snapshot_id = NULL WHERE id = '{doc}';
+                 DELETE FROM crdt_revisions WHERE document_id = '{doc}';
+                 DELETE FROM crdt_snapshots WHERE document_id = '{doc}';
+                 DELETE FROM crdt_operations WHERE document_id = '{doc}';
+                 DELETE FROM documents WHERE id = '{doc}';
+                 DELETE FROM users WHERE id = '{}';",
+                owner.0
+            ))
+            .await;
+    }
 }

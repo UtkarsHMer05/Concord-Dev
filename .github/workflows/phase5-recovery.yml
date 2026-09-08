@@ -97,6 +97,9 @@ jobs:
       - name: Lease/claim/stale-owner race stress (M046)
         run: cargo test --test phase5_races -- --test-threads=1
         working-directory: rust
+      - name: Storage integrity + security regression (M045)
+        run: cargo test --test phase5_security -- --test-threads=1
+        working-directory: rust
       - name: Phase 3/4 regressions (op-log + ws + distributed)
         run: |
           cargo test --test db_integration -- --test-threads=1

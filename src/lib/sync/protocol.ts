@@ -121,6 +121,36 @@ export interface ServerDraining {
   graceMs: number;
 }
 
+/** s→c (P5-M031): the client's cursor precedes the compaction floor —
+ * delta catch-up is impossible; fetch + import the covering snapshot,
+ * then resume catch-up from the boundary. All u64s as decimal strings. */
+export interface SnapshotResyncRequired {
+  boundary: string;
+  snapshotId: string;
+  snapshotChecksum: string;
+  snapshotFormatVersion: string;
+  coverageOpCount: string;
+}
+
+/** c→s (P5-M031): fetch one snapshot by id for resync. */
+export interface FetchSnapshot {
+  snapshotId: string;
+}
+
+/** s→c (P5-M031): the requested snapshot, base64 wrapper bytes + the
+ * metadata the client re-validates (checksum over the wrapper bytes,
+ * declared size). All u64s as decimal strings. */
+export interface SnapshotPayload {
+  snapshotId: string;
+  formatVersion: string;
+  coverageSeq: string;
+  coveredOpCount: string;
+  stateDigest: string;
+  checksum: string;
+  payloadBase64: string;
+  payloadSize: string;
+}
+
 // ---------------------------------------------------------------------------
 // Frame union
 // ---------------------------------------------------------------------------
@@ -137,6 +167,9 @@ export type ControlPayload =
   | { type: "durable_ack"; payload: DurableAck }
   | { type: "ping"; payload: Ping }
   | { type: "pong"; payload: Pong }
+  | { type: "fetch_snapshot"; payload: FetchSnapshot }
+  | { type: "snapshot_resync_required"; payload: SnapshotResyncRequired }
+  | { type: "snapshot_payload"; payload: SnapshotPayload }
   | { type: "error"; payload: ErrorFrame }
   | { type: "server_draining"; payload: ServerDraining };
 
@@ -152,6 +185,9 @@ export const CONTROL_FRAME_TYPES = [
   "durable_ack",
   "ping",
   "pong",
+  "fetch_snapshot",
+  "snapshot_resync_required",
+  "snapshot_payload",
   "error",
   "server_draining",
 ] as const;
@@ -200,6 +236,26 @@ const PAYLOAD_VALIDATORS: Record<ControlFrameType, (p: unknown) => string | null
   durable_ack: isStrict({ batchId: isString, opIds: arrayOf(isString) }),
   ping: isStrict({ nonce: isString }),
   pong: isStrict({ nonce: isString }),
+  fetch_snapshot: isStrict({ snapshotId: isString }),
+  // P5-M031 frames (SEC5-3: payloadSize carries the declared wrapper
+  // byte length so the client's size check is live on this transport).
+  snapshot_resync_required: isStrict({
+    boundary: isString,
+    snapshotId: isString,
+    snapshotChecksum: isString,
+    snapshotFormatVersion: isString,
+    coverageOpCount: isString,
+  }),
+  snapshot_payload: isStrict({
+    snapshotId: isString,
+    formatVersion: isString,
+    coverageSeq: isString,
+    coveredOpCount: isString,
+    stateDigest: isString,
+    checksum: isString,
+    payloadBase64: isString,
+    payloadSize: isString,
+  }),
   error: isStrict({ code: isEnum(...ERROR_CODES), message: isString, requestId: optional(isString) }),
   server_draining: isStrict({ reason: isString, graceMs: isUint }),
 };

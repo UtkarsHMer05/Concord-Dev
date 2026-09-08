@@ -8,7 +8,10 @@
 //! commits together with the compaction-floor advance in ONE
 //! transaction — a crash can never leave a floor above its coverage
 //! (invariant: floor_seq ≤ covering snapshot's coverage_seq, both set
-//! or both NULL).
+//! or both NULL). Each batch also re-verifies the revision-protection
+//! predicate and the covering snapshot's FINALIZED status INSIDE the
+//! transaction, under the documents row lock (SEC5-2 race closure) —
+//! the pre-loop eligibility reads alone are advisory only.
 //!
 //! Automatic pruning is DISABLED by default until the M032 end-to-end
 //! equivalence gate passes (DEC-040); compaction here is driven
@@ -94,6 +97,7 @@ pub struct DryRun {
 /// the real prune. Checks, in order: FINALIZED coverage exists at the
 /// boundary; no protected revision would lose snapshot coverage.
 async fn eligibility(
+    db: &Db,
     snapshots: &SnapshotRepo,
     document: Uuid,
     boundary: i64,
@@ -110,16 +114,30 @@ async fn eligibility(
     if covering.coverage_seq < boundary {
         return Err(CompactionError::NoCoverage { document, boundary });
     }
-    // 2. Retention: no revision whose target_seq ≤ boundary references
-    //    a DIFFERENT snapshot that would become the only pruned-away
-    //    source. Revisions reference snapshots explicitly; the row we
-    //    prune TO keeps coverage of every op ≤ boundary via `covering`,
-    //    so the guard is: no revision row pins a snapshot with
-    //    coverage_seq < boundary other than `covering`… in practice the
-    //    v2 schema's revisions.snapshot_id must be NULL or ≥ boundary
-    //    or equal to the covering snapshot. Keep it simple + strict:
-    //    any revision referencing a snapshot with coverage < boundary
-    //    blocks pruning below that snapshot's coverage.
+    // 2. Revision protection (SEC5-2 fix): a revision's target_seq must
+    //    remain reconstructable. Reconstruction needs the ops in
+    //    (covering_snapshot, target_seq] to still exist in the durable
+    //    log — so pruning may NEVER advance above the LOWEST revision
+    //    target. When revisions exist, the effective prune boundary is
+    //    min(revision target_seq); a prune request above that is
+    //    refused (RetentionProtected). When no revisions exist, the
+    //    covering snapshot alone justifies pruning.
+    let revision_floor: Option<i64> = {
+        let client = db.get().await?;
+        let row = client
+            .query_opt(
+                "SELECT MIN(target_seq) AS min_target FROM crdt_revisions
+                 WHERE document_id = $1",
+                &[&document],
+            )
+            .await?;
+        row.and_then(|r| r.get::<_, Option<i64>>("min_target"))
+    };
+    if let Some(min_target) = revision_floor {
+        if boundary > min_target {
+            return Err(CompactionError::RetentionProtected { document, boundary });
+        }
+    }
     Ok(covering.snapshot_id)
 }
 
@@ -130,7 +148,7 @@ pub async fn dry_run(
     document: Uuid,
     boundary: i64,
 ) -> Result<DryRun, CompactionError> {
-    let snapshot_id = eligibility(snapshots, document, boundary).await?;
+    let snapshot_id = eligibility(db, snapshots, document, boundary).await?;
     let client = db.get().await?;
     let row = client
         .query_one(
@@ -157,6 +175,81 @@ pub async fn dry_run(
     })
 }
 
+/// Per-batch in-transaction guard (SEC5-2 follow-up, P5-M045): the
+/// eligibility reads above run OUTSIDE the prune transactions on a
+/// separate connection, so a revision (or a retention status flip) can
+/// land between them and the DELETE. This re-checks everything the
+/// DELETE depends on, inside the batch transaction, AFTER taking the
+/// documents-row lock:
+///
+/// 1. `SELECT ... FOR UPDATE` on the documents row serializes prune
+///    against every writer that locks documents first (revision
+///    creation's FOR SHARE, retention's documents lock). Interleaving
+///    safety: either the revision row is already visible when the
+///    predicate runs (we refuse below), or we hold the documents lock
+///    first and the creator's FOR SHARE blocks until this batch
+///    commits — after which the creator re-reads the NEW floor and can
+///    never insert a revision below it.
+/// 2. The revision predicate at statement time must mirror
+///    eligibility's refusal exactly: STRICTLY below the boundary
+///    (boundary == min_target stays prunable — a revision T ≥ boundary
+///    reconstructs from the floor snapshot at coverage ≤ T plus ops
+///    (boundary, T], all still present after pruning the covered
+///    prefix).
+/// 3. The covering snapshot row is re-locked (FOR UPDATE) and must
+///    still be FINALIZED for THIS document — a concurrent retention
+///    mark_superseded cannot flip coverage between eligibility and the
+///    DELETE.
+///
+/// Returns Ok(()) when the batch may proceed; the caller rolls the
+/// transaction back (by returning the error) on any refusal.
+async fn recheck_in_batch_tx(
+    tx: &tokio_postgres::Transaction<'_>,
+    document: Uuid,
+    boundary: i64,
+    snapshot_id: Uuid,
+) -> Result<(), CompactionError> {
+    // (1) Serialize on the documents row — see the doc comment above.
+    tx.query_opt(
+        "SELECT id FROM documents WHERE id = $1 FOR UPDATE",
+        &[&document],
+    )
+    .await?
+    .ok_or(CompactionError::NoCoverage { document, boundary })?;
+
+    // (2) Statement-time revision predicate (strictly below boundary,
+    //     same as eligibility's boundary > min_target refusal).
+    let protected = tx
+        .query_opt(
+            "SELECT 1 WHERE EXISTS(
+                 SELECT 1 FROM crdt_revisions
+                 WHERE document_id = $1 AND target_seq < $2)",
+            &[&document, &boundary],
+        )
+        .await?
+        .is_some();
+    if protected {
+        return Err(CompactionError::RetentionProtected { document, boundary });
+    }
+
+    // (3) Covering snapshot still FINALIZED, still ours, row-locked so
+    //     retention cannot flip it mid-batch.
+    let covered = tx
+        .query_opt(
+            "SELECT 1 FROM crdt_snapshots
+             WHERE snapshot_id = $1 AND document_id = $2
+               AND status = 'finalized'
+             FOR UPDATE",
+            &[&snapshot_id, &document],
+        )
+        .await?
+        .is_some();
+    if !covered {
+        return Err(CompactionError::NoCoverage { document, boundary });
+    }
+    Ok(())
+}
+
 /// Staged, batched, transactional pruning (M030.2/M030.3, DEC-040).
 ///
 /// Each batch: one transaction that (a) DELETEs up to `batch_rows`
@@ -165,6 +258,12 @@ pub async fn dry_run(
 /// The loop repeats until no covered rows remain. Automatic pruning
 /// callers are gated on the M032 equivalence flag — this function is
 /// the only op-log deletion path in the codebase.
+///
+/// The eligibility reads before the loop are advisory for the dry-run
+/// path; EVERY batch re-verifies protection inside its transaction
+/// (see [`recheck_in_batch_tx`]) — a revision created below the
+/// boundary after eligibility, or a retention flip of the covering
+/// snapshot, refuses the batch and leaves the log intact.
 pub async fn prune_to_boundary(
     db: &Db,
     snapshots: &SnapshotRepo,
@@ -172,14 +271,29 @@ pub async fn prune_to_boundary(
     boundary: i64,
     batch_rows: i64,
 ) -> Result<i64, CompactionError> {
-    let snapshot_id = eligibility(snapshots, document, boundary).await?;
+    let snapshot_id = eligibility(db, snapshots, document, boundary).await?;
     let batch_rows = batch_rows.clamp(1, 10_000);
     let mut client = db.get().await?;
 
     let mut total_deleted: i64 = 0;
     loop {
-        // One batch: delete + floor advance commit atomically.
+        // One batch: re-verify + delete + floor advance commit
+        // atomically.
         let tx = client.transaction().await?;
+        // SEC5-2 race closure: eligibility ran on a separate connection;
+        // re-check the revision predicate and the covering snapshot
+        // INSIDE this transaction, under the documents row lock, or
+        // roll the whole batch back.
+        if let Err(e) = recheck_in_batch_tx(&tx, document, boundary, snapshot_id).await {
+            tracing::warn!(
+                document = %document,
+                boundary,
+                snapshot = %snapshot_id,
+                error = %e,
+                "prune refused by in-transaction recheck"
+            );
+            return Err(e);
+        }
         let deleted = tx
             .execute(
                 // PostgreSQL DELETE has no LIMIT: bound the batch with a
@@ -203,6 +317,7 @@ pub async fn prune_to_boundary(
         };
         if deleted == 0 && total_deleted > 0 {
             // Fully pruned in a previous batch; still set the floor.
+            // (The in-tx rechecks above already ran for this batch.)
             let rows = tx
                 .execute(
                     "UPDATE documents

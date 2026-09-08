@@ -78,11 +78,13 @@ echo "--- phase 5: recovery suites ---"
   cargo test --test phase5_history -- --test-threads=1
   cargo test --test phase5_restore_concurrency -- --test-threads=1
   cargo test --test phase5_retention -- --test-threads=1
-  cargo test --test phase5_races -- --test-threads=1 )
+  cargo test --test phase5_races -- --test-threads=1
+  cargo test --test phase5_security -- --test-threads=1 )
 
-# 11. Phase 5 web: client resync suite (unit project).
+# 11. Phase 5 web: client resync suite + live client resync E2E.
 echo "--- phase 5: web resync suite ---"
 source "$HOME/.nvm/nvm.sh" && nvm use 24 >/dev/null
 npx vitest run --project unit
+npx vitest run --project realtime
 
 echo "=== Phase 4+5 gate: ALL GREEN ==="

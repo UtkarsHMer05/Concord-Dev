@@ -191,6 +191,16 @@ impl JobRepo {
         // all gateways share one clock for lease semantics — no
         // cross-process skew questions.
         let lease_secs = lease.as_secs().max(1) as i32;
+        // Liveness (SEC5 audit V9 / P5-M045): clear last_failure_class
+        // on every claim. requeue_expired's DISTINCT guard means a job
+        // whose class stays 'lease_expired' is skipped by the sweep; if
+        // the class were left set from the PREVIOUS expiry, a job that
+        // expires, is re-claimed, then expires again WITHOUT an
+        // intervening fail() would be stranded running forever (the
+        // sweep skips it, claim_next only takes pending). Clearing the
+        // class at claim makes each claim cycle start clean, so the
+        // next expiry is always requeueable and the guard stays sound
+        // (it still collapses repeated sweeps of the SAME claim).
         let claimed = client
             .execute(
                 "UPDATE maintenance_jobs
@@ -198,6 +208,7 @@ impl JobRepo {
                      claim_version = claim_version + 1,
                      lease_expires_at = now() + make_interval(secs => $3::int),
                      attempts = attempts + 1,
+                     last_failure_class = NULL,
                      updated_at = now()
                  WHERE job_id = $1 AND state = 'pending'
                    AND claim_version = $4",
@@ -219,6 +230,7 @@ impl JobRepo {
                 attempts: candidate.attempts + 1,
                 owner_gateway: Some(gateway_id as i32),
                 claim_version: new_version,
+                last_failure_class: None, // cleared at claim (see above)
                 ..candidate
             },
             new_version,

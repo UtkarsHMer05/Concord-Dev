@@ -581,9 +581,11 @@ void emit_ok_restore_diff(const std::string& target_digest, const std::string& b
 //      target already lives in A.
 // 2. INSERT (re-insertion): un-delete is impossible (DEC-023 tombstones), so
 //    items visible in B but tombstoned-or-absent in A are re-created under
-//    fresh identities in the reserved REST band (counters sequential from 1,
-//    FRESH each call — no worker persistence; the Rust DB unique index makes
-//    accidental re-ingest a harmless duplicate no-op). Lamports are base+i
+//    fresh identities in the reserved REST band (counters sequential, each
+//    batch starting ABOVE every REST counter already applied in either
+//    snapshot — the m036 convergence fix: a colliding id would be a dedup
+//    no-op in Doc::apply_remote and silently drop its op's effect).
+//    Lamports are base+i
 //    where base = max(A,B) register lamports: strictly greater than BOTH
 //    snapshots' clocks, so re-inserted attr registers win any LWW merge.
 // 3. ORDERING / ANCHORING. A literal origin remap (rewriting B's left/right
@@ -834,7 +836,30 @@ struct RestoreDiffResult {
 
     // Fresh REST identity + clock basis: lamports strictly greater than both
     // snapshots' register lamports so re-inserted attrs win every LWW merge.
-    std::uint64_t restore_counter = 0;  // counters 1..N sequential, FRESH per call
+    //
+    // Identity basis is HISTORY-AWARE (m036 convergence fix): the emitted ops
+    // must never collide with an op id the CURRENT state (or the target) has
+    // already applied. A restore pipeline can legitimately feed a previous
+    // diff's batch back into the history (A was rebuilt as ops_A + diff_old,
+    // then new concurrent ops arrived); the core dedups ops by identity
+    // (Doc::apply_remote returns false on an applied id and integrates
+    // nothing), so a colliding delete would silently skip its tombstone and
+    // the fold check would fail with status 3. The counter therefore starts
+    // ABOVE every REST-band counter already applied in either snapshot. The
+    // state summary (version vector) exposes exactly that bound: it is the
+    // highest CONTIGUOUS counter per replica, and the REST band only ever
+    // grows through sequentially-numbered batches (1..N per call, each later
+    // batch continuing above the previous), so applied REST counters are
+    // always a contiguous prefix — `state_summary().at(REST)` is the max.
+    // Belt and braces: an applied id above the contiguous bound (impossible
+    // for this band, but a snapshot could be crafted) is still caught by the
+    // fold check below, which rejects any non-convergence (status 3, never
+    // silent). Determinism is preserved: the basis is a pure function of the
+    // two input snapshots (no wall clock, no randomness).
+    const std::uint64_t applied_restore_high =
+        std::max(doc_a.state_summary().at(kRestoreReplica),
+                 doc_b.state_summary().at(kRestoreReplica));
+    std::uint64_t restore_counter = applied_restore_high;  // next = high + 1..
     std::uint64_t lamport_clock = std::max(state_a.max_lamport, state_b.max_lamport);
     const auto next_identity = [&]() {
         restore_counter += 1;

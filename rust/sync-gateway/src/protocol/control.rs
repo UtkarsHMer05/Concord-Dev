@@ -188,6 +188,11 @@ pub struct FetchSnapshot {
 /// s→c (P5-M031): the requested snapshot, validated server-side before
 /// send (format, document association, checksum) — the client still
 /// re-validates independently (defense in depth, M031.3).
+///
+/// `payload_size` carries the wrapper's exact byte length (SEC5-3 fix):
+/// the client's `size_mismatch` defense compares the declared size to
+/// the decoded payload BEFORE hashing, so the check is live on this
+/// transport, not only on a future HTTP envelope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SnapshotPayload {
@@ -198,6 +203,8 @@ pub struct SnapshotPayload {
     pub state_digest: String,
     pub checksum: String,
     pub payload_base64: String,
+    /// Wrapper byte length (u64 as decimal string).
+    pub payload_size: String,
 }
 
 /// s→c: the batch met the documented persistence contract (ACK_DURABLE,

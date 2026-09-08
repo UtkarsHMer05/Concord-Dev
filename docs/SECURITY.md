@@ -54,8 +54,10 @@ Last updated: 2026-09-07
 
 ## 5. Known accepted limitations
 
-- `rate_limited` is a reserved protocol code, not yet enforced (TARGET
-  Phase 4 edge rate limiting).
+- `rate_limited` is enforced for the connect upgrade and all snapshot
+  read paths (the `fetch` scope); the `write`/`malformed` scopes remain
+  policy-defined but not yet enforced at the frame layer (documented
+  target for the Phase 6 edge work).
 - SIGKILL skips the drain notice (by design; durability is never at risk
   since ACK requires PostgreSQL commit).
 - FileJwks (`GATEWAY_JWKS_FILE`) is an explicit dev/E2E-only source;
@@ -98,9 +100,11 @@ server-side checks.
 ### 6.4 Rate limiting + abuse
 Fixed-window budgets per (scope, principal) shared through Redis when
 available (connect 240/min/peer default — GATEWAY_RATE_CONNECT_PER_MIN
-override; writes 2000/min; malformed 50/min). Gateway-hopping cannot
-evade the global budget (cross-instance test). Local fallback keeps
-per-gateway bounds during Redis outages (accepted N× residual, bounded).
+override; writes 2000/min; malformed 50/min; snapshot reads 30/min per
+connection — the `fetch` scope covering `fetch_snapshot` and the
+`sync_request` resync decision). Gateway-hopping cannot evade the global
+budget (cross-instance test). Local fallback keeps per-gateway bounds
+during Redis outages (accepted N× residual, bounded).
 
 ### 6.5 Findings (all documented, none high-severity)
 F4-1 local-fallback N× budgets during Redis outage (accepted; DEC-033).
@@ -148,7 +152,32 @@ revisions requires EDITOR+; restore requires OWNER. Restores are
 forward-moving auditable events; acknowledged concurrent edits are
 never silently discarded (restores merge as ordinary CRDT batches).
 
-### 7.6 Findings (P5-M045 audit: see runbook disposition)
-Recorded in the private audit report; any HIGH/CRITICAL finding is
-fixed before the release gate (none outstanding at gate time — the
-final-gate checkpoint records the audit verdict).
+### 7.6 Findings (P5-M045 audit: fixed; see disposition)
+The adversarial audit found 2 MEDIUM + 1 MEDIUM-latent + several LOW/INFO
+findings, zero HIGH/CRITICAL. All MEDIUMs are fixed and regression-pinned
+(`phase5_security.rs`):
+
+- **SEC5-1 (fixed)** — `fetch_snapshot` was unthrottled (each fetch = full
+  payload read + SHA-256 + base64 serve): an authenticated VIEWER could
+  generate unbounded read/bandwidth amplification. Fix: a `fetch`
+  rate-limit scope (30/min/connection, shared with the `sync_request`
+  resync path — both snapshot read paths bounded by one budget); bursts
+  beyond it get `rate_limited` errors.
+- **SEC5-2 (fixed)** — compaction eligibility ignored `crdt_revisions`:
+  pruning could delete a live revision's op basis (silent history
+  degradation). Fix: pruning refuses boundaries above the lowest revision
+  target (`RetentionProtected`), re-checked inside every prune transaction
+  under the documents row lock; revision creation validates its boundary
+  against the floor and the durable high-water at insert time.
+- **SEC5-3 (fixed)** — the `snapshot_payload` frame omitted the declared
+  payload size, leaving the client's `size_mismatch` defense unexercised
+  on the WS path. Fix: `payloadSize` is now a wire field, and the server
+  refuses to serve any snapshot whose base64 form would exceed the frame
+  cap (`payload_too_large`, never a truncated/undeliverable frame).
+- LOW/INFO (documented in the audit): oversize-serve guard (now fixed via
+  SEC5-3), `write`/`malformed` scopes still unenforced at frame level
+  (documented target), lease-expiry re-queue class reset (fixed),
+  `enqueue_unique` coalescing race (documented, tolerable), uniform
+  not-found refusal for malformed snapshot ids (accepted — no existence
+  oracle), `token_head` logging (JWT header prefix only, public by
+  construction).

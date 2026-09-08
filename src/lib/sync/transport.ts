@@ -22,6 +22,8 @@ import {
   type ControlFrameType,
   type DecodedControlFrame,
   type ErrorCode,
+  type SnapshotPayload,
+  type SnapshotResyncRequired,
   FATAL_ERROR_CODES,
 } from "./protocol";
 
@@ -51,6 +53,14 @@ export interface TransportEvents {
   onSyncBatch: (ops: Uint8Array[], nextCursor: number, hasMore: boolean) => void;
   /** Catch-up finished; the session is READY. */
   onSyncDone: () => void;
+  /** The server demands snapshot resync: the local cursor precedes the
+   * compaction floor (P5-M031). The session fetches + imports the
+   * covering snapshot, then resumes delta catch-up from the boundary. */
+  onSnapshotResyncRequired: (signal: SnapshotResyncRequired) => void;
+  /** The requested snapshot payload arrived (P5-M031), already decoded
+   * and shape-validated; the session re-validates integrity before
+   * import (checksum-before-trust, defense in depth). */
+  onSnapshotPayload: (payload: SnapshotPayload) => void;
   /** Safe server error (vocabulary codes only). */
   onError: (code: ErrorCode, message: string, requestId?: string) => void;
   /** The server is draining (grace window). */
@@ -187,6 +197,11 @@ export class SyncTransport {
     this.send("sync_request", { cursor }, undefined);
   }
 
+  /** Fetches one snapshot by id for stale-client resync (P5-M031). */
+  fetchSnapshot(snapshotId: string): void {
+    this.send("fetch_snapshot", { snapshotId }, undefined);
+  }
+
   /** Sends a client_ops batch (identity-stable canonical bytes). */
   sendClientOps(batchId: number, ops: Uint8Array[]): void {
     if (this.ws?.readyState !== WebSocket.OPEN) {
@@ -286,6 +301,14 @@ export class SyncTransport {
       case "sync_done":
         this.setStatus("ready");
         this.options.events.onSyncDone();
+        break;
+      case "snapshot_resync_required":
+        this.options.events.onSnapshotResyncRequired(
+          frame.payload as SnapshotResyncRequired,
+        );
+        break;
+      case "snapshot_payload":
+        this.options.events.onSnapshotPayload(frame.payload as SnapshotPayload);
         break;
       case "durable_ack":
         this.options.events.onDurableAck(

@@ -29,10 +29,12 @@ pub struct RateLimitPolicy {
 }
 
 /// Standard scopes (P4-M023: connects, write ops, malformed frames,
-/// reconnect abuse).
+/// reconnect abuse; P5-M045: snapshot fetch — a full-payload read +
+/// hash + base64 serve per frame).
 pub const SCOPE_CONNECT: &str = "connect";
 pub const SCOPE_WRITE_OPS: &str = "write";
 pub const SCOPE_MALFORMED: &str = "malformed";
+pub const SCOPE_SNAPSHOT_FETCH: &str = "fetch";
 
 pub fn default_policies() -> Policies {
     [
@@ -56,6 +58,21 @@ pub fn default_policies() -> Policies {
             SCOPE_MALFORMED,
             RateLimitPolicy {
                 max_events: 50,
+                window: Duration::from_secs(60),
+            },
+        ),
+        (
+            // Snapshot fetches (SEC5-1 fix): each served fetch is a
+            // full-payload SELECT + SHA-256 over all stored bytes +
+            // base64 + a ~4/3×-payload outbound frame — a read-
+            // amplification primitive if unbounded. Resync flows
+            // need a handful of fetches per session (signal → fetch →
+            // optional retry after a transient error), never a
+            // stream; 30/min/connection is far above legitimate use
+            // while capping the amplification.
+            SCOPE_SNAPSHOT_FETCH,
+            RateLimitPolicy {
+                max_events: 30,
                 window: Duration::from_secs(60),
             },
         ),

@@ -625,3 +625,117 @@ async fn bounded_runner_executes_queue_and_stops_cleanly() {
 
     cleanup(&db, owner, doc).await;
 }
+
+/// P5-M045 liveness (SEC5 audit V9): a job that expires, is re-claimed,
+/// then expires again WITHOUT an intervening fail() must stay
+/// requeueable. Before the fix, requeue_expired's DISTINCT guard plus a
+/// sticky last_failure_class='lease_expired' stranded the second expiry
+/// running forever. The fix clears the class AT CLAIM, so each claim
+/// cycle starts clean and every expiry is sweepable.
+#[tokio::test]
+async fn reexpired_job_is_requeueable_after_reclaim() {
+    let Some(db) = test_db().await else { return };
+    let (owner, doc) = fixture_document(&db).await;
+    purge_jobs(&db).await;
+    let jobs = JobRepo::new(db.clone());
+    let lease = Duration::from_secs(60);
+
+    let job_id = jobs
+        .enqueue_unique("verify", Some(doc), Some(21), 5)
+        .await
+        .expect("enqueue");
+
+    // Claim #1 (v1, attempts 1, class cleared by the claim UPDATE).
+    let (j1, v1) = jobs
+        .claim_next(&["verify"], 1, lease)
+        .await
+        .expect("claim 1")
+        .expect("job");
+    assert_eq!(j1.job_id, job_id);
+    assert_eq!(v1, 1);
+    assert_eq!(
+        j1.last_failure_class, None,
+        "claim must clear last_failure_class"
+    );
+
+    // Expire #1 without any fail() → sweep (via claim_next) requeues it.
+    {
+        let client = db.get().await.expect("pool");
+        client
+            .execute(
+                "UPDATE maintenance_jobs SET lease_expires_at = now() - interval '1 second'
+                 WHERE job_id = $1",
+                &[&job_id],
+            )
+            .await
+            .expect("expire 1");
+    }
+    let (j2, v2) = jobs
+        .claim_next(&["verify"], 2, lease)
+        .await
+        .expect("re-claim after first expiry")
+        .expect("requeued");
+    assert_eq!(j2.job_id, job_id);
+    assert_eq!(v2, v1 + 1);
+    assert_eq!(
+        j2.last_failure_class, None,
+        "re-claim also clears the class"
+    );
+
+    // Expire #2 WITHOUT any intervening fail() — the exact scenario that
+    // used to strand the job. Force the expiry by SQL, then sweep with a
+    // plain requeue_expired call (no claim interference): the job must
+    // go back to pending, not stay stranded running.
+    {
+        let client = db.get().await.expect("pool");
+        client
+            .execute(
+                "UPDATE maintenance_jobs SET lease_expires_at = now() - interval '1 second'
+                 WHERE job_id = $1",
+                &[&job_id],
+            )
+            .await
+            .expect("expire 2");
+    }
+    let swept = jobs
+        .requeue_expired(lease)
+        .await
+        .expect("second sweep must run");
+    assert!(
+        swept >= 1,
+        "re-expired job must be requeueable (swept {swept})"
+    );
+    let client = db.get().await.expect("pool");
+    let state: String = client
+        .query_one(
+            "SELECT state FROM maintenance_jobs WHERE job_id = $1",
+            &[&job_id],
+        )
+        .await
+        .expect("state")
+        .get("state");
+    assert_eq!(state, "pending", "not stranded: pending again");
+
+    // Terminal cleanup: claim (v3) and fail via the repo.
+    let (j3, v3) = jobs
+        .claim_next(&["verify"], 3, lease)
+        .await
+        .expect("claim 3")
+        .expect("job");
+    assert_eq!(j3.job_id, job_id);
+    assert!(jobs
+        .fail(&j3, v3, FailureClass::Terminal)
+        .await
+        .expect("terminal fail"));
+    let state_end: String = client
+        .query_one(
+            "SELECT state FROM maintenance_jobs WHERE job_id = $1",
+            &[&job_id],
+        )
+        .await
+        .expect("final state")
+        .get("state");
+    assert_eq!(state_end, "failed");
+
+    cleanup(&db, owner, doc).await;
+}

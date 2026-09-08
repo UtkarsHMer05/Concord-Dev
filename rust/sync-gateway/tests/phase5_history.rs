@@ -184,6 +184,27 @@ async fn purge_jobs(db: &Db) {
     let _ = client.execute("DELETE FROM maintenance_jobs", &[]).await;
 }
 
+/// Deletes the fixture doc's revision/job debris BEFORE the test body
+/// (P5-M045 boundary tests). The suite's DB is shared with other
+/// suites and panicked earlier runs leave rows behind — the SEC5-2
+/// creation-side guard would (correctly) refuse a `None` boundary on
+/// a debris document whose high-water equals its floor, so a fresh
+/// start is asserted-able, not accidental.
+async fn purge_doc_state(db: &Db, f: &Fixture) {
+    let client = db.get().await.expect("pool");
+    client
+        .batch_execute(&format!(
+            "DELETE FROM crdt_revisions WHERE document_id = '{}';
+             DELETE FROM maintenance_jobs WHERE document_id = '{}';
+             DELETE FROM crdt_operations WHERE document_id = '{}';
+             UPDATE documents SET compaction_floor_seq = NULL,
+                 compaction_floor_snapshot_id = NULL WHERE id = '{}';",
+            f.doc, f.doc, f.doc, f.doc
+        ))
+        .await
+        .expect("purge doc debris");
+}
+
 fn service(db: &Db, workers: &WorkerPool) -> RevisionService {
     RevisionService::new(
         GatewayRepo::new(db.clone()),
@@ -764,6 +785,398 @@ async fn restore_requires_owner_and_anchors_the_target() {
     // restore-of-restore) = 4 rows, all retained (H6: restore never
     // touches history).
     assert_eq!(listed.len(), 4, "audit trail fully retained");
+
+    cleanup(&db, &f).await;
+}
+
+// -------------------------------------------------------------------------
+// 6. SEC5-2 creation-side closure (P5-M045): boundary validation at
+//    revision creation — the window (floor, high-water] is ENFORCED.
+// -------------------------------------------------------------------------
+
+/// Boundary above the durable high-water is a fiction — the log does
+/// not reach it, so reconstruction would silently replay fewer ops
+/// than the boundary claims. The guard must refuse it BEFORE any row
+/// is written; a boundary at the exact high-water stays valid.
+#[tokio::test]
+async fn create_revision_rejects_boundary_above_high_water() {
+    let Some(db) = test_db().await else { return };
+    let Some(workers) = live_worker_pool() else {
+        return;
+    };
+    let f = fixture(&db).await;
+    purge_jobs(&db).await;
+    let svc = service(&db, &workers);
+
+    // Server sequences are GLOBAL (BIGSERIAL) and shared with every
+    // other suite's debris — boundaries are RELATIVE to the first
+    // ingest, never absolute (existing-suite convention; base varies
+    // run to run).
+    let high_water = ingest(&svc.repo, f.owner, f.doc, &ops_at(6, 1000, 0xEE41)).await;
+    let base = high_water - 6;
+    assert_eq!(high_water, base + 6, "ops 1..6 ingested (relative to base)");
+
+    // Some(past the log): refused with the typed error, and NOTHING
+    // was written (the boundary value is far above any plausible
+    // sequence).
+    let err = svc
+        .create_revision(
+            f.doc,
+            f.owner,
+            revision_kind::NAMED,
+            Some("future"),
+            Some(high_water + 900),
+        )
+        .await
+        .expect_err("boundary above the high-water must be refused");
+    assert!(
+        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == high_water + 900),
+        "got {err:?}"
+    );
+    let listed = svc
+        .list_revisions(f.doc, f.owner, 50)
+        .await
+        .expect("listing works");
+    assert!(
+        listed.is_empty(),
+        "the refused revision must not leave a row (got {} rows)",
+        listed.len()
+    );
+
+    // Boundary exactly at the high-water: the window is INCLUSIVE at
+    // the top (base < high-water <= high-water, floor NULL).
+    let ok = svc
+        .create_revision(
+            f.doc,
+            f.owner,
+            revision_kind::NAMED,
+            Some("head"),
+            Some(high_water),
+        )
+        .await
+        .expect("boundary at the high-water is valid");
+    assert_eq!(ok.target_seq, high_water);
+    let listed = svc
+        .list_revisions(f.doc, f.owner, 50)
+        .await
+        .expect("listing works");
+    assert_eq!(listed.len(), 1, "exactly the accepted revision");
+    assert_eq!(listed[0].target_seq, high_water);
+
+    cleanup(&db, &f).await;
+}
+
+/// Boundary at/below the compaction floor has its ops (0, boundary]
+/// already pruned, and the floor's covering snapshot anchors a HIGHER
+/// boundary — reconstruction would fall to a wrong anchor/empty-start
+/// and silently produce a WRONG digest. This is the SEC5-2
+/// silent-degradation bug entered from the CREATION side; restore
+/// already refuses pruned targets (RestoreTargetPruned) — creation
+/// must too (InvalidBoundary).
+#[tokio::test]
+async fn create_revision_rejects_boundary_at_or_below_compaction_floor() {
+    let Some(db) = test_db().await else { return };
+    let Some(workers) = live_worker_pool() else {
+        return;
+    };
+    let f = fixture(&db).await;
+    purge_jobs(&db).await;
+    let svc = service(&db, &workers);
+    let pipeline =
+        SnapshotPipeline::new(svc.repo.clone(), svc.snapshots.clone(), svc.workers.clone());
+    purge_doc_state(&db, &f).await;
+
+    // 12 ops, finalized snapshot at the full boundary (head).
+    let head = ingest(&svc.repo, f.owner, f.doc, &ops_at(12, 1100, 0xEE42)).await;
+    let base = head - 12; // first op's server seq (global BIGSERIAL)
+    let b6 = base + 6; // boundary at op 6
+    let job = Uuid::new_v4();
+    let (snap_id, _d, _v) = pipeline
+        .build_at_boundary(f.doc, head, job, 1)
+        .await
+        .expect("build at head");
+    assert!(svc
+        .snapshots
+        .transition_building_to_verifying(snap_id)
+        .await
+        .expect("transition"));
+    let _ = pipeline.verify(f.doc, snap_id).await.expect("verify");
+    assert!(pipeline.finalize(snap_id, None).await.expect("finalize"));
+
+    // No revisions exist yet, so pruning to the head is eligible (the
+    // SEC5-2 base fix only protects EXISTING revisions — this test
+    // supplies the creation-side complement).
+    let deleted = prune_to_boundary(&db, &svc.snapshots, f.doc, head, 100)
+        .await
+        .expect("prune to the head with no revisions yet");
+    assert_eq!(deleted, 12, "all ops pruned; floor is now the head");
+
+    // Some(b6): b6 <= floor head — the ops (base..b6] are gone; refuse.
+    let err = svc
+        .create_revision(
+            f.doc,
+            f.owner,
+            revision_kind::NAMED,
+            Some("below"),
+            Some(b6),
+        )
+        .await
+        .expect_err("boundary below the floor must be refused");
+    assert!(
+        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == b6),
+        "got {err:?}"
+    );
+    // Some(head): the window is EXCLUSIVE at the floor (head <= floor)
+    // — the revision's ENTIRE op basis is pruned and the floor snapshot
+    // anchors coverage == head, which cannot serve a boundary-head
+    // tail replay. Refuse.
+    let err = svc
+        .create_revision(f.doc, f.owner, revision_kind::NAMED, Some("at"), Some(head))
+        .await
+        .expect_err("boundary at the floor must be refused");
+    assert!(
+        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == head),
+        "got {err:?}"
+    );
+
+    // None (current high-water): also refused — after pruning to the
+    // head the durable log is EMPTY, so the COALESCE high-water is 0
+    // and 0 <= floor(head) fails the window. This is CORRECT
+    // fail-closed behavior: a revision cannot exist at a boundary
+    // whose basis is fully pruned with no later ops. (The resolved
+    // boundary in the error is the post-prune high-water 0, not the
+    // floor — the guard reports the boundary it tried to pin.)
+    let err = svc
+        .create_revision(f.doc, f.owner, revision_kind::NAMED, Some("now"), None)
+        .await
+        .expect_err("None boundary on a fully-pruned log must fail closed");
+    assert!(
+        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == 0),
+        "got {err:?}"
+    );
+    // Internal entry point agrees (same guard, no actor needed).
+    let err = svc
+        .create_auto_checkpoint(f.doc, None, None, None)
+        .await
+        .expect_err("auto checkpoint at the floor must fail closed too");
+    assert!(
+        matches!(err, HistoryError::InvalidBoundary { .. }),
+        "got {err:?}"
+    );
+
+    // Once two more ops land, the new high-water is strictly above
+    // the floor — the None default is valid again and pins it.
+    let new_high_water = ingest(&svc.repo, f.owner, f.doc, &ops_at(2, 1200, 0xEE43)).await;
+    assert_eq!(new_high_water, head + 2);
+    let ok = svc
+        .create_revision(f.doc, f.owner, revision_kind::NAMED, Some("after"), None)
+        .await
+        .expect("None pins the (now above-floor) high-water");
+    assert_eq!(ok.target_seq, new_high_water);
+
+    let listed = svc
+        .list_revisions(f.doc, f.owner, 50)
+        .await
+        .expect("listing works");
+    assert_eq!(listed.len(), 1, "only the post-floor revision exists");
+
+    cleanup(&db, &f).await;
+}
+
+/// The auto_checkpoint internal entry point enforces the SAME boundary
+/// window (the guard lives in the shared resolve step, not just the
+/// actor-facing path): above high-water, below floor, at floor, and
+/// the fail-closed None default are all InvalidBoundary; the valid
+/// window still works.
+#[tokio::test]
+async fn auto_checkpoint_rejects_invalid_boundaries() {
+    let Some(db) = test_db().await else { return };
+    let Some(workers) = live_worker_pool() else {
+        return;
+    };
+    let f = fixture(&db).await;
+    purge_jobs(&db).await;
+    let svc = service(&db, &workers);
+    let pipeline =
+        SnapshotPipeline::new(svc.repo.clone(), svc.snapshots.clone(), svc.workers.clone());
+    purge_doc_state(&db, &f).await;
+
+    let head = ingest(&svc.repo, f.owner, f.doc, &ops_at(12, 1300, 0xEE44)).await;
+    let base = head - 12; // global BIGSERIAL: boundaries are relative
+    let b3 = base + 3;
+    let b6 = base + 6;
+
+    // Above the high-water: refused, nothing written.
+    let err = svc
+        .create_auto_checkpoint(f.doc, Some(head + 900), None, None)
+        .await
+        .expect_err("above high-water must be refused");
+    assert!(
+        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == head + 900),
+        "got {err:?}"
+    );
+    // None pins the current high-water: valid while floor is NULL.
+    let ok = svc
+        .create_auto_checkpoint(f.doc, None, None, None)
+        .await
+        .expect("None = high-water is valid pre-compaction");
+    assert_eq!(ok.target_seq, head);
+
+    // Snapshot at b6 + prune to b6: floor b6, ops (b6, head] remain.
+    let job = Uuid::new_v4();
+    let (snap6, _d, _v) = pipeline
+        .build_at_boundary(f.doc, b6, job, 1)
+        .await
+        .expect("build at b6");
+    assert!(svc
+        .snapshots
+        .transition_building_to_verifying(snap6)
+        .await
+        .expect("transition"));
+    let _ = pipeline.verify(f.doc, snap6).await.expect("verify");
+    assert!(pipeline.finalize(snap6, None).await.expect("finalize"));
+    let deleted = prune_to_boundary(&db, &svc.snapshots, f.doc, b6, 100)
+        .await
+        .expect("prune below the auto_checkpoint's basis");
+    assert_eq!(deleted, 6);
+
+    // Some(b3): below the floor b6 — refuse.
+    let err = svc
+        .create_auto_checkpoint(f.doc, Some(b3), None, None)
+        .await
+        .expect_err("below floor must be refused");
+    assert!(
+        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == b3),
+        "got {err:?}"
+    );
+    // Some(b6): at the floor — refuse (window is floor-EXCLUSIVE).
+    let err = svc
+        .create_auto_checkpoint(f.doc, Some(b6), None, None)
+        .await
+        .expect_err("at floor must be refused");
+    assert!(
+        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == b6),
+        "got {err:?}"
+    );
+    // Some(head): current high-water, above the floor — valid.
+    let ok = svc
+        .create_auto_checkpoint(f.doc, Some(head), None, Some(f.owner))
+        .await
+        .expect("boundary above the floor is valid");
+    assert_eq!(ok.target_seq, head);
+    assert_eq!(ok.created_by, Some(f.owner.0));
+    // None: still the high-water (head > floor b6) — valid.
+    let ok = svc
+        .create_auto_checkpoint(f.doc, None, None, None)
+        .await
+        .expect("None = high-water above the floor is valid");
+    assert_eq!(ok.target_seq, head);
+
+    let listed = svc
+        .list_revisions(f.doc, f.owner, 50)
+        .await
+        .expect("listing works");
+    assert_eq!(listed.len(), 3, "only the accepted checkpoints exist");
+
+    cleanup(&db, &f).await;
+}
+
+/// The positive end-to-end SEC5-2 guarantee, creation side: a revision
+/// created at a VALID boundary (above the later prune floor) keeps
+/// reconstructing to the IDENTICAL digest after compaction prunes
+/// below it — the guard is what makes the boundary promise real, and
+/// reconstruction survives the prune.
+#[tokio::test]
+async fn revision_created_above_floor_reconstructs_correctly_after_prune() {
+    let Some(db) = test_db().await else { return };
+    let Some(workers) = live_worker_pool() else {
+        return;
+    };
+    let f = fixture(&db).await;
+    purge_jobs(&db).await;
+    let svc = service(&db, &workers);
+    let pipeline =
+        SnapshotPipeline::new(svc.repo.clone(), svc.snapshots.clone(), svc.workers.clone());
+    purge_doc_state(&db, &f).await;
+
+    // Ops 1..12 (relative); a snapshot at b6 (the future floor) is
+    // required before any prune — build it up front so the prune below
+    // is eligible.
+    let head = ingest(&svc.repo, f.owner, f.doc, &ops_at(12, 1400, 0xEE45)).await;
+    let base = head - 12;
+    let b6 = base + 6;
+    let job_snap = Uuid::new_v4();
+    let (snap6, _d, _v) = pipeline
+        .build_at_boundary(f.doc, b6, job_snap, 1)
+        .await
+        .expect("build at b6");
+    assert!(svc
+        .snapshots
+        .transition_building_to_verifying(snap6)
+        .await
+        .expect("transition"));
+    let _ = pipeline.verify(f.doc, snap6).await.expect("verify");
+    assert!(pipeline.finalize(snap6, None).await.expect("finalize"));
+
+    // Revision at the head (valid: floor NULL yet, == high-water).
+    // Its basis (ops (b6, head] via the snapshot-b6 anchor) must
+    // survive a prune to b6.
+    let rev = svc
+        .create_revision(
+            f.doc,
+            f.owner,
+            revision_kind::NAMED,
+            Some("survivor"),
+            Some(head),
+        )
+        .await
+        .expect("revision at the head boundary");
+    assert_eq!(rev.target_seq, head);
+
+    // Digest BEFORE the prune (ops still present, empty-start replay).
+    let pre = svc
+        .revision_content(f.doc, f.owner, rev.revision_id)
+        .await
+        .expect("pre-prune reconstruction");
+    assert!(pre.state_digest.starts_with("sha256:"));
+
+    // Prune to b6: allowed (b6 <= the revision's min target head —
+    // the SEC5-2 base fix permits it precisely because the revision's
+    // basis (b6, head] stays intact above the floor).
+    let deleted = prune_to_boundary(&db, &svc.snapshots, f.doc, b6, 100)
+        .await
+        .expect("prune to b6 is allowed below the revision boundary");
+    assert_eq!(deleted, 6);
+
+    // SEC5-2 end-to-end guarantee: the SAME digest after the prune —
+    // the revision's reconstruction is anchored on snapshot b6 + the
+    // surviving ops (b6, head]; pruning below never altered history.
+    let post = svc
+        .revision_content(f.doc, f.owner, rev.revision_id)
+        .await
+        .expect("post-prune reconstruction must still work");
+    assert_eq!(
+        pre.state_digest, post.state_digest,
+        "digest before and after pruning must be IDENTICAL (SEC5-2 creation-side guarantee)"
+    );
+    assert_eq!(post.covered_by_snapshot, Some(snap6));
+
+    // And the log truly lost the pruned prefix (the snapshot carried
+    // it, not the log).
+    let remaining = svc.repo.catchup_page(f.doc, 0, 100).await.expect("page");
+    assert_eq!(remaining.ops.len(), 6, "only the ops above b6 remain");
+
+    // The guard also holds for FUTURE creations at the now-pruned
+    // boundaries (floor b6): Some(b6) is refused; Some(head) and None
+    // stay valid (head > floor b6).
+    let err = svc
+        .create_revision(f.doc, f.owner, revision_kind::NAMED, Some("gone"), Some(b6))
+        .await
+        .expect_err("boundary at the new floor must be refused");
+    assert!(
+        matches!(err, HistoryError::InvalidBoundary { .. }),
+        "got {err:?}"
+    );
 
     cleanup(&db, &f).await;
 }

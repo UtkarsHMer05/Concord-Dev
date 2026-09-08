@@ -221,6 +221,9 @@ sync_batch:  [0x01] [0x21] [next_cursor u64] [has_more u8] [count u16] { [op_len
 | `sync_done` | s→c | `{ }` (marks the end of catch-up; only then READY) |
 | `client_ops` | c→s | binary data frame (§9.3) |
 | `durable_ack` | s→c | `{ batchId: string, opIds: [string] }` → **ACK_DURABLE** |
+| `snapshot_resync_required` | s→c | `{ boundary, snapshotId, snapshotChecksum, snapshotFormatVersion, coverageOpCount }` (u64s as decimal strings; sent instead of delta pages when the client's cursor precedes the document's compaction floor) |
+| `fetch_snapshot` | c→s | `{ snapshotId: uuid }` (rate-limited: `fetch` scope, 30/min/connection) |
+| `snapshot_payload` | s→c | `{ snapshotId, formatVersion, coverageSeq, coveredOpCount, stateDigest, checksum, payloadBase64, payloadSize }` — base64 wrapper bytes + declared size (the client's size/checksum defenses are live on this transport) |
 | `ping` | c→s | `{ nonce: u64 }` |
 | `pong` | s→c | `{ nonce: u64 }` |
 | `error` | both | `{ code, message, requestId? }` (§9.8) |
@@ -272,11 +275,25 @@ A client that lost its cursor re-syncs from `0` (bounded batches). Server
 order is a **storage/fetch order surrogate only**; it never defines CRDT
 conflict resolution (the C++/WASM core does, by identities).
 
+**Snapshot resync (Phase 5).** When a `sync_request` cursor precedes the
+document's compaction floor, delta catch-up is impossible (the covered ops
+are pruned). The server answers with `snapshot_resync_required` instead of
+pages: the floor boundary + the covering FINALIZED snapshot's metadata
+(validated + access-checked before the signal). The client then sends
+`fetch_snapshot` and receives `snapshot_payload`, re-validates integrity
+independently (checksum over the wrapper bytes, declared size, document
+identity, coverage agreement with the announced signal), imports the
+snapshot atomically, re-applies its own unacked ops under their original
+identities, sets its cursor to the boundary, and resumes delta catch-up
+from there. A client never loses its own unacked work to a resync.
+
 ### 9.8 Error codes
 
 `unauthorized`, `forbidden`, `unsupported_protocol_version`,
 `unknown_frame_type`, `invalid_state`, `malformed_frame`,
-`payload_too_large`, `rate_limited` (placeholder, not yet enforced),
+`payload_too_large`, `rate_limited` (enforced: snapshot read paths —
+`fetch_snapshot` and the `sync_request` resync decision share the
+`fetch` scope, 30/min/connection; `connect` is enforced at upgrade),
 `database_unavailable`, `server_draining`, `internal_error`.
 
 Error frames carry a safe `message` and never expose SQL details, stack

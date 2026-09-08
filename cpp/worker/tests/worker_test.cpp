@@ -1737,8 +1737,243 @@ CONCORD_TEST(restore_diff_empty_document_edges) {
     CHECK(folded.visible_document().front().chars.empty());
 }
 
+// ---------------------------------------------------------------------------
+// Test group 8 (m036 convergence fix): a restore pipeline can feed a previous
+// diff's batch back into the durable history (A was rebuilt as ops_A +
+// diff_old, then concurrent ops arrived). The emitted batch's identities must
+// never collide with an already-applied REST-band id — the core dedups ops by
+// identity (apply_remote is a no-op for an applied id), so a colliding delete
+// would silently skip its tombstone and the fold check would fail with
+// status 3. Regression: the triple-wave protocol-level sequence (op bytes
+// mirroring rust/sync-gateway/src/protocol/golden.rs shapes).
+// ---------------------------------------------------------------------------
+namespace {
+
+// Golden op byte shapes (fixtures/protocol/v1/golden.json, golden.rs): builders
+// cycle [insert, delimiter, delete]. Each op REWRITES only bytes [2..10)
+// (writer replica) and [10..18) (writer counter) of the golden builder output
+// — origins/targets keep their golden anchor bytes except the delete's target,
+// which is rewritten in place (bytes [18..26)/[26..34)).
+std::string golden_insert_op() {
+    // 0101 d4..11 09 | 00 00 01 01 68 00
+    return std::string("\x01\x01", 2) + std::string("\xd4\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x11\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x09\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x00\x00\x01\x01\x68\x00", 6);
+}
+std::string golden_delimiter_op() {
+    // 0101 d4..12 0a | 01 d4..11 00 02 01 04 "type" 01 09 "paragraph"
+    return std::string("\x01\x01", 2) + std::string("\xd4\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x12\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x0a\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x01", 1) +
+           std::string("\xd4\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x11\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x00\x02\x01", 3) +
+           std::string("\x04\x00\x00\x00\x00\x00\x00\x00", 8) + "type" +
+           std::string("\x01", 1) +
+           std::string("\x09\x00\x00\x00\x00\x00\x00\x00", 8) + "paragraph";
+}
+std::string golden_delete_op() {
+    // 0102 e2..05 0b | d4..11
+    return std::string("\x01\x02", 2) + std::string("\xe2\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x05\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x0b\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\xd4\x00\x00\x00\x00\x00\x00\x00", 8) +
+           std::string("\x11\x00\x00\x00\x00\x00\x00\x00", 8);
+}
+
+void rewrite_u64(std::string& op, std::size_t offset, std::uint64_t value) {
+    for (int i = 0; i < 8; ++i) {
+        op[offset + static_cast<std::size_t>(i)] =
+            static_cast<char>((value >> (8 * i)) & 0xffu);
+    }
+}
+// Rewrites the WRITER identity (bytes [2..10) replica, [10..18) counter).
+std::string rewrite_writer(std::string op, std::uint64_t replica, std::uint64_t counter) {
+    rewrite_u64(op, 2, replica);
+    rewrite_u64(op, 10, counter);
+    return op;
+}
+// Rewrites a delete op's TARGET (bytes [18..26) replica, [26..34) counter).
+std::string rewrite_delete_target(std::string op, std::uint64_t replica, std::uint64_t counter) {
+    rewrite_u64(op, 18, replica);
+    rewrite_u64(op, 26, counter);
+    return op;
+}
+
+// One six-op wave of identities (replica, base..base+5) cycling builders
+// [insert, delimiter, delete]: the delete targets the wave's own first insert
+// (replica, base) — the golden delete's target bytes rewritten in place.
+std::vector<std::string> golden_wave_ops(std::uint64_t replica, std::uint64_t base) {
+    std::vector<std::string> ops;
+    for (std::uint64_t step = 0; step < 6; ++step) {
+        const std::uint64_t counter = base + step;
+        switch (step % 3) {
+            case 0:
+                ops.push_back(rewrite_writer(golden_insert_op(), replica, counter));
+                break;
+            case 1:
+                ops.push_back(rewrite_writer(golden_delimiter_op(), replica, counter));
+                break;
+            default:
+                ops.push_back(rewrite_delete_target(
+                    rewrite_writer(golden_delete_op(), replica, counter), replica, base));
+                break;
+        }
+    }
+    return ops;
+}
+
+// The concurrent four-op wave (replica 0xC003, counters 90..93): insert,
+// delimiter, delete (targets 90), insert.
+std::vector<std::string> golden_concurrent_ops() {
+    std::vector<std::string> ops;
+    ops.push_back(rewrite_writer(golden_insert_op(), 0xC003, 90));
+    ops.push_back(rewrite_writer(golden_delimiter_op(), 0xC003, 91));
+    ops.push_back(rewrite_delete_target(rewrite_writer(golden_delete_op(), 0xC003, 92),
+                                         0xC003, 90));
+    ops.push_back(rewrite_writer(golden_insert_op(), 0xC003, 93));
+    return ops;
+}
+
+// Decodes a serialize_batch frame of raw op byte strings (the CMD 7 payload).
+std::vector<std::string> decode_raw_batch(const std::string& batch) {
+    std::vector<std::string> out;
+    Reader r{batch};
+    const std::uint32_t count = r.u32();
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const std::uint32_t len = r.u32();
+        out.push_back(r.bytes.substr(r.offset, len));
+        r.offset += len;
+    }
+    CHECK(r.done());
+    return out;
+}
+
+// Builds a one-op serialize_batch frame from raw op bytes without needing the
+// Operation type: [u32 1][u32 len][raw]. Hand-rolled to keep raw byte fidelity
+// (parse_batch below re-validates through the core).
+std::string serialize_batch_frame_of_raw(const std::string& raw) {
+    Bytes b;
+    b.u32(1);
+    b.u32(static_cast<std::uint32_t>(raw.size()));
+    b.raw(raw);
+    return b.data;
+}
+
+// Decodes one raw op byte string through the core's strict parser (structure
+// validation for free — these are hand-encoded protocol bytes).
+Operation parse_single_raw(const std::string& raw) {
+    const std::vector<Operation> ops = parse_batch(serialize_batch_frame_of_raw(raw));
+    CHECK_EQ(ops.size(), 1u);
+    return ops.front();
+}
+
+// Wraps raw op bytes as single-op serialize_batch frames (the durable-log row
+// shape) — the CMD 1/CMD 4 request batch entries.
+std::vector<std::string> raw_op_batches(const std::vector<std::string>& raw_ops) {
+    std::vector<std::string> out;
+    out.reserve(raw_ops.size());
+    for (const std::string& raw : raw_ops) {
+        out.push_back(serialize_batch_frame_of_raw(raw));
+    }
+    return out;
+}
+
+// Concatenates raw-op waves into one raw list.
+std::vector<std::string> concat_raw(const std::vector<std::string>& a,
+                                     const std::vector<std::string>& b) {
+    std::vector<std::string> out = a;
+    out.insert(out.end(), b.begin(), b.end());
+    return out;
+}
+
+// The triple-wave scenario, parameterized by the interleaving of the first
+// restore batch against the concurrent wave. B = snap(fold wave1);
+// A1 = snap(fold w1 + w2); diff(A1,B) → status 0 with a delete batch (ops1);
+// A2 = snap(fold w1 + w2 + ops1 [+ ordering] + concurrent); diff(A2,B) MUST
+// ALSO be status 0 — the m036 regression (before the fix: status 3, "restore
+// batch does not converge to target content", because the new batch's REST
+// identities collided with ops1's already-applied ids and the core deduped
+// the deletes away).
+void run_restore_history_collision_case(bool concurrent_first) {
+    const std::vector<std::string> wave1 = golden_wave_ops(0xC001, 50);
+    const std::vector<std::string> wave2 = golden_wave_ops(0xC002, 70);
+    const std::vector<std::string> concurrent = golden_concurrent_ops();
+
+    // B = snap(fold wave1) — the restore boundary.
+    const auto [digest_b, snap_b] = reconstruct_state(raw_op_batches(wave1));
+    // A1 = snap(fold wave1 + wave2).
+    const auto [digest_a1, snap_a1] = reconstruct_state(raw_op_batches(concat_raw(wave1, wave2)));
+    CHECK(digest_a1 != digest_b);
+
+    // First diff: deletes wave2's live items; status 0 (pre-existing behavior).
+    const DiffResponse diff1 = run_restore_diff(snap_a1, snap_b);
+    CHECK_EQ(diff1.target_digest, digest_b);
+    bool saw_delete = false;
+    for (const Operation& op : diff1.ops) {
+        CHECK(op.type == OpType::Delete);
+        saw_delete = true;
+    }
+    CHECK(saw_delete);
+    const std::vector<std::string> ops1 = decode_raw_batch(diff1.batch);
+
+    // A2: the restore pipeline's durable history already contains ops1, plus a
+    // concurrent wave that arrived after the restore.
+    const std::vector<std::string> a2_ops = concurrent_first
+        ? concat_raw(concat_raw(concat_raw(wave1, wave2), concurrent), ops1)
+        : concat_raw(concat_raw(concat_raw(wave1, wave2), ops1), concurrent);
+    const auto [digest_a2, snap_a2] = reconstruct_state(raw_op_batches(a2_ops));
+    CHECK(digest_a2 != digest_b);
+
+    // THE REGRESSION: the second diff must converge (status 0), and the batch
+    // must fold A2 to B's visible content.
+    const DiffResponse diff2 = run_restore_diff(snap_a2, snap_b);
+    CHECK_EQ(diff2.target_digest, digest_b);
+    bool saw_delete2 = false;
+    for (const Operation& op : diff2.ops) {
+        CHECK(op.type == OpType::Delete);
+        CHECK_EQ(op.id.replica.value(), kRestoreReplicaValue);
+        // The fix: every emitted id sits strictly ABOVE the REST ids already
+        // applied in A2's history (ops1's counters) — no dedup collisions.
+        CHECK(op.id.counter.value() > ops1.size());
+        saw_delete2 = true;
+    }
+    CHECK(saw_delete2);
+
+    // Externally re-prove convergence: fold A2's ops + diff2 through CMD 1 and
+    // compare visible content to B's (the restore contract).
+    const auto [digest_rt, snap_rt] =
+        reconstruct_state(raw_op_batches(concat_raw(a2_ops, decode_raw_batch(diff2.batch))));
+    (void)digest_rt;
+    check_visible_equal(snap_rt, snap_b, "restore history collision");
+
+    // Applying the batch twice is still a harmless duplicate (fold stability):
+    // the same digest as once (dedup no-op on the second pass).
+    const std::string once = digest_after_fold(snap_a2, diff2.batch);
+    const WorkerRun dup = run_worker(digest_after_request(snap_a2, {diff2.batch, diff2.batch}));
+    Reader dr{dup.stdout_bytes};
+    CHECK_EQ(dr.u32(), kStatusOk);
+    const std::string digest_dup = dr.blob();
+    CHECK(dr.done());
+    CHECK_EQ(digest_dup, once);
+}
+
+// Case 1: ops1 BEFORE the concurrent wave (the task's primary sequence).
+CONCORD_TEST(restore_diff_history_collision_concurrent_after) {
+    run_restore_history_collision_case(false);
+}
+
+// Case 2: the concurrent wave BEFORE the first restore batch (reverse
+// interleaving — same contract, different pending-drain order).
+CONCORD_TEST(restore_diff_history_collision_concurrent_before) {
+    run_restore_history_collision_case(true);
+}
+
+}  // namespace
+
 int main() {
     return ::concord::testing::run_all();
 }
-
 

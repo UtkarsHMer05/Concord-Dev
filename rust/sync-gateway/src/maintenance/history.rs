@@ -121,6 +121,26 @@ pub enum HistoryError {
     /// not visible to this caller).
     #[error("revision not found")]
     RevisionNotFound,
+    /// A revision boundary outside the reconstructable window
+    /// `(compaction_floor_seq, durable high-water]` (P5-M045,
+    /// SEC5-2 creation-side closure). Two failure shapes, both
+    /// rejected BEFORE any row is written:
+    ///   * `boundary > high_water` — the boundary is a fiction: the log
+    ///     does not reach it, so reconstruction would silently replay
+    ///     fewer ops than the boundary claims;
+    ///   * `boundary <= compaction_floor_seq` (floor set) — the ops
+    ///     `(0, boundary]` are already pruned, and the floor's
+    ///     covering snapshot anchors a HIGHER boundary, so
+    ///     reconstruction would fall to a wrong anchor/empty-start and
+    ///     silently produce a WRONG digest (the same silent-degradation
+    ///     bug as SEC5-2, entered from the creation side).
+    ///
+    /// `None` boundaries (current high-water) fail closed too — only
+    /// reachable when the log is empty AND floor > 0 (a document whose
+    /// entire log was pruned with no surviving ops), which still must
+    /// not mint a revision whose basis is gone.
+    #[error("revision boundary invalid: {boundary}")]
+    InvalidBoundary { boundary: i64 },
     /// The restore target's operations are no longer in the durable
     /// log (compaction floor at/above the target boundary) and no
     /// covering snapshot anchors it. Retention (M038) must protect
@@ -329,6 +349,73 @@ impl RevisionService {
         })
     }
 
+    /// Resolves and validates a revision boundary in ONE DB
+    /// round-trip (P5-M045, SEC5-2 creation-side closure), returning
+    /// the enforced boundary.
+    ///
+    /// Semantics: the window `(floor, high_water]`.
+    ///   * `floor` = `documents.compaction_floor_seq` (NULL when the
+    ///     document was never compacted — no lower bound; ops at/below
+    ///     the floor are pruned AND the floor snapshot anchors a
+    ///     HIGHER coverage, so a boundary T ≤ floor has neither its ops
+    ///     nor a usable anchor ⇒ refuse when `T <= floor`);
+    ///   * `high_water` = `MAX(crdt_operations.id)` for the document
+    ///     (0 when the log is empty ⇒ every boundary > 0 is refused
+    ///     and boundary 0 is allowed only while floor is NULL/0).
+    ///
+    /// When `candidate` is None the boundary defaults to the CURRENT
+    /// high-water read by THIS query (not a separate durable_cursor
+    /// call — one round-trip, and the value is the one the guard
+    /// actually validated, so it can never disagree with itself).
+    /// A None-derived boundary failing validation (empty log AND
+    /// floor > 0) is refused fail-closed: no revision may exist at a
+    /// boundary whose entire basis is pruned with no later ops.
+    ///
+    /// Race safety against a concurrent prune: the documents row is
+    /// taken FOR SHARE (reader side of the compaction lock
+    /// discipline — `prune_to_boundary` takes the same row FOR UPDATE
+    /// inside each batch transaction, see compaction.rs
+    /// `recheck_in_batch_tx`). Interleaving: either the creator's
+    /// FOR SHARE lands first — the prune batch blocks until the
+    /// revision row is committed, after which the prune's in-tx
+    /// revision predicate sees it and refuses below — or the prune
+    /// batch holds the row FOR UPDATE first — the creator's FOR SHARE
+    /// blocks until the prune commits, and then reads the NEW floor +
+    /// NEW high-water and validates against post-prune reality. No
+    /// interleaving can insert a revision the guard did not vet.
+    ///
+    /// Static SQL, parameterized values (module convention). The
+    /// row is missing only when the document does not exist — the
+    /// same not-found the insert would produce; Forbidden-shaped
+    /// callers have already authorized the document, so this is an
+    /// internal-consistency error surfaced as Pg.
+    async fn resolve_boundary(
+        &self,
+        document: Uuid,
+        candidate: Option<i64>,
+    ) -> Result<i64, HistoryError> {
+        let client = self.repo.db.get().await?;
+        let row = client
+            .query_one(
+                "SELECT d.id,
+                        COALESCE((SELECT MAX(o.id) FROM crdt_operations o
+                                  WHERE o.document_id = d.id), 0) AS high_water,
+                        d.compaction_floor_seq
+                 FROM documents d
+                 WHERE d.id = $1
+                 FOR SHARE",
+                &[&document],
+            )
+            .await?;
+        let high_water: i64 = row.get("high_water");
+        let floor: Option<i64> = row.get("compaction_floor_seq");
+        let boundary = candidate.unwrap_or(high_water);
+        if boundary > high_water || floor.is_some_and(|f| boundary <= f) {
+            return Err(HistoryError::InvalidBoundary { boundary });
+        }
+        Ok(boundary)
+    }
+
     /// Creates a revision row (M034). Authorization:
     ///   - `named`: EDITOR+ (H4) — actor is recorded as the creator;
     ///   - `auto_checkpoint` / `restore_event`: internal-only kinds.
@@ -337,12 +424,22 @@ impl RevisionService {
     ///     ([`Self::create_auto_checkpoint`] and the restore path),
     ///     never an actor-facing `create_revision`.
     ///
-    /// `target_seq = None` pins the CURRENT durable high-water; a
-    /// `Some` boundary must be within the durable log (`0 <= seq <=
-    /// high-water`). Named revisions enqueue a `snapshot_build` job at
-    /// the boundary as a fire-and-forget HINT (HISTORY.md §2:
-    /// "triggers (does not block on) a snapshot build") — coalesced by
-    /// `enqueue_unique`.
+    /// Boundary contract (ENFORCED, P5-M045): `target_seq = None`
+    /// pins the current durable high-water; a `Some` boundary must lie
+    /// in the reconstructable window `(compaction_floor_seq,
+    /// high-water]` — within the durable log AND strictly above the
+    /// compaction floor. Anything else is
+    /// [`HistoryError::InvalidBoundary`] BEFORE any row is written:
+    /// a boundary above the high-water is a fiction reconstruction
+    /// would silently under-replay, and a boundary at/below the floor
+    /// has its ops pruned (wrong-digest silent degradation — the
+    /// SEC5-2 creation-side hole). The validation and the None
+    /// default come from one FOR-SHARE-guarded round-trip
+    /// (see [`Self::resolve_boundary`]).
+    ///
+    /// Named revisions enqueue a `snapshot_build` job at the boundary
+    /// as a fire-and-forget HINT (HISTORY.md §2: "triggers (does not
+    /// block on) a snapshot build") — coalesced by `enqueue_unique`.
     pub async fn create_revision(
         &self,
         document: Uuid,
@@ -357,10 +454,9 @@ impl RevisionService {
             let label = label
                 .filter(|l| !l.trim().is_empty())
                 .ok_or(HistoryError::LabelRequired)?;
-            let boundary = match target_seq {
-                Some(seq) => seq,
-                None => self.repo.durable_cursor(document).await?,
-            };
+            // Boundary guard AFTER authz, before the insert (the
+            // authorization order is unchanged and non-negotiable).
+            let boundary = self.resolve_boundary(document, target_seq).await?;
             let info = self
                 .insert_revision(NewRevision {
                     document,
@@ -406,6 +502,14 @@ impl RevisionService {
     /// no actor check — the caller must be trusted gateway code
     /// (scheduler policy, ingest hook). Records `created_by` only when
     /// a triggering actor is known.
+    ///
+    /// Same enforced boundary contract as
+    /// [`Self::create_revision`] (P5-M045): `target_seq = None` pins
+    /// the current durable high-water; any resolved boundary must lie
+    /// in `(compaction_floor_seq, high-water]` or the call fails with
+    /// [`HistoryError::InvalidBoundary`] before any row is written —
+    /// the checkpoint hint must never mint a revision whose basis is
+    /// pruned or whose boundary exceeds the log.
     pub async fn create_auto_checkpoint(
         &self,
         document: Uuid,
@@ -413,10 +517,7 @@ impl RevisionService {
         label: Option<&str>,
         triggered_by: Option<UserId>,
     ) -> Result<RevisionInfo, HistoryError> {
-        let boundary = match target_seq {
-            Some(seq) => seq,
-            None => self.repo.durable_cursor(document).await?,
-        };
+        let boundary = self.resolve_boundary(document, target_seq).await?;
         self.insert_revision(NewRevision {
             document,
             kind: revision_kind::AUTO_CHECKPOINT,

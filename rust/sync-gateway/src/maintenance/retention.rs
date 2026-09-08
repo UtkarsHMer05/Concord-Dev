@@ -12,6 +12,17 @@
 //! pruning, not payload deletion — payload GC ships deliberately
 //! conservative).
 //!
+//! Race closure (P5-M045, SEC5-2 class): the candidate scan above each
+//! mark/delete loop runs on its own connection, so a concurrent prune
+//! could pin (or already be deleting toward) a snapshot mid-retention.
+//! EVERY per-id mark/delete therefore runs inside a transaction that
+//! FIRST takes the owning documents row FOR UPDATE — the same lock
+//! order prune uses — which serializes retention against any prune in
+//! flight, THEN row-locks the snapshot and re-checks the full
+//! protection set (status, newest, revision references, floor
+//! reference, and the coverage-below-floor belt-and-braces rule)
+//! before mutating.
+//!
 //! Accounting (M039): one lightweight query pass over the Phase 5
 //! tables for ops/bytes/floors/ages/counts — exposed for /metrics and
 //! the maintenance scheduler; no monitoring-stack work (Phase 6).
@@ -33,41 +44,69 @@ pub enum RetentionError {
     Protected(Uuid),
 }
 
-/// True when the snapshot id is referenced by any revision row or by
-/// the document's compaction floor (P5-M038 protection set).
-async fn is_protected(
-    client: &tokio_postgres::Client,
+/// Per-id in-transaction re-check for the mark/purge loops (P5-M045
+/// race closure). Must run INSIDE a transaction that already holds the
+/// owning documents row FOR UPDATE (see callers) so no prune can
+/// concurrently advance the floor underneath us.
+///
+/// The single SELECT row-locks the candidate snapshot (FOR UPDATE — a
+/// concurrent retention pass cannot double-mark/double-delete it) and
+/// refuses the id when ANY of these hold:
+/// - the snapshot is not in the expected pre-state (`expected_status`)
+///   any more (a concurrent pass or a status transition raced us);
+/// - it IS the newest finalized for the document (protection set);
+/// - some revision references it (protection set, statement-time);
+/// - the document's compaction floor points at it (protection set);
+/// - its coverage_seq is BELOW the document's compaction floor
+///   (COALESCE(floor, -1) makes the no-floor case never refuse): a
+///   snapshot whose coverage ended strictly before the floor could be
+///   needed by the resync path's covered prefix. A snapshot AT the
+///   floor's coverage (== the floor row itself or a same-coverage
+///   sibling) is already excluded by the exact floor-reference check
+///   above, so this clause only bites strictly-older rows —
+///   belt-and-braces against a prune racing this retention pass.
+async fn still_unprotected(
+    tx: &tokio_postgres::Transaction<'_>,
+    document: Uuid,
     snapshot_id: Uuid,
+    expected_status: &str,
 ) -> Result<bool, RetentionError> {
-    let referenced_by_revision = client
+    let row = tx
         .query_opt(
-            "SELECT 1 FROM crdt_revisions WHERE snapshot_id = $1 LIMIT 1",
-            &[&snapshot_id],
+            "SELECT 1 FROM crdt_snapshots s
+             WHERE s.snapshot_id = $1
+               AND s.document_id = $2
+               AND s.status = $3
+               AND s.snapshot_id <> (
+                   SELECT snapshot_id FROM crdt_snapshots
+                   WHERE document_id = $2 AND status = 'finalized'
+                   ORDER BY coverage_seq DESC, attempt DESC
+                   LIMIT 1)
+               AND NOT EXISTS (SELECT 1 FROM crdt_revisions r
+                               WHERE r.snapshot_id = s.snapshot_id)
+               AND NOT EXISTS (SELECT 1 FROM documents d
+                               WHERE d.id = s.document_id
+                                 AND d.compaction_floor_snapshot_id = s.snapshot_id)
+               AND s.coverage_seq > (
+                   SELECT COALESCE(d2.compaction_floor_seq, -1)
+                   FROM documents d2 WHERE d2.id = $2)
+             FOR UPDATE OF s",
+            &[&snapshot_id, &document, &expected_status],
         )
-        .await?
-        .is_some();
-    if referenced_by_revision {
-        return Ok(true);
-    }
-    let floor_ref = client
-        .query_opt(
-            "SELECT 1 FROM documents WHERE compaction_floor_snapshot_id = $1",
-            &[&snapshot_id],
-        )
-        .await?
-        .is_some();
-    Ok(floor_ref)
+        .await?;
+    Ok(row.is_some())
 }
 
 /// Marks unreferenced non-newest FINALIZED snapshots as superseded
 /// (metadata-only; payloads retained). Returns the ids marked.
 /// Never touches: the newest FINALIZED per document, any snapshot
-/// referenced by a revision, the floor snapshot, or non-finalized rows.
+/// referenced by a revision, the floor snapshot, anything at/below
+/// the current compaction floor, or non-finalized rows.
 pub async fn mark_superseded_unreferenced(
     db: &Db,
     document: Uuid,
 ) -> Result<Vec<Uuid>, RetentionError> {
-    let client = db.get().await?;
+    let mut client = db.get().await?;
     // Candidates: finalized, NOT the newest finalized (per document),
     // not referenced by any revision, not the floor snapshot.
     let rows = client
@@ -93,19 +132,34 @@ pub async fn mark_superseded_unreferenced(
     let mut marked = Vec::with_capacity(rows.len());
     for row in rows {
         let id: Uuid = row.get("snapshot_id");
-        // Belt and braces: the query excludes protected rows, but the
-        // protection set can race (a revision created between query
-        // and mark) — re-check per id.
-        if is_protected(&client, id).await? {
+        // Race closure (SEC5-2 class): the candidate scan above read
+        // WITHOUT locks, so a concurrent prune may have pinned this
+        // snapshot as its floor target between scan and mark. Run the
+        // mark inside a transaction that first locks the documents row
+        // FOR UPDATE — prune takes the same lock before each batch's
+        // DELETE, so this serializes against any prune in flight —
+        // then re-checks the full protection set on the row-locked
+        // snapshot before flipping its status.
+        let tx = client.transaction().await?;
+        tx.query_opt(
+            "SELECT id FROM documents WHERE id = $1 FOR UPDATE",
+            &[&document],
+        )
+        .await?;
+        if !still_unprotected(&tx, document, id, "finalized").await? {
+            // Protected (or already flipped) between scan and lock —
+            // skip, never destroy.
+            tx.rollback().await?;
             continue;
         }
-        let n = client
+        let n = tx
             .execute(
                 "UPDATE crdt_snapshots SET status = 'superseded'
                  WHERE snapshot_id = $1 AND status = 'finalized'",
                 &[&id],
             )
             .await?;
+        tx.commit().await?;
         if n > 0 {
             marked.push(id);
         }
@@ -119,7 +173,7 @@ pub async fn mark_superseded_unreferenced(
 /// in the codebase and is never called by automatic maintenance in
 /// Phase 5 (guard documented at the call sites).
 pub async fn purge_unreferenced(db: &Db, document: Uuid) -> Result<(usize, i64), RetentionError> {
-    let client = db.get().await?;
+    let mut client = db.get().await?;
     // Superseded + no revision reference + not floor snapshot.
     let rows = client
         .query(
@@ -140,16 +194,30 @@ pub async fn purge_unreferenced(db: &Db, document: Uuid) -> Result<(usize, i64),
     for row in rows {
         let id: Uuid = row.get("snapshot_id");
         let bytes: i64 = i64::from(row.get::<_, i32>("bytes"));
-        if is_protected(&client, id).await? {
+        // Race closure: same shape as the mark loop — lock the
+        // documents row (serializing against prune's per-batch lock),
+        // re-check protection on the row-locked snapshot, and only
+        // then DELETE. Any refusal aborts the whole call: a purge that
+        // partially destroyed payloads while skipping a protected id
+        // would be surprising to reason about, and the per-document
+        // scope keeps the blast radius one retry.
+        let tx = client.transaction().await?;
+        tx.query_opt(
+            "SELECT id FROM documents WHERE id = $1 FOR UPDATE",
+            &[&document],
+        )
+        .await?;
+        if !still_unprotected(&tx, document, id, "superseded").await? {
             return Err(RetentionError::Protected(id));
         }
-        let n = client
+        let n = tx
             .execute(
                 "DELETE FROM crdt_snapshots
                  WHERE snapshot_id = $1 AND status = 'superseded'",
                 &[&id],
             )
             .await?;
+        tx.commit().await?;
         if n > 0 {
             deleted += 1;
             reclaimed += bytes;
