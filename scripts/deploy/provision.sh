@@ -152,12 +152,15 @@ if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
         {\"Sid\": \"SsmReadEnv\", \"Effect\": \"Allow\",
          \"Action\": [\"ssm:GetParameter\", \"ssm:GetParameters\"],
          \"Resource\": \"arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/concord/*\"},
+        {\"Sid\": \"SsmRegister\", \"Effect\": \"Allow\",
+         \"Action\": [\"ssm:UpdateInstanceInformation\"],
+         \"Resource\": \"*\"},
         {\"Sid\": \"SsmSessionManager\", \"Effect\": \"Allow\",
          \"Action\": [\"ssmmessages:CreateControlChannel\", \"ssmmessages:CreateDataChannel\",
                      \"ssmmessages:OpenControlChannel\", \"ssmmessages:OpenDataChannel\"],
          \"Resource\": \"*\"}
       ]}" >/dev/null
-  echo "  created IAM role ${ROLE_NAME} (ECR pull + S3/SSM read + Session Manager)"
+  echo "  created IAM role ${ROLE_NAME} (ECR pull + S3/SSM read + SSM registration + Session Manager)"
 else
   echo "  reuse IAM role ${ROLE_NAME}"
 fi
@@ -171,10 +174,15 @@ else
   echo "  reuse instance profile ${PROFILE_NAME}"
 fi
 
-# 3. Latest AL2023 ARM64 AMI.
-AMI=$(aws ssm get-parameter --region "$REGION" \
-  --name "/aws/service/ami-amazon-linux-2023/latest/arm64-minimal-kernel-default" \
-  --query Parameter.Value --output text)
+# 3. Latest AL2023 ARM64 AMI. NOTE: this account's credentials are
+# DENIED the /aws/ SSM namespace ("No access to /aws/ namespace" —
+# observed 2026-09-09), so the public-parameter AMI lookup is
+# unavailable; the ec2 DescribeImages fallback resolves the same
+# AL2023 minimal ARM64 image directly (owner amazon, newest
+# al2023-ami-*-kernel-*-arm64).
+AMI=$(aws ec2 describe-images --region "$REGION" --owners amazon \
+  --filters "Name=name,Values=al2023-ami-2023.*-kernel-*-arm64" "Name=state,Values=available" \
+  --query 'sort_by(Images,&CreationDate)[-1].ImageId' --output text)
 echo "  AMI: ${AMI}"
 
 VPC_ID=$(aws ec2 describe-vpcs --region "$REGION" \

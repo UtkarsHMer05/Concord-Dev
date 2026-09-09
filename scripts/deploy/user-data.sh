@@ -94,11 +94,13 @@ echo "drizzle family applied (registry: drizzle.__drizzle_migrations)"
 docker compose -f docker-compose.cloud.yml -p "concord-${ENV}" up -d
 
 # --- Nightly backup cron (docs/OPERATIONS.md § Scheduled backups) ---
-mkdir -p /var/backups/concord
-cat > /etc/cron.d/concord-backup <<CRON
-# Concord nightly PostgreSQL dump (03:15, gzip, keep 14) — OPERATIONS.md.
-15 3 * * * root docker exec concord-${ENV}-db pg_dump -U concord -d concord | gzip > /var/backups/concord/concord-\$(date +\%Y\%m\%d).sql.gz && find /var/backups/concord -name 'concord-*.sql.gz' -mtime +14 -delete
-CRON
+# The minimal AL2023 image has NO /etc/cron.d — create it (and the
+# backup dir) before writing the cron file.
+mkdir -p /etc/cron.d /var/backups/concord
+printf '%s\n' \
+  '# Concord nightly PostgreSQL dump (03:15, gzip, keep 14) — OPERATIONS.md.' \
+  '15 3 * * * root docker exec concord-'"${ENV}"'-db pg_dump -U concord -d concord | gzip > /var/backups/concord/concord-$(date +\%Y\%m\%d).sql.gz && find /var/backups/concord -name "concord-*.sql.gz" -mtime +14 -delete' \
+  > /etc/cron.d/concord-backup
 chmod 644 /etc/cron.d/concord-backup
 
 echo "== bootstrap complete =="

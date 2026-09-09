@@ -122,10 +122,21 @@ docker tag concord-gateway:"${COMMIT}" "$GW_IMAGE"
 
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "https://${REGISTRY}" >/dev/null
-docker push -q "$WEB_IMAGE" >/dev/null
-docker push -q "$GW_IMAGE" >/dev/null
-echo "  pushed: ${WEB_IMAGE}"
-echo "  pushed: ${GW_IMAGE}"
+# ECR tags are IMMUTABLE: re-publishing the same commit (e.g. after a
+# bundle-only fix — images unchanged) must SKIP the push, not fail it.
+push_if_absent() {  # $1 = full image ref
+  local repo tag
+  repo="${1%%:*}"; repo="${repo##*/}"; tag="${1##*:}"
+  if aws ecr describe-images --region "$REGION" --repository-name "$repo" \
+       --image-ids "imageTag=${tag}" >/dev/null 2>&1; then
+    echo "  ecr: ${repo}:${tag} already pushed (immutable) — skip"
+  else
+    docker push -q "$1" >/dev/null
+    echo "  pushed: $1"
+  fi
+}
+push_if_absent "$WEB_IMAGE"
+push_if_absent "$GW_IMAGE"
 
 # ---------------------------------------------------------------------------
 # 5. SSM SecureString — the full runtime env file.
@@ -200,7 +211,13 @@ cp scripts/deploy/initdb/01-extensions.sql "${STAGE}/initdb/"
 sed -e "s/__ENV__/${ENV}/g" -e "s/__BUCKET__/${BUCKET}/g" \
   scripts/deploy/user-data.sh > "${STAGE}/user-data.sh"
 
-tar -czf "$BUNDLE" -C "$STAGE" .
+# COPYFILE_DISABLE: macOS bsdtar otherwise embeds AppleDouble `._*`
+# resource-fork files for every copied file — observed breaking Grafana
+# provisioning on staging (it tried to parse ._dashboards.yml as YAML).
+# COPYFILE_DISABLE=1 must be exported BEFORE tar; also clean any that
+# slipped in (belt and suspenders).
+find "${STAGE}" -name '._*' -type f -delete
+COPYFILE_DISABLE=1 tar -czf "$BUNDLE" -C "$STAGE" .
 aws s3 mb "s3://${BUCKET}" --region "$REGION" 2>/dev/null || true
 aws s3api put-public-access-block --bucket "$BUCKET" --region "$REGION" \
   --public-access-block-config \
