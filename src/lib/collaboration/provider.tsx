@@ -31,6 +31,7 @@ import { toast } from "sonner";
 
 import type { DocumentSession, SaveStatus } from "./types";
 import { serializeDocumentContent } from "./content";
+import { useBridgeStatusStore } from "@/store/use-bridge-status-store";
 
 const SAVE_DEBOUNCE_MS = 500;
 const MARGINS_KEY_PREFIX = "concord.doc.";
@@ -65,6 +66,16 @@ export function DocumentSessionProvider({
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const hasConflictRef = useRef(false);
+
+  // Two write paths, mutually exclusive per session (D16): when the editor
+  // bridge is on the CRDT path, durability flows through the worker +
+  // realtime session (ops → gateway → peers); the whole-document mirror
+  // must NOT double-save (it would also 409-conflict with itself on stale
+  // contentVersion). Only the fallback path (unsupported content / worker
+  // failure) saves here. The store read is safe outside the effect — the
+  // value is captured per render for the saveContent closure.
+  const bridgeMode = useBridgeStatusStore((s) => s.state.mode);
+  const crdtLive = bridgeMode === "crdt";
 
   const contentVersionRef = useRef(initialContentVersion);
   const pendingContentRef = useRef<unknown>(null);
@@ -139,6 +150,11 @@ export function DocumentSessionProvider({
       if (!canEditContent || hasConflictRef.current) {
         return;
       }
+      // CRDT mode owns durability (worker + sync session); the mirror is
+      // the fallback path only — never both (D16 exclusivity).
+      if (crdtLive) {
+        return;
+      }
       pendingContentRef.current = json;
       setStatus((s) => (s === "conflict" ? s : "saving"));
       if (timerRef.current) {
@@ -151,7 +167,7 @@ export function DocumentSessionProvider({
         });
       }, SAVE_DEBOUNCE_MS);
     },
-    [canEditContent, flush],
+    [canEditContent, crdtLive, flush],
   );
 
   // Flush pending saves when navigating away/unmounting (best effort).

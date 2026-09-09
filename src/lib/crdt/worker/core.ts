@@ -216,6 +216,82 @@ export class CrdtWorkerCore {
                 const engine = await this.ensureEngine();
                 return { kind: "exportStream", json: engine.streamJson() };
             }
+
+            // ---- Phase 7 sync-seam additions (D16, additive only) ---------
+
+            case "replicaInfo": {
+                // Join-summary surface: replica identity + the highest
+                // contiguous own-replica counter observed in the durable
+                // log (the local summary the gateway join frame carries).
+                await this.ensureEngine();
+                const state = await this.config.persistence.loadLocalState(
+                    this.config.documentId,
+                );
+                let maxOwnCounter = 0n;
+                for (const op of state.ops) {
+                    const id = readOpIdentity(op);
+                    if (id !== null && id.replicaId === this.config.replicaId) {
+                        maxOwnCounter = BigInt(
+                            Math.max(Number(maxOwnCounter), id.counter),
+                        );
+                    }
+                }
+                return {
+                    kind: "replicaInfo",
+                    replicaId: this.config.replicaId.toString(),
+                    sequence: maxOwnCounter.toString(),
+                };
+            }
+
+            case "localOpsSince": {
+                // Own-replica op stream past a counter (decimal string):
+                // the sync session's local-op subscription cursor. Ops from
+                // other replicas are filtered out — only THIS replica's
+                // generated ops ever enter the client outbox.
+                await this.ensureEngine();
+                const state = await this.config.persistence.loadLocalState(
+                    this.config.documentId,
+                );
+                const since = BigInt(request.counter);
+                const ops: Uint8Array[] = [];
+                let nextCounter = since;
+                for (const op of state.ops) {
+                    const id = readOpIdentity(op);
+                    if (id === null || id.replicaId !== this.config.replicaId) {
+                        continue;
+                    }
+                    if (BigInt(id.counter) > since) {
+                        ops.push(op);
+                        nextCounter = BigInt(id.counter);
+                    }
+                }
+                return {
+                    kind: "localOpsSince",
+                    ops,
+                    nextCounter: nextCounter.toString(),
+                };
+            }
+
+            case "importSnapshot": {
+                // Atomic snapshot import for the stale-client resync flow
+                // (P5-M031 port contract): build fresh, swap only on
+                // success. Same engine semantics as loadSnapshot; kept as a
+                // distinct kind so the sync seam cannot be confused with
+                // the editor's loadSnapshot path.
+                const engine = await this.ensureEngine();
+                const restored = await ConcordEngine.importFromSnapshot(
+                    this.config.replicaId,
+                    request.snapshot,
+                    this.config.loadFactory,
+                );
+                engine.free();
+                this.engine = restored;
+                await this.config.persistence.saveSnapshot(
+                    this.config.documentId,
+                    request.snapshot,
+                );
+                return { kind: "importSnapshot", streamSize: restored.streamSize() };
+            }
         }
     }
 }

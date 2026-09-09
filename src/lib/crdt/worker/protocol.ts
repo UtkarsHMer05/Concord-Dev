@@ -18,7 +18,14 @@ export type WorkerRequest =
     | { id: number; kind: "streamSize" }
     | { id: number; kind: "exportSnapshot" }
     | { id: number; kind: "exportOps" }
-    | { id: number; kind: "exportStream" };
+    | { id: number; kind: "exportStream" }
+    // ---- Phase 7 sync-seam additions (D16, additive only) -----------------
+    // The sync session (src/lib/sync/sync-session.ts) drives the worker as a
+    // CrdtEnginePort; these requests expose replica identity, the local op
+    // identity stream, and atomic snapshot import over the same RPC channel.
+    | { id: number; kind: "replicaInfo" }
+    | { id: number; kind: "localOpsSince"; counter: string }
+    | { id: number; kind: "importSnapshot"; snapshot: Uint8Array };
 
 export type CrdtWorkerError = {
     code: string;
@@ -28,6 +35,14 @@ export type CrdtWorkerError = {
 export type WorkerResponse =
     | { id: number; ok: true; result: WorkerResultPayload }
     | { id: number; ok: false; error: CrdtWorkerError };
+
+/**
+ * Worker → client push notification (no correlation id; additive Phase 7
+ * sync-seam surface). Emitted after a LOCAL op-generating request durably
+ * persists, so the sync session can observe local ops without wrapping
+ * every editor-bridge call.
+ */
+export type WorkerNotification = { kind: "localOps"; ops: Uint8Array[] };
 
 export type WorkerResultPayload =
     | { kind: "init"; ready: true }
@@ -39,4 +54,8 @@ export type WorkerResultPayload =
     | { kind: "streamSize"; size: number }
     | { kind: "exportSnapshot"; snapshot: Uint8Array }
     | { kind: "exportOps"; ops: Uint8Array[] }
-    | { kind: "exportStream"; json: string };
+    | { kind: "exportStream"; json: string }
+    // ---- Phase 7 sync-seam additions (D16, additive only) -----------------
+    | { kind: "replicaInfo"; replicaId: string; sequence: string }
+    | { kind: "localOpsSince"; ops: Uint8Array[]; nextCounter: string }
+    | { kind: "importSnapshot"; streamSize: number };

@@ -4,12 +4,12 @@
 import type { ConcordModule } from "../wasm-types";
 import { IdbPersistence } from "./idb";
 import { CrdtWorkerCore } from "./core";
-import type { WorkerRequest, WorkerResponse } from "./protocol";
+import type { WorkerRequest, WorkerResponse, WorkerNotification } from "./protocol";
 
 /** Minimal worker-global surface (lib.dom worker types are not in tsconfig lib). */
 interface WorkerGlobal {
     onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
-    postMessage(message: WorkerResponse): void;
+    postMessage(message: WorkerResponse | WorkerNotification): void;
 }
 declare const self: WorkerGlobal;
 
@@ -73,6 +73,13 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
             }
             const result = await core.handle(request);
             respond({ id: request.id, ok: true, result });
+            // Local-op push notification (Phase 7 sync seam, D16 additive):
+            // after a durable local op the sync session's subscription
+            // observes the bytes. Remote applications (applyRemote) are NOT
+            // local ops and never push.
+            if (result.kind === "localOps" && result.ops.length > 0) {
+                self.postMessage({ kind: "localOps", ops: result.ops });
+            }
         } catch (error) {
             respond({
                 id: request.id,

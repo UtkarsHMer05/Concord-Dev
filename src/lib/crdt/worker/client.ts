@@ -5,7 +5,7 @@
 // error instead of growing without bound; worker termination rejects every
 // pending request.
 import type { StreamEntryJson } from "../adapter";
-import type { WorkerRequest, WorkerResponse, WorkerResultPayload, CrdtWorkerError } from "./protocol";
+import type { WorkerRequest, WorkerResponse, WorkerResultPayload, CrdtWorkerError, WorkerNotification } from "./protocol";
 
 const MAX_PENDING = 256;
 
@@ -26,6 +26,7 @@ export class CrdtClient {
     private nextId = 1;
     private pending = new Map<number, Pending>();
     private terminated = false;
+    private localOpsListeners = new Set<(ops: Uint8Array[]) => void>();
 
     constructor(private readonly options: CrdtClientOptions = {}) {}
 
@@ -38,8 +39,18 @@ export class CrdtClient {
                 new URL("./crdt-worker.ts", import.meta.url),
                 { type: "module" },
             );
-            this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+            this.worker.onmessage = (event: MessageEvent<WorkerResponse | WorkerNotification>) => {
                 const response = event.data;
+                // Push notification (no correlation id): fan out to the
+                // local-ops listeners (sync seam, D16 additive).
+                if (!("id" in response)) {
+                    if (response.kind === "localOps" && response.ops.length > 0) {
+                        for (const listener of this.localOpsListeners) {
+                            listener(response.ops);
+                        }
+                    }
+                    return;
+                }
                 const pending = this.pending.get(response.id);
                 if (pending === undefined) {
                     return; // stale response for an already-failed request
@@ -152,6 +163,42 @@ export class CrdtClient {
     async exportStream(): Promise<StreamEntryJson[]> {
         const result = await this.call({ kind: "exportStream" });
         return JSON.parse((result as { kind: "exportStream"; json: string }).json) as StreamEntryJson[];
+    }
+
+    /**
+     * Subscribes to locally generated canonical op bytes (Phase 7 sync
+     * seam, D16 additive). The worker pushes a `localOps` notification
+     * after each durable local op; the sync session feeds these into its
+     * outbox. Returns an unsubscribe function.
+     */
+    onLocalOps(handler: (ops: Uint8Array[]) => void): () => void {
+        this.localOpsListeners.add(handler);
+        return () => {
+            this.localOpsListeners.delete(handler);
+        };
+    }
+
+    /** Replica identity + highest own counter (join state summary). */
+    async replicaInfo(): Promise<{ replicaId: string; sequence: string }> {
+        const result = await this.call({ kind: "replicaInfo" });
+        const info = result as { kind: "replicaInfo"; replicaId: string; sequence: string };
+        return { replicaId: info.replicaId, sequence: info.sequence };
+    }
+
+    /** Own-replica ops past a counter (decimal string) — resumable cursor. */
+    async localOpsSince(counter: string): Promise<{ ops: Uint8Array[]; nextCounter: string }> {
+        const result = await this.call({ kind: "localOpsSince", counter });
+        const since = result as {
+            kind: "localOpsSince";
+            ops: Uint8Array[];
+            nextCounter: string;
+        };
+        return { ops: since.ops, nextCounter: since.nextCounter };
+    }
+
+    /** Atomic snapshot import (stale-client resync port contract). */
+    async importSnapshot(snapshot: Uint8Array): Promise<void> {
+        await this.call({ kind: "importSnapshot", snapshot });
     }
 
     terminate(): void {

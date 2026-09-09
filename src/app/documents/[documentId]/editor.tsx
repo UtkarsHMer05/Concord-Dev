@@ -13,12 +13,13 @@ import FontFamily from '@tiptap/extension-font-family'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
 import { useEditor, EditorContent } from '@tiptap/react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 
 import { useEditorStore } from '@/store/use-editor-store';
 import { useBridgeStatusStore } from '@/store/use-bridge-status-store';
 import { useDocumentSession } from '@/lib/collaboration/provider';
 import { CrdtEditorBridge } from '@/lib/crdt/editor-bridge';
+import { useSyncSession } from '@/lib/sync/use-sync-session';
 import type { CrdtClient } from '@/lib/crdt/worker/client';
 import type { PmNode } from '@/lib/crdt/pm-model';
 import { FontSizeExtension } from '@/extensions/font-size';
@@ -39,6 +40,7 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
   const { editorContent, content, settings, canEditContent } = useDocumentSession();
   const { setEditor } = useEditorStore();
   const setBridgeStatus = useBridgeStatusStore((s) => s.setState);
+  const bridgeMode = useBridgeStatusStore((s) => s.state.mode);
   // The bridge is created after the editor exists; onUpdate routes through
   // this ref so the creation-time closure stays valid.
   const bridgeRef = useRef<CrdtEditorBridge | null>(null);
@@ -59,9 +61,14 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
     },
     onUpdate({ editor }) {
       setEditor(editor)
-      // Phase 1 server mirror (transitional): keeps documents.content in
-      // PostgreSQL roughly in sync for the home list and other devices.
-      content.saveContent(editor.getJSON())
+      // Two write paths, mutually exclusive per session (D16):
+      // - CRDT mode: ops flow through the worker → SyncSession → gateway;
+      //   the whole-document mirror must NOT double-save.
+      // - fallback mode (unsupported content / worker failure): the
+      //   Phase 1 PostgreSQL mirror owns durability.
+      if (bridgeMode !== 'crdt') {
+        content.saveContent(editor.getJSON())
+      }
       // Phase 2 local-first path: diff against the CRDT canonical state and
       // emit durable operations through the worker. Failures degrade the
       // session to the Phase-1 mirror (logged, never unhandled).
@@ -126,12 +133,15 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
     ],
   })
 
-  // Bridge lifecycle: connect once the editor exists (client-side only).
-  useEffect(() => {
+  // Bridge lifecycle (client-side only): the bridge is CREATED derived from
+  // the editor instance (stable per editor), and started in the effect. The
+  // useMemo value also feeds the sync-session hook without touching refs
+  // during render.
+  const bridge = useMemo(() => {
     if (!crdtClient || !editor) {
-      return;
+      return null;
     }
-    const bridge = new CrdtEditorBridge({
+    return new CrdtEditorBridge({
       editor,
       client: crdtClient,
       documentId,
@@ -140,15 +150,31 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
       // save path) is surfaced to the UI, never silent.
       onStatusChange: setBridgeStatus,
     });
+    // seedPmDoc is read once at bridge start; the bridge is per editor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crdtClient, editor, documentId, setBridgeStatus]);
+
+  useEffect(() => {
+    if (!bridge) {
+      return;
+    }
     bridgeRef.current = bridge;
     void bridge.start();
     return () => {
       bridgeRef.current = null;
       setBridgeStatus({ mode: "idle" });
     };
-    // The bridge is per editor instance; content/seed are read once at start.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crdtClient, editor, setBridgeStatus]);
+    // The bridge identity IS the dependency: start once per instance.
+  }, [bridge, setBridgeStatus]);
+
+  // Realtime wiring (D16): once the bridge is on the CRDT path, start the
+  // SyncSession (REAL worker engine port) against the configured gateway.
+  // No gateway URL / signed out / fallback ⇒ stays local-only (truthful).
+  useSyncSession({
+    documentId,
+    crdtClient,
+    bridge,
+  });
 
   return (
     <div className="size-full overflow-x-auto bg-[#F9FBFD] px-4 print:p-0 print:bg-white print:overflow-visible">
