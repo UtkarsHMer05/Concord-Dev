@@ -1,12 +1,17 @@
 # P6-M027 — Hardened release image: web app (Next.js standalone).
+# P7-M021 — deployment build-args (NEXT_PUBLIC_* are build-time inlined).
 #
 # Multi-stage, pinned base images, non-root runtime, no build secrets in
 # the final layer, no package managers / debug tools in runtime.
-# LOCAL BUILD + SMOKE ONLY — production deployment is Phase 7.
 #
 # Build:  docker build -f docker/web.Dockerfile -t concord-web:release .
+# Deploy: docker build -f docker/web.Dockerfile \
+#           --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_... \
+#           --build-arg NEXT_PUBLIC_SYNC_GATEWAY_URL=ws://<alb-dns>:8890/api/v1/sync .
+#         (NEXT_PUBLIC_* vars are INLINED into the client bundle at build
+#          time — they cannot be runtime env. Secrets are NEVER baked:
+#          CLERK_SECRET_KEY + DATABASE_URL are runtime env via SSM.)
 # Run:    docker run --rm -p 3000:3000 --env-file .env.local concord-web:release
-#         (requires Clerk + DATABASE_URL env; loopback only in Phase 6)
 
 # --- Stage 1: deps -----------------------------------------------------------
 # node:24-alpine is the LTS line matching .nvmrc (24.x) — pinned minor via
@@ -24,12 +29,19 @@ FROM node:24.20-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Next.js standalone output keeps the runtime layer minimal.
+# Standalone output keeps the runtime layer minimal.
 # Dummy vars: the build must not require real secrets (build-time env only).
 ENV NEXT_TELEMETRY_DISABLED=1
 # public/wasm is produced by `npm run wasm:build` (git-ignored); the image
 # build expects it present. Build the wasm layer first when needed:
 #   npm run wasm:build && docker build ...
+# P7-M021: per-environment NEXT_PUBLIC_* values (see header — these are
+# the ONLY two NEXT_PUBLIC vars the app reads: Clerk publishable key and
+# the browser-facing sync WS URL).
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_SYNC_GATEWAY_URL
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY} \
+    NEXT_PUBLIC_SYNC_GATEWAY_URL=${NEXT_PUBLIC_SYNC_GATEWAY_URL}
 RUN npm run build
 
 # --- Stage 3: runtime --------------------------------------------------------
@@ -45,6 +57,13 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 # public assets (incl. wasm if built) — copy is small and keeps URLs stable.
 COPY --from=build --chown=nextjs:nodejs /app/public ./public
+# Migration runner (P7-M022, two-family rule): drizzle migrations +
+# runner script + drizzle-orm/pg deps (not traced into standalone — the
+# migrator imports them directly, outside Next's dependency graph).
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/pg ./node_modules/pg
+COPY --chown=nextjs:nodejs drizzle ./drizzle
+COPY --chown=nextjs:nodejs scripts/db/migrate.mjs ./scripts/db/migrate.mjs
 # Non-root user (node image ships uid 1000 `node`).
 USER node
 EXPOSE 3000

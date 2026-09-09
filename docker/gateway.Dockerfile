@@ -1,12 +1,13 @@
 # P6-M027 — Hardened release image: Rust sync gateway.
+# P7-M021 — ships the native C++ worker BINARY in the same image
+# (GATEWAY_WORKER_BINARY=/app/concord-worker per docker-compose.cloud.yml
+# and SECURITY.md §10.2: the gateway spawns the worker per maintenance
+# request via stdio).
 #
 # Multi-stage build: cargo build in the builder stage (rust:1.98-alpine
 # + toolchain 1.98.1 matching rust/rust-toolchain.toml), minimal runtime
 # with only the binary + CA certs, non-root user (uid 10001), no
 # cargo/rustc/package managers at runtime.
-# LOCAL BUILD + SMOKE ONLY — production deployment is Phase 7. Note:
-# Phase 4 runs gateways on the HOST (host networking for NATS/Redis/PG);
-# the container is the release-candidate packaging proof for Phase 7.
 #
 # Build: docker build -f docker/gateway.Dockerfile -t concord-gateway:release .
 # Smoke: scripts/release/smoke-images.sh
@@ -26,6 +27,20 @@ WORKDIR /build
 COPY rust ./rust
 RUN cargo build --release --manifest-path rust/sync-gateway/Cargo.toml
 
+# --- Stage 1b: native worker (P7-M021) ---------------------------------------
+# The C++ maintenance worker compiled for the image's own target arch
+# (same flow as docker/worker.Dockerfile: Release, tests/benchmarks off,
+# libstdc++/libgcc linked STATICALLY so the minimal runtime needs no
+# extra packages).
+FROM alpine:3.22 AS worker-builder
+RUN apk add --no-cache cmake ninja gcc g++ musl-dev
+WORKDIR /build
+COPY cpp ./cpp
+RUN cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCONCORD_BUILD_TESTS=OFF -DCONCORD_BUILD_BENCHMARKS=OFF \
+    -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
+ && cmake --build build/native
+
 # --- Stage 2: runtime --------------------------------------------------------
 FROM alpine:3.22 AS runtime
 # CA certs for Clerk HTTPS verification. Nothing else: no shell tools
@@ -35,6 +50,12 @@ WORKDIR /app
 # Workspace target dir lives at the workspace root (rust/target), not the
 # member crate dir.
 COPY --from=builder /build/rust/target/release/sync-gateway ./
+# Native C++ maintenance worker (P7-M021): spawned per maintenance
+# request via GATEWAY_WORKER_BINARY=/app/concord-worker (stdio
+# protocol). Numeric chown (uid 10001 = the concord user created below
+# — named --chown would fail because the user does not exist yet at
+# COPY time).
+COPY --from=worker-builder --chown=10001:10001 /build/build/native/worker/concord-worker /app/concord-worker
 # Non-root, fixed uid for reproducibility.
 RUN addgroup -S -g 10001 concord && adduser -S -u 10001 -G concord concord
 USER concord

@@ -1,0 +1,31 @@
+# Concord cloud Prometheus scrape config (P7-M021/M026).
+#
+# Rendered into the deployment bundle by scripts/deploy/push-bundle.sh
+# (which writes prometheus.cloud.yml next to docker-compose.cloud.yml).
+#
+# Scrapes the three gateway CONTAINERS on the compose network (gw1..gw3
+# — service DNS names, not host ports) and itself. The gateways expose
+# Prometheus text exposition at GET /metrics (unauthenticated — compose
+# network only, never published; label values are bounded enums by the
+# metrics.rs cardinality contract — no document/user IDs). No secrets.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # The three gateway replicas (compose service names).
+  - job_name: concord-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "gw1:8791"
+          - "gw2:8792"
+          - "gw3:8793"
+        labels:
+          service: concord-sync-gateway
+
+  # Prometheus itself (up-time / self-scrape).
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -4,11 +4,26 @@
 # stack (docker-compose.cloud.yml), an ALB terminating TLS with an
 # ACM cert, security groups providing the public/private split.
 #
+# ORDERING (load-bearing): the ALB is created FIRST (before the
+# instance) because the web image bakes the ALB DNS name into the
+# client bundle at build time (NEXT_PUBLIC_SYNC_GATEWAY_URL —
+# push-bundle.sh resolves it from the ALB). The INSTANCE is launched
+# LAST, after scripts/deploy/push-bundle.sh has stored the SSM env —
+# user-data reads SSM at first boot. Full sequence per environment:
+#
+#   1. ENV=<env> ./scripts/deploy/provision.sh --infra-only
+#        (SGs + IAM role + ALB + target groups + listeners; no instance)
+#   2. ENV=<env> ./scripts/deploy/push-bundle.sh
+#        (builds ARM64 images with the ALB DNS baked; ECR + SSM + S3)
+#   3. ENV=<env> ./scripts/deploy/provision.sh
+#        (idempotent re-run: reuses everything, launches the instance;
+#        user-data pulls the bundle, applies migrations, boots the stack)
+#
 # Idempotent: re-running with the same ENV reuses/creates-missing
 # resources and prints the ALB DNS name.
 #
 # Usage:
-#   ENV=staging ./scripts/deploy/provision.sh
+#   ENV=staging ./scripts/deploy/provision.sh [--infra-only]
 #   ENV=production ./scripts/deploy/provision.sh
 #
 # Requires: aws CLI with credentials; the account's default VPC in
@@ -35,6 +50,18 @@ CERT_ARN="${CERT_ARN:-}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-t4g.medium}"   # Graviton, 2 vCPU / 4GB
 KEY_NAME="${KEY_NAME:-sentiment-analysis-dataset-keypair}"  # existing account key
 NAME="concord-${ENV}"
+
+# --infra-only: stop after SGs + IAM + ALB + TGs + listeners (BEFORE the
+# instance). Required because push-bundle.sh needs the ALB DNS name to
+# bake into the web image, and user-data needs the SSM env to exist —
+# both happen between the two provision.sh runs.
+INFRA_ONLY=false
+for arg in "$@"; do
+  case "$arg" in
+    --infra-only) INFRA_ONLY=true ;;
+    *) echo "unknown flag: $arg" >&2; exit 2 ;;
+  esac
+done
 
 echo "== provisioning ${NAME} in ${REGION} =="
 
@@ -99,43 +126,63 @@ done
 # 2. Key pair must exist (used only for emergencies; SSM preferred).
 aws ec2 describe-key-pairs --region "$REGION" --key-names "$KEY_NAME" >/dev/null
 
+# 2b. IAM instance role (P7-M021): the instance needs ECR pull, S3
+# bundle read, and SSM Parameter Store read (secrets) — plus SSM
+# Session Manager for shell access (no SSH ingress exists). Least
+# privilege: NO write permissions anywhere, no s3 put, no SSM put.
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ROLE_NAME="${NAME}-instance-role"
+if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+  aws iam create-role --role-name "$ROLE_NAME" \
+    --assume-role-policy-document '{
+      "Version": "2012-10-17",
+      "Statement": [{"Effect": "Allow",
+        "Principal": {"Service": "ec2.amazonaws.com"},
+        "Action": "sts:AssumeRole"}]}' >/dev/null
+  aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name concord-instance-policy \
+    --policy-document "{
+      \"Version\": \"2012-10-17\",
+      \"Statement\": [
+        {\"Sid\": \"EcrPull\", \"Effect\": \"Allow\",
+         \"Action\": [\"ecr:GetAuthorizationToken\", \"ecr:BatchGetImage\", \"ecr:GetDownloadUrlForLayer\"],
+         \"Resource\": \"*\"},
+        {\"Sid\": \"S3ReadBundle\", \"Effect\": \"Allow\",
+         \"Action\": [\"s3:GetObject\"],
+         \"Resource\": \"arn:aws:s3:::concord-deploy-*/concord/*\"},
+        {\"Sid\": \"SsmReadEnv\", \"Effect\": \"Allow\",
+         \"Action\": [\"ssm:GetParameter\", \"ssm:GetParameters\"],
+         \"Resource\": \"arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/concord/*\"},
+        {\"Sid\": \"SsmSessionManager\", \"Effect\": \"Allow\",
+         \"Action\": [\"ssmmessages:CreateControlChannel\", \"ssmmessages:CreateDataChannel\",
+                     \"ssmmessages:OpenControlChannel\", \"ssmmessages:OpenDataChannel\"],
+         \"Resource\": \"*\"}
+      ]}" >/dev/null
+  echo "  created IAM role ${ROLE_NAME} (ECR pull + S3/SSM read + Session Manager)"
+else
+  echo "  reuse IAM role ${ROLE_NAME}"
+fi
+PROFILE_NAME="${NAME}-instance-profile"
+if ! aws iam get-instance-profile --instance-profile-name "$PROFILE_NAME" >/dev/null 2>&1; then
+  aws iam create-instance-profile --instance-profile-name "$PROFILE_NAME" >/dev/null
+  aws iam add-role-to-instance-profile \
+    --instance-profile-name "$PROFILE_NAME" --role-name "$ROLE_NAME" >/dev/null
+  echo "  created instance profile ${PROFILE_NAME}"
+else
+  echo "  reuse instance profile ${PROFILE_NAME}"
+fi
+
 # 3. Latest AL2023 ARM64 AMI.
 AMI=$(aws ssm get-parameter --region "$REGION" \
   --name "/aws/service/ami-amazon-linux-2023/latest/arm64-minimal-kernel-default" \
   --query Parameter.Value --output text)
 echo "  AMI: ${AMI}"
 
-# 4. Instance (idempotent by tag).
-INSTANCE_ID=$(aws ec2 describe-instances --region "$REGION" \
-  --filters "Name=tag:Name,Values=${NAME}" "Name=instance-state-name,Values=running,pending,stopped" \
-  --query 'Reservations[0].Instances[0].InstanceId' --output text)
-if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
-  # user-data installs docker + compose, then clones the deployment
-  # bundle from S3 (uploaded by scripts/deploy/push-bundle.sh) and
-  # boots the stack. The bundle contains: compose file, nginx conf,
-  # prometheus/grafana config, env files (secrets injected at this
-  # step via SSM parameters — pulled, never stored in the AMI/udocs).
-  USER_DATA=$(cat scripts/deploy/user-data.sh)
-  INSTANCE_ID=$(aws ec2 run-instances --region "$REGION" \
-    --image-id "$AMI" --instance-type "$INSTANCE_TYPE" \
-    --key-name "$KEY_NAME" --security-group-ids "$sg_id" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${NAME}}]" \
-    --user-data "$USER_DATA" \
-    --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
-    --query 'Instances[0].InstanceId' --output text)
-  echo "  launched ${INSTANCE_ID} (${INSTANCE_TYPE})"
-else
-  echo "  reuse instance ${INSTANCE_ID}"
-fi
-
-# Wait for running.
-aws ec2 wait instance-running --region "$REGION" --instance-ids "$INSTANCE_ID" || true
-
-# 5. Target groups — one per backend port (SA-SEC7: a single TG
-# registered with two ports mixes web health checks into the WS path;
-# ALB TGs route per-listener, so 8890 gets its own TG + health check).
 VPC_ID=$(aws ec2 describe-vpcs --region "$REGION" \
   --filters Name=is-default,Values=true --query 'Vpcs[0].VpcId' --output text)
+
+# 4. Target groups — one per backend port (SA-SEC7: a single TG
+# registered with two ports mixes web health checks into the WS path;
+# ALB TGs route per-listener, so 8890 gets its own TG + health check).
 TG_WEB_ARN=$(aws elbv2 describe-target-groups --region "$REGION" --names "${NAME}-tg-web" \
   --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)
 if [ -z "$TG_WEB_ARN" ] || [ "$TG_WEB_ARN" = "None" ]; then
@@ -205,14 +252,75 @@ else
   create_listener "$LB_ARN" HTTP 8890 "" "$TG_SYNC_ARN"
 fi
 
-# Register the instance on both target groups (web 3000, sync LB 8890).
-aws elbv2 register-targets --region "$REGION" --target-group-arn "$TG_WEB_ARN" \
-  --targets "[{\"Id\":\"${INSTANCE_ID}\",\"Port\":3000}]" >/dev/null
-aws elbv2 register-targets --region "$REGION" --target-group-arn "$TG_SYNC_ARN" \
-  --targets "[{\"Id\":\"${INSTANCE_ID}\",\"Port\":8890}]" >/dev/null
+# Register the instance on both target groups (web 3000, sync LB 8890)
+# — only when launching; a reused instance is already registered.
+REGISTER=true
 
 DNS=$(aws elbv2 describe-load-balancers --region "$REGION" --load-balancer-arn "$LB_ARN" \
   --query 'LoadBalancers[0].DNSName' --output text)
+
+if [ "$INFRA_ONLY" = true ]; then
+  echo
+  echo "== ${NAME} infrastructure ready (--infra-only; no instance) =="
+  echo "  ALB DNS:  ${DNS}"
+  echo "  next: ENV=${ENV} ./scripts/deploy/push-bundle.sh  (build+push images,"
+  echo "        SSM env, S3 bundle — resolves ALB DNS into the web image)"
+  echo "  then:  ENV=${ENV} ./scripts/deploy/provision.sh  (launch instance)"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Instance (idempotent by tag) — launched ONLY after the bundle exists:
+# user-data pulls the S3 bundle + SSM env at first boot. Guards fail
+# fast (clear error, no half-booted instance) if push-bundle was skipped.
+# ---------------------------------------------------------------------------
+INSTANCE_ID=$(aws ec2 describe-instances --region "$REGION" \
+  --filters "Name=tag:Name,Values=${NAME}" "Name=instance-state-name,Values=running,pending,stopped" \
+  --query 'Reservations[0].Instances[0].InstanceId' --output text)
+if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+  # Guards: SSM env + S3 bundle must exist BEFORE first boot.
+  if ! aws ssm get-parameter --region "$REGION" --name "/concord/${ENV}/concord.env" \
+       >/dev/null 2>&1; then
+    echo "error: SSM /concord/${ENV}/concord.env missing — run push-bundle.sh first" >&2
+    exit 2
+  fi
+  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+  BUCKET="${BUNDLE_BUCKET:-concord-deploy-${ACCOUNT_ID}}"
+  if ! aws s3 ls "s3://${BUCKET}/concord/${ENV}/bundle.tar.gz" --region "$REGION" \
+       >/dev/null 2>&1; then
+    echo "error: s3://${BUCKET}/concord/${ENV}/bundle.tar.gz missing — run push-bundle.sh first" >&2
+    exit 2
+  fi
+
+  # user-data: docker + compose + aws-cli → ECR login (instance profile)
+  # → S3 bundle → SSM env → drizzle migrations → stack up → backup cron.
+  # __ENV__/__BUCKET__ rendered here; secrets live in SSM only.
+  USER_DATA=$(sed -e "s/__ENV__/${ENV}/g" -e "s/__BUCKET__/${BUCKET}/g" \
+    scripts/deploy/user-data.sh)
+  INSTANCE_ID=$(aws ec2 run-instances --region "$REGION" \
+    --image-id "$AMI" --instance-type "$INSTANCE_TYPE" \
+    --key-name "$KEY_NAME" --security-group-ids "$sg_id" \
+    --iam-instance-profile Name="${PROFILE_NAME}" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${NAME}}]" \
+    --user-data "$USER_DATA" \
+    --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
+    --query 'Instances[0].InstanceId' --output text)
+  echo "  launched ${INSTANCE_ID} (${INSTANCE_TYPE}, profile ${PROFILE_NAME})"
+else
+  REGISTER=false
+  echo "  reuse instance ${INSTANCE_ID}"
+fi
+
+# Wait for running.
+aws ec2 wait instance-running --region "$REGION" --instance-ids "$INSTANCE_ID" || true
+
+if [ "$REGISTER" = true ]; then
+  aws elbv2 register-targets --region "$REGION" --target-group-arn "$TG_WEB_ARN" \
+    --targets "[{\"Id\":\"${INSTANCE_ID}\",\"Port\":3000}]" >/dev/null
+  aws elbv2 register-targets --region "$REGION" --target-group-arn "$TG_SYNC_ARN" \
+    --targets "[{\"Id\":\"${INSTANCE_ID}\",\"Port\":8890}]" >/dev/null
+fi
+
 echo
 echo "== ${NAME} provisioned =="
 echo "  instance: ${INSTANCE_ID}"

@@ -1,0 +1,12 @@
+-- Concord cloud database initialization (P7-M021).
+-- Runs ONCE at first initialization of the concord_pgdata_cloud volume.
+-- The cloud environments run the single production database "concord"
+-- only — the isolated concord_test database is a LOCAL-DEV facility
+-- (scripts/db/init/01-create-test-db.sql) and is deliberately NOT
+-- created here: test suites never run against staging/prod data.
+--
+-- pg_trgm is required by the drizzle 0000 migration (GIN trigram index
+-- on lower(title) for ILIKE search); creating it here keeps the first
+-- bootstrap deterministic. CREATE EXTENSION requires superuser — the
+-- compose postgres user is one.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;

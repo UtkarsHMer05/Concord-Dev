@@ -12,12 +12,17 @@
 #   - secrets come from the environment file written at launch from
 #     AWS SSM/env injection (never baked into images; file mode 600).
 #
-# Env files required next to this compose file (git-ignored, written by
-# scripts/deploy/render-envs.sh at launch time):
-#   concord.env      — shared secrets/config (DATABASE_URL, Clerk keys)
-#   gateway.env      — GATEWAY_* overrides (ports are fixed per replica)
+# Env files required next to this compose file (git-ignored, written to
+# SSM by scripts/deploy/push-bundle.sh; user-data fetches them to the
+# instance at launch):
+#   concord.env      — ALL runtime env: secrets (DATABASE_URL, Clerk
+#                      secret, PG_PASSWORD) + image refs + shared
+#                      gateway config. Sourced by user-data before
+#                      `compose up` so ${...} interpolation resolves;
+#                      every service also injects it via env_file.
 #
 # Usage:  docker compose -f docker-compose.cloud.yml -p concord-${ENV} up -d
+#          (on the instance; see scripts/deploy/user-data.sh)
 
 services:
   db:
@@ -40,6 +45,25 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+
+  # Drizzle migration runner (P7-M022): runs ONCE at bootstrap from the
+  # SAME web image (node runtime + scripts/db/migrate.mjs + drizzle/ are
+  # copied into the image). Two-family rule (docs/MIGRATIONS.md): drizzle
+  # FIRST, then gateways boot and apply their own family idempotently.
+  # command: [] clears the image CMD (["node","server.js"]) — without
+  # it, the CMD args would be appended to the overridden entrypoint.
+  migrations:
+    image: ${CONCORD_WEB_IMAGE:?set in concord.env}
+    container_name: concord-${ENV:-staging}-migrations
+    env_file: concord.env
+    entrypoint: ["node", "scripts/db/migrate.mjs"]
+    command: []
+    working_dir: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    profiles: ["migrate"]
 
   nats:
     image: nats:2.11.6-alpine
@@ -78,6 +102,11 @@ services:
     environment:
       HOSTNAME: 0.0.0.0
       PORT: 3000
+    # Host publication for the ALB web target group (port 3000). The
+    # instance SG opens 3000 to the ALB SG ONLY (provision.sh, P7-M020)
+    # — never 0.0.0.0/0.
+    ports:
+      - "3000:3000"
     depends_on:
       db:
         condition: service_healthy
@@ -93,7 +122,7 @@ services:
     container_name: concord-${ENV:-staging}-gw1
     restart: unless-stopped
     env_file:
-      - gateway.env
+      - concord.env
     environment:
       GATEWAY_ID: 1
       GATEWAY_BIND_HOST: 0.0.0.0
@@ -106,8 +135,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    extra_hosts:
-      - "db.internal:host-gateway"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8791/api/v1/health/live"]
       interval: 10s
@@ -120,7 +147,7 @@ services:
     container_name: concord-${ENV:-staging}-gw2
     restart: unless-stopped
     env_file:
-      - gateway.env
+      - concord.env
     environment:
       GATEWAY_ID: 2
       GATEWAY_BIND_HOST: 0.0.0.0
@@ -145,7 +172,7 @@ services:
     container_name: concord-${ENV:-staging}-gw3
     restart: unless-stopped
     env_file:
-      - gateway.env
+      - concord.env
     environment:
       GATEWAY_ID: 3
       GATEWAY_BIND_HOST: 0.0.0.0
@@ -192,6 +219,8 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
+      # Rendered by scripts/deploy/push-bundle.sh from
+      # scripts/deploy/prometheus.cloud.yml.in (targets gw1..gw3).
       - ./prometheus.cloud.yml:/etc/prometheus/prometheus.yml:ro
       - concord_prometheus:/prometheus
 
@@ -208,7 +237,12 @@ services:
     ports:
       - "127.0.0.1:3001:3000"
     volumes:
+      # Rendered by scripts/deploy/push-bundle.sh from
+      # scripts/observability/grafana (same layout as local dev:
+      # provisioning at /etc/grafana/provisioning, dashboard JSONs at
+      # /var/lib/grafana/dashboards — the path dashboards.yml points at).
       - ./grafana.cloud:/etc/grafana/provisioning:ro
+      - ./grafana.cloud-dashboards:/var/lib/grafana/dashboards:ro
       - concord_grafana:/var/lib/grafana
 
 volumes:
