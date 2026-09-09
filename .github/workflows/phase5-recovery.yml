@@ -70,7 +70,7 @@ jobs:
       - name: Recovery selection/fallback + differential verifier
         run: cargo test --test phase5_recovery -- --test-threads=1
         working-directory: rust
-      - name: Job scheduler: claim/lease/heartbeat + bounded concurrency
+      - name: "Job scheduler: claim/lease/heartbeat + bounded concurrency"
         run: cargo test --test phase5_jobs -- --test-threads=1
         working-directory: rust
       - name: Compaction floor + dry-run + staged pruning

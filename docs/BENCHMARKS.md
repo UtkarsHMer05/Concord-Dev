@@ -184,3 +184,98 @@ halves durable bytes at this scale while retaining full
 historical-revision capability (protected snapshots per DEC-040 /
 retention rules). All numbers: local machine, exact workload/method in
 the private ledger; no production claims.
+
+## Phase 6 — full verification campaigns (MEASURED, 2026-09-09)
+
+Environment: Apple M2 (Mac14,2), 8 cores, 8 GB, macOS 26.5 (arm64);
+rustc/cargo 1.98.1; Apple clang 21; cmake 4.2.1; PostgreSQL 18.6,
+NATS 2.11.6, Redis 8.8.2 (Docker, loopback); release builds only.
+Every result carries an embedded environment snapshot (run ID, commit,
+toolchain versions) and validates against the machine-readable schema;
+raw artifacts live under the private benchmark runs directory.
+
+### Multi-gateway throughput / scaling (P6-M037)
+
+Open-loop 200 ops/s aggregate target, 30 s steady window, 5 s warmup,
+3 runs per cell, medians; 16-cell full matrix {1,2,3,4 gateways} ×
+{10,60 clients} × {1,20 documents}; zero loss in every run
+(`sent == acked` asserted per run; error rate 0.000%).
+
+| Cell (gateway/clients/docs) | ops/s | ack p50 | ack p95 | ack p99 |
+|---|---|---|---|---|
+| 1 gw / 10 c / 20 d | 200.0 | 8.42 ms | 15.42 ms | 24.91 ms |
+| 2 gw / 10 c / 20 d | 200.0 | 8.27 ms | 15.08 ms | 23.66 ms |
+| 3 gw / 10 c / 20 d | 200.0 | 7.93 ms | 17.25 ms | 29.20 ms |
+| 4 gw / 10 c / 20 d | 199.9 | 7.97 ms | 16.49 ms | 26.78 ms |
+| 1 gw / 60 c / 20 d | 202 | 48.70 ms | 81.54 ms | 96.29 ms |
+| 4 gw / 60 c / 20 d | 202 | 50.20 ms | 81.47 ms | 128.54 ms |
+
+Reading: ack p95 degrades **+6.9 %** from 1→4 gateways on the central
+workload while sustained delivery stays at target — horizontal gateway
+addition is essentially free at this scale. The 60-client rows' higher
+p50 (~48–52 ms) are a property of the load generator's client-sequential
+ack pacing (documented in the campaign notes), identical at 1 and 4
+gateways — not a server-side regression. The harness is open-loop at
+the fixed matrix rate; the closed-loop single-gateway ceiling (~702
+ops/s, Phase 4 measurement) remains the saturation reference.
+
+### Recovery / compaction (P6-M038)
+
+`recovery-bench`, 5 runs per measurement, digest equality asserted on
+every run.
+
+| Measurement | Result |
+|---|---|
+| Full replay, 100k history, p50 | 65.153 s |
+| Snapshot+tail recovery, 100k/1k, p50 | **0.927 s** |
+| Recovery improvement | **98.6 %** (third consecutive reproduction) |
+| Snapshot import, 100k state, p50 | 66.4 ms |
+| Snapshot build, 100k, p50 | 16.02 s |
+| Full compaction, 50k history | 50,000 rows / 2.63 MB → 0 rows / 0 B |
+| Durable bytes remaining (keep-newest) | **50.1 %** |
+| Post-compaction recovery, p50 | 49.9 ms |
+
+Recorded gaps (not fabricated): the 250k-history tier was not run
+(the harness pins 10k/100k); stale-client resync *latency* at scale is
+correctness-proven but not separately timed (snapshot import at 100k —
+66.4 ms — is the dominant resync component).
+
+### Correctness / fault-tolerance aggregate (P6-M039)
+
+181/181 scenarios passed, 0 failed — 24 deterministic corpus executions
+(8 scenarios × {2,5,10} replicas), 130 randomized campaign seeds
+(1,060,000 randomized operations; deterministic per seed), 27 chaos
+scenarios across gateway/NATS/Redis/PostgreSQL/worker/compound faults.
+Observed across all executed scenarios: **0 divergent replicas,
+0 lost durable-ACKed operations** (within the fault model defined in
+`docs/FAILURE_MODEL.md`). Sanitizers (ASan+UBSan, TSan) green on the
+full native matrix; 5,000,000 fuzz executions across 5 targets with
+zero crashes.
+
+### Browser-path WASM measurements (P6-M036)
+
+Node-instrumented real-WASM measurements (not real-Chromium claims;
+documented proxy):
+
+| Scenario | p50 |
+|---|---|
+| Typing, 500 sequential inserts | 0.003 ms/op (0 ops >50 ms in 2,500) |
+| Large paste, 5,000-op batch | 39.3 ms |
+| Remote fanout batch, 5,000 ops | 227.2 ms |
+| Snapshot import, 50k state (2.6 MB) | 16.5 ms |
+| Stale-client resync, 50k snapshot + 1k tail | 955.4 ms |
+
+WASM bundle: 165,032 B (`concord-crdt.wasm`) + 15,261 B JS glue =
+180,293 B (176.1 KiB). Every scenario gate is cross-engine golden
+parity (WASM digest == native digest).
+
+### TARGET vs MEASURED discipline
+
+Phase 6 targets (durable-ack p95 < 25 ms; 1→4 gw degradation ≤ 30 %;
+recovery ≥ 90 % faster; compaction ≤ 60 % bytes) are defined as
+targets in `docs/OBSERVABILITY.md` and the private success-criteria
+document; every number above is MEASURED under the stated environment
+and run discipline. Gaps and anomalies are recorded, never silently
+dropped (the one full-campaign anomaly — a load-generator client-exit
+at gw1-c10-d1 — shipped zero unacked ops and is root-caused in the
+campaign notes).

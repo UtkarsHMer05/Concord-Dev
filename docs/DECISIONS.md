@@ -1150,3 +1150,116 @@ retained and will not be removed.
   unchanged from Phase 4).
 - **Evidence:** `phase5_security.rs` (4 regression tests), realtime E2E
   resync test, retention/compaction/history suite extensions.
+
+## DEC-043 — Phase 6 verification architecture: evidence ledger before claims, machine-readable benchmark schema, chaos as first-class scenarios
+
+- **Context:** Phase 6 is the proof phase; earlier phases accumulated
+  evidence in mixed forms (ledger prose, test names, console output).
+- **Decision:** every Phase 6 benchmark emits a machine-readable result
+  (schema `concord.bench.result/1`) embedding a full environment
+  snapshot (run ID, commit, hardware, toolchain + service versions);
+  chaos scenarios emit 10-field JSON records aggregated automatically
+  into `{attempted, passed, failed, skipped, lostDurableAckedOps,
+  divergentReplicas}`; resume-eligibility requires before + after +
+  workload + denominator recorded in the private evidence ledger.
+- **Alternatives:** hand-recorded console outputs (rejected: unauditable
+  and drift-prone); treating test suites as implicit evidence for
+  performance claims (rejected: correctness green ≠ measured).
+
+## DEC-044 — Observability posture: runtime-gated OTel, hand-rolled Prometheus registry, legacy metrics endpoint kept byte-compatible
+
+- **Context:** the gateway needed OpenTelemetry tracing + Prometheus
+  metrics without destabilizing a verified binary or adopting heavy
+  metric-stack dependencies.
+- **Decision:** OTel is compiled-in but runtime-gated
+  (`GATEWAY_OTEL_ENABLED`, default false — zero behavior change off);
+  the Prometheus registry is a small hand-rolled thread-safe module
+  extending the existing telemetry counters (no new metrics crate);
+  the pre-existing `/api/v1/metrics` text endpoint is preserved
+  byte-compatible and `/metrics` serves the Prometheus exposition.
+  Cardinality is bounded by construction (labels only from const
+  tables) and audited by test. Correlation uses protocol-native
+  identity (`gw-<gateway>-batch-<batch>`), not new wire fields.
+- **Alternatives:** always-on OTel (rejected: runtime risk in a
+  verified path); a metrics crate (rejected: dependency weight for a
+  bounded need); wire-protocol correlation IDs (rejected: protocol
+  churn; existing fields suffice).
+
+## DEC-045 — Maintenance scheduler wired behind GATEWAY_WORKER_BINARY (P6 audit F-1)
+
+- **Context:** the Phase 5 lifecycle audit (SA-RUST6, P6-M019) found the
+  gateway binary never started the maintenance Scheduler — snapshots,
+  compaction sweeps and lease recovery only ran in tests.
+- **Decision:** `main.rs` constructs and spawns the BoundedRunner when
+  `GATEWAY_WORKER_BINARY` names an existing worker binary (validated at
+  config time); the env is absent in dev/E2E so single-process runs
+  stay deterministic. Graceful shutdown stops claiming first; in-flight
+  workers are kill-on-drop; lapsed leases requeue via the existing
+  sweep. Live-proven: a pending snapshot job was claimed, executed by
+  the real C++ worker, and finalized; SIGTERM drains cleanly.
+- **Alternatives:** always-on scheduler with a default worker path
+  (rejected: breaks the deterministic local-first dev posture);
+  leaving scheduling to an external operator (rejected: it silently
+  forfeits snapshot/compaction benefits in any deployed form).
+
+## DEC-046 — Chaos methodology: deterministic scenario ledger with explicit durability counting, not random process killing
+
+- **Context:** the phase prompt demands chaos that proves properties,
+  not anecdote.
+- **Decision:** every scenario pre-declares its 10-field record
+  (precondition, fault, expected degraded behavior, durability
+  expectation, recovery expectation, invariant, timeout, observed
+  result); lost-durable-ACK counting intersects observed ACK identities
+  with post-recovery PostgreSQL state (never asserted by absence
+  alone); divergence is measured by exact op-identity set equality on
+  fresh catch-up connections per surviving gateway (worker digest
+  verification where the worker is in the path). Docker-manipulated
+  faults restore state; the runner exits non-zero on any failure and
+  counts skips separately.
+- **Result:** 27/27 scenarios green across gateway/NATS/Redis/
+  PostgreSQL/worker/compound faults with 0 lost durable-ACKed
+  operations and 0 divergent replicas (aggregate JSON is the source of
+  truth; no hand-edited numbers).
+
+## DEC-047 — Security posture: threat model mapped to executable tests; scanners are inputs, not gates
+
+- **Context:** scanners alone cannot prove authorization semantics.
+- **Decision:** the formal threat model (SECURITY.md §8) maps every row
+  to an existing executable test or a named planned milestone; Phase 6
+  added the authorization/IDOR matrix, live-revocation proofs
+  (in-transaction recheck → immediate enforcement at the next batch
+  boundary, no TTL cache), internal broker/Redis trust abuse suites,
+  and a secret scanner whose output is redacted by construction.
+  Container base-image criticals are documented-accepted dev risk with
+  an explicit remediation path (image hardening landed; base rebuild is
+  Phase 7), surfaced by dep-scan's by-design exit code — never hidden.
+- **Alternatives:** treating `npm audit`/scanner exit codes as the
+  security story (rejected: scanners do not exercise authorization
+  logic); suppressing container findings (rejected: dishonest gates).
+
+## DEC-048 — Release images: multi-stage, pinned, non-root, built from clean trees; local smoke only (deployment stays Phase 7)
+
+- **Decision:** gateway and web release images are multi-stage builds
+  on pinned bases (rust:1.98-alpine + toolchain 1.98.1;
+  node:24.20-alpine; next standalone output), runtime layers contain
+  only the binary/server + CA certs, fixed non-root uids (10001/1000).
+  Image builds always export from `git archive HEAD` (never a dirty
+  working tree) and the smoke script boots each image asserting
+  health endpoints + non-root identity. No registry push, no deploy.
+- **Alternatives:** building from the working tree (rejected: in-flight
+  edits must never leak into release artifacts); heavier runtime bases
+  (rejected: contradicts hardening).
+
+## DEC-049 — CI topology shaped by the shared-test-DB reality
+
+- **Context:** all Rust integration suites and the TS db/realtime
+  projects share one `concord_test` database; truncating suites and
+  chaos Docker manipulation cannot overlap safely.
+- **Decision:** PR CI is a balanced parallel gate (web / rust+services
+  / native / wasm / security) with DB suites serialized per job;
+  distributed CI runs the cross-gateway suites and the TS realtime
+  project strictly LAST (its global setup drops/recreates the schema);
+  nightly lanes isolate chaos (own compose project) and sanitizer/fuzz
+  tiers; benchmark CI is dispatch-only for trend detection with the
+  local machine as the headline source. Drizzle migrations run before
+  Rust suites — the two migration families are independent.
