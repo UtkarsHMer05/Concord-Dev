@@ -83,6 +83,20 @@ case "${1:-ps}" in
     echo "worker probe status: ${probe} (expect 0)"
     [ "$probe" = "0" ] && echo "WORKER: PASS" || echo "WORKER: FAIL"
     ;;
+  prom)
+    # Prometheus health + scrape targets + one gateway metric family.
+    echo "--- targets up:"
+    curl -s -m 5 'http://127.0.0.1:9090/api/v1/query?query=up' \
+      | tr ',' '\n' | grep -E 'job|instance|"1"' | head -12
+    echo "--- sample gateway metric (concord_* family):"
+    curl -s -m 5 'http://127.0.0.1:9090/api/v1/query?query={__name__=~"concord.*"}' \
+      | tr ',' '\n' | grep -oE '"__name__":"[^"]*"|"value":\["[0-9.]+"' | head -10
+    ;;
+  grafana)
+    curl -s -m 5 -o /dev/null -w 'grafana loopback http: %{http_code}\n' \
+      "http://127.0.0.1:3001/api/health"
+    curl -s -m 5 "http://127.0.0.1:3001/api/health" | head -c 120; echo
+    ;;
   restart)
     compose restart "${2:?service name}"
     ;;
