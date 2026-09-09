@@ -41,6 +41,34 @@ Deployment topology for staging/prod: `docs/DEPLOYMENT.md` +
   duplicates, denies, malformed, slow-consumer disconnects, sync batches,
   broker publish/consume/poison, rate-limited
 
+### Inspecting cloud-stack observability — SSH tunnel ONLY (P7-M020)
+
+`docker-compose.cloud.yml` binds Prometheus (`127.0.0.1:9090`) and
+Grafana (`127.0.0.1:3001`) to the instance's loopback, and the instance
+security group opens NOTHING for them (only the ALB SG reaches :3000
+and :8890). Grafana runs anonymous-Admin — safe **only** because the
+loopback binding + SG make remote reachability impossible. The one
+supported way to look at dashboards on the cloud stack:
+
+```bash
+# From your machine (instance reached via SSM or SSH; keep-alive OK):
+ssh -N -L 9090:127.0.0.1:9090 -L 3001:127.0.0.1:3001 <instance>
+
+# then open locally:
+#   http://127.0.0.1:3001  (Grafana — Admin, anonymous)
+#   http://127.0.0.1:9090  (Prometheus)
+```
+
+Rules (security invariants — do not relax):
+
+- **Never** add a `ports:` entry without a `127.0.0.1:` prefix for
+  Prometheus/Grafana, and never open 9090/3001 in the instance SG.
+- **Never** port-forward Grafana to `0.0.0.0` on your laptop (`-L
+  3001:...` binds loopback by default — keep it that way).
+- If Grafana must ever be shared beyond one operator, anonymous-Admin
+  MUST be replaced by real authentication first (the compose file's
+  own comment states this condition).
+
 ## Shutdown + failure behavior (tested)
 
 - SIGTERM/SIGINT: drain notice → write cutoff → bounded grace → exit 0.

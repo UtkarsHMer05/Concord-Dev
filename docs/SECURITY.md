@@ -2,7 +2,7 @@
 
 Status: Authoritative (Phase 6 threat model current; Phase 4 §1–6 and
 Phase 5 §7 remain in force as described below)
-Version: 2.0
+Version: 2.1
 Last updated: 2026-09-09
 
 > **Document structure.** §1–§5 record the Phase 3 posture, §6 the Phase 4
@@ -12,7 +12,9 @@ Last updated: 2026-09-09
 > traced to either an existing executable test (file/suite named) or a
 > planned Phase 6 test (marked `PLANNED → P6-Mxxx`). §9 records the
 > Phase 6 scanning tooling (P6-M024 secret scanning, P6-M025 supply-chain
-> scanning).
+> scanning). §10 records the Phase 7 production security configuration
+> (P7-M020 sign-off: TLS/Clerk posture, required env, network exposure,
+> rate limits, CSP posture, runtime secrets, IAM recommendations).
 
 ## 1. Trust boundaries (CURRENT)
 
@@ -521,3 +523,220 @@ names/versions/licenses only — no secrets by construction); double
 regeneration produced byte-identical files for all three. Regenerate
 any time with `bash scripts/security/sbom.sh` (`web` / `rust` /
 `native` / `all` / `validate` subcommands).
+
+---
+
+## 10. Production security configuration (P7-M020, CURRENT as of 2026-09-09)
+
+This section is the security sign-off record for the Phase 7 staging/
+production deployment (DEC-050 topology: ALB → web :3000 + nginx :8890
+→ 3 gateways; PG/NATS/Redis private; Prometheus/Grafana loopback).
+It states the REQUIRED configuration, the honest posture where v1 falls
+short, and who owns each item.
+
+### 10.1 TLS / WSS posture (DEC-050) — BLOCKER documented
+
+**Decision review (SA-SEC7):** v1 owns no domain, so ACM DNS validation
+is impossible; email validation is not offered for ALB-managed ACM certs
+in practice; an ALB cannot serve a cert for its own default DNS name
+(`*.elb.amazonaws.com` certs are AWS-internal). There is therefore **no
+supported way to get TLS on the ALB DNS name without owning a domain**
+— the no-TLS v1 posture is airtight as stated. `CERT_ARN` in
+`scripts/deploy/provision.sh` is now a REAL upgrade path: when set, the
+script provisions `HTTPS :443` (web) + `HTTPS :8443` (sync/WSS)
+listeners with the ACM cert; unset, it serves plain `:80` + `:8890`.
+
+**Risk quantification (plain ws://):** the sync gateway receives the
+Clerk session JWT in the `authenticate` control frame. Over `ws://`, that
+JWT is sniffable by anyone on-path (same LAN, ISP, or any hop). The JWT
+is short-lived (~60 s) and revocable, but on-path capture ⇒ session
+hijack for the token lifetime. The web tier over `http://` additionally
+ships the whole app + Clerk publishable key (public by design) — no
+secret leak there, but no integrity either.
+
+**Clerk + plain HTTP — the FUNCTIONAL blocker (verified):**
+
+- Production Clerk (`pk_live_`) **requires an owned domain** in the
+  dashboard (Clerk production-deploy docs: "You will need to have a
+  domain you own"; FAPI/cookies assume the CNAME'd frontend API). It
+  cannot serve the ALB DNS name.
+- Development Clerk (`pk_test_`, `<id>.clerk.accounts.dev`) is NOT
+  hard-gated to `localhost` — Clerk's own docs recommend it for
+  non-local preview domains (`*.vercel.app`). But dev instances run the
+  **dev-browser handshake**: clerk-js opens a popup to
+  `https://<id>.clerk.accounts.dev/v1/dev_browser/init?origin=<app
+  origin>&redirect=<app url>`; the user must click "Trust this
+  application". The handshake works from any origin INCLUDING plain
+  `http://` origins (there is no `isSecureContext` gate in clerk-js 4.x
+  — verified in the shipped bundle; cookies are set with `secure:
+  <isDevInstance || https:>` so dev cookies stay non-Secure over http).
+  Sign-in on plain http from a non-localhost origin therefore WORKS but
+  requires the trust popup on every browser, marks the session as a
+  dev-browser token, and caps at 100 users.
+- **Net verdict:** the no-domain posture is FUNCTIONAL only in the
+  Clerk-*development*-instance sense (trust popup + relaxed security +
+  100-user cap), over plaintext. It is acceptable for **staging on a
+  trusted network**, and NOT acceptable for production sign-in. The
+  recommendation stands: v1 production deploy must either (a) obtain a
+  domain (then ACM DNS validation + Clerk production instance — the
+  one-step upgrade), or (b) stay staging-only. This is recorded as the
+  single open security blocker for production.
+
+### 10.2 Required staging/prod settings (env block)
+
+```bash
+# --- gateway.env (SSM-backed / bundle) — EXACT values ---
+GATEWAY_BIND_HOST=0.0.0.0                       # IP literal (validated)
+GATEWAY_BIND_PORT=8791                           # 8791/8792/8793 per replica
+GATEWAY_ALLOWED_ORIGINS=http://<ALB-DNS-NAME>   # the ORIGIN the browser
+                                                # shows (scheme+host, no
+                                                # path, no trailing /).
+                                                # With TLS: https://<host>.
+GATEWAY_DATABASE_URL=postgres://...              # SSM SecureString
+GATEWAY_CLERK_ISSUER=https://<instance>.clerk.accounts.dev
+GATEWAY_NATS_URL=nats://nats:4222
+GATEWAY_REDIS_URL=redis://redis:6379
+GATEWAY_NATS_SUBJECT_PREFIX=concord.<env>        # same on ALL gateways
+GATEWAY_WORKER_BINARY=/app/concord-worker
+GATEWAY_RATE_CONNECT_PER_MIN=60                  # see 10.4
+GATEWAY_MAX_FRAME_SIZE=8388608                   # 8 MiB (PROTOCOL §9.11)
+# --- web env (concord.env) ---
+NEXT_PUBLIC_SYNC_GATEWAY_URL=ws://<ALB-DNS-NAME>:8890/api/v1/sync
+                                                # wss://<host>:8443/... with TLS
+```
+
+**`GATEWAY_ALLOWED_ORIGINS` is currently CONFIG-ONLY (see finding
+F-P7-SEC-01 in the sign-off report):** the gateway parses and normalizes
+it but does NOT yet reject upgrades by `Origin` header — enforcement is
+a `rust/` change (lead-owned, P8). Until then the value MUST still be
+set (it documents intent and is validated on upgrade-day).
+
+### 10.3 Network exposure (verified against provision.sh + compose)
+
+| Port | Exposure | Enforcement |
+|---|---|---|
+| 443/80 | ALB only — public | ALB SG `concord-<env>-alb-sg` |
+| 3000 (web) | ALB SG only | instance SG rule: source = ALB SG |
+| 8890 (nginx sync LB) | ALB SG only | same |
+| 8791–8793 (gateways) | compose network only | no `ports:` in compose |
+| 5432 (PG) | `127.0.0.1` on instance only | compose `ports: "127.0.0.1:5432:5432"` |
+| 4222/6379 (NATS/Redis) | compose network only | no `ports:` |
+| 9090/3001 (Prometheus/Grafana) | loopback only + NOT in SG | compose `127.0.0.1:` binds; SSH-tunnel access (OPERATIONS.md) |
+
+No SSH ingress is created; SSM Session Manager is the access path.
+Grafana anonymous-Admin is bound to loopback (never exposed; if it ever
+is, auth MUST be enabled — see OPERATIONS.md tunnel note).
+
+### 10.4 Rate limits for public internet (recommended values)
+
+Defaults (`connect 240/min/IP`, `write 2000/min`, `malformed 50/min`,
+`fetch 30/min/conn`) are tuned for LOCAL dev. Behind nginx (round-robin
+across 3 gateways) the connect-limit principal is the LB's source IP —
+ALL clients share one bucket per gateway (finding F-P7-SEC-04). Public
+exposure therefore needs:
+
+- `GATEWAY_RATE_CONNECT_PER_MIN=60` — 240 is too generous as a GLOBAL
+  bucket; 60/min shared ≈ 1 reconnect-storm of 20 tabs × 3 gateways.
+- Keep `write 2000/min` and `fetch 30/min/conn` (per-connection or
+  per-user scopes — safe under LB).
+- `GATEWAY_MAX_FRAME_SIZE=8388608` (8 MiB) stays: it is the protocol
+  cap validated against snapshot-serve size (SEC5-3), per-frame, not
+  per-bucket.
+- Long-term fix (P8, `rust/`-owned): rate-limit on `X-Forwarded-For`
+  (trusted only from nginx/ALB) or the authenticated principal rather
+  than the TCP peer IP.
+
+### 10.5 CSP, cookies, verbose errors, source maps (honest posture)
+
+- **CSP: none in v1 (documented).** The app emits no
+  `Content-Security-Policy` (no `next.config.ts` headers, no
+  middleware). A strict CSP is non-trivial here: Clerk requires
+  `script-src/connect-src/frame-src` entries for its FAPI host +
+  `*.protect.clerk.com` (with `:*` on connect-src!), TipTap uses inline
+  styling, and the CRDT WASM worker needs `worker-src 'self' blob:` +
+  `script-src` wasm paths (`WebAssembly.instantiate` from a first-party
+  `/wasm/concord-crdt.wasm` fetch inside a worker). Recommendation for
+  v2: start with `@clerk/nextjs`'s built-in `contentSecurityPolicy`
+  middleware option (`default` mode; available in the installed
+  `@clerk/nextjs 7.9.1`), then tighten `worker-src`/`script-src` for
+  the WASM worker. v1 ships without CSP — an accepted, documented gap
+  (no third-party script hosts beyond Clerk's own CDN-hosted clerk-js).
+- **Cookies/session: Clerk defaults, not overridden.** Concord code
+  never touches `document.cookie` or Clerk cookie options (verified by
+  grep) — Clerk's httpOnly/secure/sameSite defaults apply unmodified.
+  Clerk sets `secure` on its session cookies whenever the instance is
+  production OR the origin is `https:`; dev-instance cookies over http
+  are non-Secure by Clerk's own choice (see 10.1).
+- **Verbose errors: fixed + audited.** `error.tsx` (M007) shows plain
+  copy + `error.digest`; the "Technical details" disclosure renders
+  `error.message`, which in production for SERVER-side errors is
+  Next.js's generic redacted message (digest only); client-thrown
+  messages are Concord's own vocabulary-coded strings
+  (`src/server/result.ts` maps every error to a fixed user-safe table).
+  Server actions + API routes return only `type` + fixed `message`
+  (verified across `src/app/actions`, `src/app/api`). The single
+  `console.error` (`src/server/db/client.ts` idle-client message) is
+  server-side log only.
+- **Source maps: not uploaded.** Production Next.js build emits only a
+  4KB stub map (Phase 6 audit; re-verified 2026-09-09: exactly one 4KB
+  `.map` in `.next/static`). The deploy path is S3 bundle → docker
+  images; nothing uploads `.next/static` to the ALB webroot beyond what
+  the image serves, and the stub leaks no source. No change needed.
+
+### 10.6 Secrets at runtime (accepted container reality)
+
+Chain: SSM SecureString `/concord/<env>/concord.env` → written at
+launch by `user-data.sh` with mode 600 root-only → compose `env_file`.
+`user-data.sh` never echoes values (only status lines; the SSM
+parameter is redirected straight to the file). **Accepted limitation:**
+any process inside a container (and anyone with docker/SSH access on
+the instance) can read its own container's env via `/proc/<pid>/environ`
+or `docker inspect` — this is inherent to env-injected secrets in
+compose. The compensating controls are: instance access is SSM-only (no
+public SSH), the env file is root-600, and the operators list is the
+deployment owners. Post-v1 hardening path (documented, not built):
+secrets as docker secrets files / SSM Agent APIs rather than env vars.
+
+### 10.7 Post-v1 IAM posture (ROOT-credential account — DEC-050 flag)
+
+The account currently deploys with ROOT credentials. Recommended
+post-v1 hardening (account-level actions, owned by the deployment
+owner, NOT part of this repo):
+
+1. Create a scoped `concord-deploy` IAM user (programmatic, MFA on the
+   console login if kept at all) with a minimal policy: the EC2
+   run/describe subset for the Concord instance tags, ALB/TG/listener
+   create+describe, SG create+authorize for `concord-*` groups, S3
+   read/write on the bundle bucket only, SSM GetParameter on
+   `/concord/*` only, CloudWatch Logs read. Nothing else.
+2. Rotate/remove the ROOT access keys entirely (root should hold no
+   standing keys; root MFA stays).
+3. Secrets (SSM SecureString) written via a separate
+   `concord-secrets-admin` role; the deploy user needs only
+   GetParameter, never PutParameter.
+4. Enable CloudTrail (if not already) and alert on any root-identity
+   API call.
+5. Instance profile instead of ambient credentials on the EC2 instance:
+   an instance role with only `s3:GetObject` on the bundle path and
+   `ssm:GetParameter` on `/concord/<env>/*` — then user-data needs no
+   user credentials at all.
+
+### 10.8 Clerk dashboard checklist (external user actions)
+
+The Clerk instance is configured OUTSIDE the repo (dashboard). Before
+production sign-in works, the deployment owner must, in the Clerk
+dashboard:
+
+- [ ] Add the app origin (`https://<domain>`; for the v1 no-domain
+      posture: the ALB DNS origin, dev instance only) to **Paths →
+      Sign-in/Sign-up redirects** allowed URLs.
+- [ ] Record the matching `GATEWAY_CLERK_ISSUER` (the instance's
+      issuer) in gateway env — JWTs are refused otherwise (auth fails,
+      indistinguishable from unauthorized).
+- [ ] Production: associate the owned domain (Domains page), pull
+      `pk_live_`/`sk_live_` keys, and restrict Frontend API access via
+      the subdomain allowlist (Clerk strongly recommends; rejects
+      non-allowlisted subdomains).
+- [ ] Set `authorizedParties` (via `clerkMiddleware`) to the exact
+      origin(s) once TLS lands — protects against subdomain cookie
+      leaking; omitted today because there is no domain (documented).
