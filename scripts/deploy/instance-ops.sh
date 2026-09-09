@@ -73,6 +73,16 @@ case "${1:-ps}" in
     done; echo
     echo "(round-robin across gw1..gw3 — every response must be 200)"
     ;;
+  worker)
+    # generate_ops probe — the EXACT frame proven by the phase6 release
+    # workflow: [u32 24][u32 6 cmd][u64 1 seed][u32 10 ops][u32 2
+    # replicas][u32 0 shape]. Written via printf INSIDE this script (no
+    # SSM JSON escaping in the path); expected head: [u32 0][u32 len]…
+    probe=$(docker exec concord-"${ENV}"-gw1 sh -c \
+      "printf '\\x18\\x00\\x00\\x00\\x06\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x0a\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00' | /app/concord-worker 2>/dev/null | od -An -tu4 -N4 | tr -d '[:space:]'")
+    echo "worker probe status: ${probe} (expect 0)"
+    [ "$probe" = "0" ] && echo "WORKER: PASS" || echo "WORKER: FAIL"
+    ;;
   restart)
     compose restart "${2:?service name}"
     ;;
