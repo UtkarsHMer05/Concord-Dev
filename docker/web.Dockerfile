@@ -48,7 +48,19 @@ COPY --from=build --chown=nextjs:nodejs /app/public ./public
 # Non-root user (node image ships uid 1000 `node`).
 USER node
 EXPOSE 3000
-# Health check: the app exposes /api/health (liveness) — container-level
-# process liveness via node is enough here; the app healthcheck runs in the
-# smoke test (docker/web smoke) rather than baked into the image.
+# HEALTHCHECK (P7-M016): node ships with the image, busybox wget exists in
+# the alpine base. Node fetch is preferred (it IS the runtime we shipped;
+# no dependence on busybox applet behavior). /api/health checks PostgreSQL:
+# an unhealthy DB returns 503 → the container is flagged unhealthy (the
+# correct signal for orchestrators — the process itself is still alive).
+# A pure liveness probe can target "/" instead.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+# Signal handling (P7-M016, VERIFIED): CMD is exec-form so node runs as
+# PID 1 and receives SIGTERM directly from `docker stop`/orchestrators.
+# Next.js standalone server.js registers SIGTERM/SIGINT handlers
+# (next/dist/server/lib/start-server.js) that close the listener, finish
+# pending requests, and exit — measured: `docker stop -t 30` exits with
+# code 143 in ~0.4 s. No init/tini wrapper is needed; do NOT add a shell
+# ENTRYPOINT here (sh does not forward signals).
 CMD ["node", "server.js"]

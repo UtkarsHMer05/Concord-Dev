@@ -34,7 +34,7 @@ export const TemplatesGallery = () => {
 
   return (
     <div className="bg-[#F1F3F4]">
-      <div className="max-w-screen-xl mx-auto px-16 py-6 flex flex-col gap-y-4">
+      <div className="max-w-screen-xl mx-auto px-4 md:px-16 py-6 flex flex-col gap-y-4">
         <h3 className="font-medium">Start a new document</h3>
         <Carousel>
           <CarouselContent className="-ml-4">
@@ -52,13 +52,14 @@ export const TemplatesGallery = () => {
                   <button
                     disabled={isCreating}
                     onClick={() => void onTemplateClick(template.label, template.initialContent)}
+                    aria-label={`Create a new document from the ${template.label} template`}
                     style={{
                       backgroundImage: `url(${template.imageUrl})`,
                       backgroundSize: "cover",
                       backgroundPosition: "center",
                       backgroundRepeat: "no-repeat",
                     }}
-                    className="size-full hover:border-blue-500 rounded-sm border hover:bg-blue-50 transition flex flex-col items-center justify-center gap-y-4 bg-white"
+                    className="size-full hover:border-blue-500 rounded-sm border hover:bg-blue-50 transition flex flex-col items-center justify-center gap-y-4 bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                   />
                   <p className="text-sm font-medium truncate">
                     {template.label}

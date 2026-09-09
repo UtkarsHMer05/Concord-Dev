@@ -3,7 +3,6 @@
 import Link from "next/link";
 import Image from "next/image"
 import { toast } from "sonner";
-import { BsFilePdf } from "react-icons/bs";
 import { useRouter } from "next/navigation";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import {
@@ -27,6 +26,7 @@ import {
 
 import { RenameDialog } from "@/components/rename-dialog";
 import { RemoveDialog } from "@/components/remove-dialog";
+import { CollaborativeModeIndicator } from "@/components/collaborative-mode-indicator";
 import {
   Menubar,
   MenubarContent,
@@ -116,20 +116,20 @@ export const Navbar = ({ data }: NavbarProps) => {
   };
 
   return (
-    <nav className="flex items-center justify-between">
-      <div className="flex gap-2 items-center">
-        <Link href="/">
-          <Image src="/logo.svg" alt="Logo" width={36} height={36} />
+    <nav className="flex items-center justify-between gap-x-2 min-w-0">
+      <div className="flex gap-2 items-center min-w-0">
+        <Link href="/" aria-label="Back to Concord home" className="shrink-0">
+          <Image src="/logo.svg" alt="Concord logo" width={36} height={36} />
         </Link>
-        <div className="flex flex-col">
+        <div className="flex flex-col min-w-0">
           <DocumentInput
             title={data.title}
             id={data.id}
             metadataVersion={data.metadataVersion}
             canRename={canRename}
           />
-          <div className="flex">
-            <Menubar className="border-none bg-transparent shadow-none h-auto p-0">
+          <div className="flex items-center gap-x-2 min-w-0 overflow-x-auto">
+            <Menubar className="border-none bg-transparent shadow-none h-auto p-0 shrink-0">
               <MenubarMenu>
                 <MenubarTrigger className="text-sm font-normal py-0.5 px-[7px] rounded-sm hover:bg-muted h-auto">
                   File
@@ -149,13 +149,13 @@ export const Navbar = ({ data }: NavbarProps) => {
                         <GlobeIcon className="size-4 mr-2" />
                         HTML
                       </MenubarItem>
-                      <MenubarItem onClick={() => window.print()}>
-                        <BsFilePdf className="size-4 mr-2" />
-                        PDF
-                      </MenubarItem>
                       <MenubarItem onClick={onSaveText}>
                         <FileTextIcon className="size-4 mr-2" />
                         Text
+                      </MenubarItem>
+                      <MenubarItem onClick={() => window.print()}>
+                        <PrinterIcon className="size-4 mr-2" />
+                        Print / Save PDF <MenubarShortcut>⌘P</MenubarShortcut>
                       </MenubarItem>
                     </MenubarSubContent>
                   </MenubarSub>
@@ -261,7 +261,7 @@ export const Navbar = ({ data }: NavbarProps) => {
                       </MenubarItem>
                       <MenubarItem onClick={() => editor?.chain().focus().toggleStrike().run()}>
                         <StrikethroughIcon className="size-4 mr-2" />
-                        <span>Strikethrough&nbsp;&nbsp;</span> <MenubarShortcut>⌘S</MenubarShortcut>
+                        <span>Strikethrough&nbsp;&nbsp;</span> <MenubarShortcut>⌘⇧X</MenubarShortcut>
                       </MenubarItem>
                     </MenubarSubContent>
                   </MenubarSub>
@@ -272,10 +272,11 @@ export const Navbar = ({ data }: NavbarProps) => {
                 </MenubarContent>
               </MenubarMenu>
             </Menubar>
+            <CollaborativeModeIndicator />
           </div>
         </div>
       </div>
-      <div className="flex gap-3 items-center pl-6">
+      <div className="flex gap-3 items-center pl-2 sm:pl-6 shrink-0">
         <OrganizationSwitcher
           afterCreateOrganizationUrl="/"
           afterLeaveOrganizationUrl="/"

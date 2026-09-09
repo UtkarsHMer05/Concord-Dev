@@ -3,30 +3,30 @@
 import { useState } from "react";
 import { type ColorResult, SketchPicker } from "react-color";
 import { type Level } from "@tiptap/extension-heading";
-import { 
+import {
   AlignCenterIcon,
   AlignJustifyIcon,
   AlignLeftIcon,
   AlignRightIcon,
-  BoldIcon, 
-  ChevronDownIcon, 
-  HighlighterIcon, 
-  ImageIcon, 
-  ItalicIcon, 
-  Link2Icon, 
-  ListCollapseIcon, 
-  ListIcon, 
-  ListOrderedIcon, 
-  ListTodoIcon, 
-  LucideIcon, 
-  MinusIcon, 
-  PlusIcon, 
-  PrinterIcon, 
-  Redo2Icon, 
-  RemoveFormattingIcon, 
-  SearchIcon, 
-  SpellCheckIcon, 
-  UnderlineIcon, 
+  BoldIcon,
+  ChevronDownIcon,
+  HighlighterIcon,
+  ImageIcon,
+  ItalicIcon,
+  Link2Icon,
+  ListCollapseIcon,
+  ListIcon,
+  ListOrderedIcon,
+  ListTodoIcon,
+  LucideIcon,
+  MinusIcon,
+  PlusIcon,
+  PrinterIcon,
+  Redo2Icon,
+  RemoveFormattingIcon,
+  SearchIcon,
+  SpellCheckIcon,
+  UnderlineIcon,
   Undo2Icon,
   UploadIcon
 } from "lucide-react";
@@ -50,6 +50,37 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
+const SPELLCHECK_KEY = "concord.editor.spellcheck";
+
+/** Spell-check is a document-level DOM attribute; track it in React state. */
+const useSpellCheck = () => {
+  const [enabled, setEnabled] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return window.localStorage.getItem(SPELLCHECK_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+
+  const toggle = () => {
+    setEnabled((current) => {
+      const next = !current;
+      document.querySelectorAll("[contenteditable]").forEach((el) => {
+        el.setAttribute("spellcheck", next ? "true" : "false");
+      });
+      try {
+        window.localStorage.setItem(SPELLCHECK_KEY, String(next));
+      } catch {
+        // Storage unavailable (private mode): the toggle stays per-session.
+      }
+      return next;
+    });
+  };
+
+  return { enabled, toggle };
+};
+
 const LineHeightButton = () => {
   const { editor } = useEditorStore();
 
@@ -65,7 +96,10 @@ const LineHeightButton = () => {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 px-1.5 overflow-hidden text-sm"
+          aria-label="Line height"
+          title="Line height"
+
+          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 px-1.5 overflow-hidden text-sm"
         >
           <ListCollapseIcon className="size-4" />
         </button>
@@ -76,7 +110,7 @@ const LineHeightButton = () => {
             key={value}
             onClick={() => editor?.chain().focus().setLineHeight(value).run()}
             className={cn(
-              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80",
+              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               editor?.getAttributes("paragraph").lineHeight === value && "bg-neutral-200/80"
             )}
           >
@@ -141,18 +175,22 @@ const FontSizeButton = () => {
     <div className="flex items-center gap-x-0.5">
       <button
         onClick={decrement}
-        className="h-7 w-7 shrink-0 flex items-center justify-center rounded-sm hover:bg-neutral-200/80"
+        aria-label="Decrease font size"
+        title="Decrease font size"
+        className="h-7 w-7 shrink-0 flex items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
       >
         <MinusIcon className="size-4" />
       </button>
       {isEditing ? (
         <input
           type="text"
+          inputMode="numeric"
+          aria-label="Font size in pixels"
           value={inputValue}
           onChange={handleInputChange}
           onBlur={handleInputBlur}
           onKeyDown={handleKeyDown}
-          className="h-7 w-10 text-sm text-center border border-neutral-400 rounded-sm bg-transparent focus:outline-none focus:ring-0"
+          className="h-7 w-10 text-sm text-center border border-neutral-400 rounded-sm bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       ) : (
         <button
@@ -160,14 +198,18 @@ const FontSizeButton = () => {
             setIsEditing(true);
             setFontSize(currentFontSize);
           }}
-          className="h-7 w-10 text-sm text-center border border-neutral-400 rounded-sm hover:bg-neutral-200/80"
+          aria-label="Font size — click to edit"
+          title="Font size (px)"
+          className="h-7 w-10 text-sm text-center border border-neutral-400 rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
         >
           {currentFontSize}
         </button>
       )}
       <button
         onClick={increment}
-        className="h-7 w-7 shrink-0 flex items-center justify-center rounded-sm hover:bg-neutral-200/80"
+        aria-label="Increase font size"
+        title="Increase font size"
+        className="h-7 w-7 shrink-0 flex items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
       >
         <PlusIcon className="size-4" />
       </button>
@@ -197,7 +239,10 @@ const ListButton = () => {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 px-1.5 overflow-hidden text-sm"
+          aria-label="Lists"
+          title="Lists"
+
+          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 px-1.5 overflow-hidden text-sm"
         >
           <ListIcon className="size-4" />
         </button>
@@ -208,7 +253,7 @@ const ListButton = () => {
             key={label}
             onClick={onClick}
             className={cn(
-              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80",
+              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               isActive() && "bg-neutral-200/80"
             )}
           >
@@ -231,13 +276,13 @@ const AlignButton = () => {
       icon: AlignLeftIcon,
     },
     {
-      label: "Align Center", 
+      label: "Align Center",
       value: "center",
       icon: AlignCenterIcon
     },
     {
       label: "Align Right",
-      value: "right", 
+      value: "right",
       icon: AlignRightIcon
     },
     {
@@ -251,7 +296,10 @@ const AlignButton = () => {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 px-1.5 overflow-hidden text-sm"
+          aria-label="Text alignment"
+          title="Text alignment"
+
+          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 px-1.5 overflow-hidden text-sm"
         >
           <AlignLeftIcon className="size-4" />
         </button>
@@ -262,7 +310,7 @@ const AlignButton = () => {
             key={value}
             onClick={() => editor?.chain().focus().setTextAlign(value).run()}
             className={cn(
-              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80",
+              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               editor?.isActive({ textAlign: value }) && "bg-neutral-200/80"
             )}
           >
@@ -313,7 +361,10 @@ const ImageButton = () => {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
-            className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 px-1.5 overflow-hidden text-sm"
+          aria-label="Insert image"
+          title="Insert image"
+
+            className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 px-1.5 overflow-hidden text-sm"
           >
             <ImageIcon className="size-4" />
           </button>
@@ -335,8 +386,13 @@ const ImageButton = () => {
           <DialogHeader>
             <DialogTitle>Insert image URL</DialogTitle>
           </DialogHeader>
+          <label htmlFor="image-url-input" className="sr-only">
+            Image URL
+          </label>
           <Input
-            placeholder="Insert image URL"
+            id="image-url-input"
+            type="url"
+            placeholder="https://example.com/image.png"
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
             onKeyDown={(e) => {
@@ -373,16 +429,29 @@ const LinkButton = () => {
     }}>
       <DropdownMenuTrigger asChild>
         <button
-          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 px-1.5 overflow-hidden text-sm"
+          aria-label="Insert link"
+          title="Insert link"
+
+          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 px-1.5 overflow-hidden text-sm"
         >
           <Link2Icon className="size-4" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="p-2.5 flex items-center gap-x-2">
+        <label htmlFor="link-url-input" className="sr-only">
+          Link URL
+        </label>
         <Input
+          id="link-url-input"
+          type="url"
           placeholder="https://example.com"
           value={value}
           onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              onChange(value);
+            }
+          }}
         />
         <Button onClick={() => onChange(value)}>
           Apply
@@ -405,7 +474,10 @@ const HighlightColorButton = () => {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 px-1.5 overflow-hidden text-sm"
+          aria-label="Highlight color"
+          title="Highlight color"
+
+          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 px-1.5 overflow-hidden text-sm"
         >
           <HighlighterIcon className="size-4" />
         </button>
@@ -433,7 +505,10 @@ const TextColorButton = () => {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 px-1.5 overflow-hidden text-sm"
+          aria-label="Text color"
+          title="Text color"
+
+          className="h-7 min-w-7 shrink-0 flex flex-col items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 px-1.5 overflow-hidden text-sm"
         >
           <span className="text-xs">A</span>
           <div className="h-0.5 w-full" style={{ backgroundColor: value }} />
@@ -455,7 +530,7 @@ const HeadingLevelButton = () => {
   const headings = [
     { label: "Normal text", value: 0, fontSize: "16px" },
     { label: 'Heading 1', value: 1, fontSize: '32px' },
-    { label: 'Heading 2', value: 2, fontSize: '24px' }, 
+    { label: 'Heading 2', value: 2, fontSize: '24px' },
     { label: 'Heading 3', value: 3, fontSize: '20px' },
     { label: 'Heading 4', value: 4, fontSize: '18px' },
     { label: 'Heading 5', value: 5, fontSize: '16px' },
@@ -475,7 +550,10 @@ const HeadingLevelButton = () => {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="h-7 min-w-7 shrink-0 flex items-center justify-center rounded-sm hover:bg-neutral-200/80 px-1.5 overflow-hidden text-sm"
+          aria-label="Heading level"
+          title="Heading level"
+
+          className="h-7 min-w-7 shrink-0 flex items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 px-1.5 overflow-hidden text-sm"
         >
           <span className="truncate">
             {getCurrentHeading()}
@@ -496,7 +574,7 @@ const HeadingLevelButton = () => {
               }
             }}
             className={cn(
-              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80",
+              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               (value === 0 && !editor?.isActive("heading")) || editor?.isActive("heading", { level: value }) && "bg-neutral-200/80"
             )}
           >
@@ -523,7 +601,10 @@ const FontFamilyButton = () => {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="h-7 w-[120px] shrink-0 flex items-center justify-between rounded-sm hover:bg-neutral-200/80 px-1.5 overflow-hidden text-sm"
+          aria-label="Font family"
+          title="Font family"
+
+          className="h-7 w-[120px] shrink-0 flex items-center justify-between rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 px-1.5 overflow-hidden text-sm"
         >
           <span className="truncate">
             {editor?.getAttributes("textStyle").fontFamily || "Arial"}
@@ -537,7 +618,7 @@ const FontFamilyButton = () => {
             onClick={() => editor?.chain().focus().setFontFamily(value).run()}
             key={value}
             className={cn(
-              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80",
+              "flex items-center gap-x-2 px-2 py-1 rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               editor?.getAttributes("textStyle").fontFamily === value && "bg-neutral-200/80"
             )}
             style={{ fontFamily: value }}
@@ -554,18 +635,24 @@ interface ToolbarButtonProps {
   onClick?: () => void;
   isActive?: boolean;
   icon: LucideIcon;
+  /** Accessible name for icon-only buttons. */
+  "aria-label"?: string;
 };
 
-const ToolbarButton = ({ 
+const ToolbarButton = ({
   onClick,
   isActive,
   icon: Icon,
+  "aria-label": ariaLabel,
  }: ToolbarButtonProps) => {
   return (
     <button
       onClick={onClick}
+      aria-label={ariaLabel}
+      aria-pressed={isActive ? true : undefined}
+      title={ariaLabel}
       className={cn(
-        "text-sm h-7 min-w-7 flex items-center justify-center rounded-sm hover:bg-neutral-200/80",
+        "text-sm h-7 min-w-7 flex items-center justify-center rounded-sm hover:bg-neutral-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
         isActive && "bg-neutral-200/80"
       )}
     >
@@ -576,10 +663,11 @@ const ToolbarButton = ({
 
 export const Toolbar = () => {
   const { editor } = useEditorStore();
+  const spellCheck = useSpellCheck();
 
-  const sections: { 
-    label: string; 
-    icon: LucideIcon; 
+  const sections: {
+    label: string;
+    icon: LucideIcon;
     onClick: () => void;
     isActive?: boolean;
   }[][] = [
@@ -600,13 +688,11 @@ export const Toolbar = () => {
         onClick: () => window.print(),
       },
       {
-        label: "Spell Check",
+        label: spellCheck.enabled ? "Disable spell check" : "Enable spell check",
         icon: SpellCheckIcon,
-        onClick: () => {
-          const current = editor?.view.dom.getAttribute("spellcheck");
-          editor?.view.dom.setAttribute("spellcheck", current === "false" ? "true" : "false");
-        },
-      }
+        isActive: spellCheck.enabled,
+        onClick: spellCheck.toggle,
+      },
     ],
     [
       {
@@ -646,7 +732,7 @@ export const Toolbar = () => {
   return (
     <div className="bg-[#F1F4F9] px-2.5 py-0.5 rounded-[24px] min-h-[40px] flex items-center gap-x-0.5 overflow-x-auto">
       {sections[0].map((item) => (
-        <ToolbarButton key={item.label} {...item} />
+        <ToolbarButton key={item.label} {...item} aria-label={item.label} />
       ))}
       <Separator orientation="vertical" className="h-6 bg-neutral-300" />
       <FontFamilyButton />
@@ -656,7 +742,7 @@ export const Toolbar = () => {
       <FontSizeButton />
       <Separator orientation="vertical" className="h-6 bg-neutral-300" />
       {sections[1].map((item) => (
-        <ToolbarButton key={item.label} {...item} />
+        <ToolbarButton key={item.label} {...item} aria-label={item.label} />
       ))}
       <TextColorButton />
       <HighlightColorButton />
@@ -667,7 +753,7 @@ export const Toolbar = () => {
       <LineHeightButton />
       <ListButton />
       {sections[2].map((item) => (
-        <ToolbarButton key={item.label} {...item} />
+        <ToolbarButton key={item.label} {...item} aria-label={item.label} />
       ))}
     </div>
   );

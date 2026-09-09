@@ -45,10 +45,12 @@ body {
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
+    --muted-foreground: 0 0% 41%;
     --accent: 0 0% 96.1%;
     --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
+    /* Darkened from 60.2% lightness so white button text passes WCAG AA
+       (4.83:1); the previous 60.2% was 3.76:1 (fails for 14px text). */
+    --destructive: 0 72.2% 50.6%;
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 89.8%;
     --input: 0 0% 89.8%;

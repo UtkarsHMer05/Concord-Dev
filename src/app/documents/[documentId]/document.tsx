@@ -43,10 +43,21 @@ export const Document = ({ document }: DocumentProps) => {
       editorContent={editorContent}
     >
       <div className="min-h-screen bg-[#FAFBFD]">
-        <div className="flex flex-col px-4 pt-2 gap-y-2 fixed top-0 left-0 right-0 z-10 bg-[#FAFBFD] print:hidden">
+        <div className="flex flex-col px-2 sm:px-4 pt-2 gap-y-2 fixed top-0 left-0 right-0 z-10 bg-[#FAFBFD] print:hidden">
           <Navbar data={document} />
           <Toolbar />
+          {!canEdit && (
+            <div
+              className="text-sm text-muted-foreground bg-muted/60 border border-border rounded-md px-3 py-1.5"
+              role="status"
+            >
+              You have view-only access to this document.
+            </div>
+          )}
         </div>
+        {/* Fixed chrome height: navbar (~52px) + toolbar (40px) + gaps.
+            The 816px page below scrolls horizontally inside its container
+            on narrow viewports (documented desktop-first limitation). */}
         <div className="pt-[114px] print:pt-0">
           <Editor crdtClient={crdtClient} documentId={document.id} seedPmDoc={(editorContent ?? null) as never} />
         </div>

@@ -16,6 +16,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import { useEffect, useRef } from 'react'
 
 import { useEditorStore } from '@/store/use-editor-store';
+import { useBridgeStatusStore } from '@/store/use-bridge-status-store';
 import { useDocumentSession } from '@/lib/collaboration/provider';
 import { CrdtEditorBridge } from '@/lib/crdt/editor-bridge';
 import type { CrdtClient } from '@/lib/crdt/worker/client';
@@ -36,8 +37,8 @@ interface EditorProps {
 
 export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
   const { editorContent, content, settings, canEditContent } = useDocumentSession();
-
   const { setEditor } = useEditorStore();
+  const setBridgeStatus = useBridgeStatusStore((s) => s.setState);
   // The bridge is created after the editor exists; onUpdate routes through
   // this ref so the creation-time closure stays valid.
   const bridgeRef = useRef<CrdtEditorBridge | null>(null);
@@ -135,15 +136,19 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
       client: crdtClient,
       documentId,
       seedPmDoc,
+      // M008 honesty rule: the fallback (unsupported content → whole-document
+      // save path) is surfaced to the UI, never silent.
+      onStatusChange: setBridgeStatus,
     });
     bridgeRef.current = bridge;
     void bridge.start();
     return () => {
       bridgeRef.current = null;
+      setBridgeStatus({ mode: "idle" });
     };
     // The bridge is per editor instance; content/seed are read once at start.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crdtClient, editor]);
+  }, [crdtClient, editor, setBridgeStatus]);
 
   return (
     <div className="size-full overflow-x-auto bg-[#F9FBFD] px-4 print:p-0 print:bg-white print:overflow-visible">

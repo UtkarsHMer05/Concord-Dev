@@ -24,8 +24,14 @@ export const DocumentMenu = ({ documentId, title, metadataVersion, onNewTab, onR
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="rounded-full">
-          <MoreVertical className="size-4" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="rounded-full"
+          aria-label={`Actions for ${title}`}
+          title={`Actions for ${title}`}
+        >
+          <MoreVertical className="size-4" aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent>

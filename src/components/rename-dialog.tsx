@@ -72,11 +72,16 @@ export const RenameDialog = ({
             </DialogDescription>
           </DialogHeader>
           <div className="my-4">
+            <label htmlFor={`rename-input-${documentId}`} className="sr-only">
+              Document name
+            </label>
             <Input
+              id={`rename-input-${documentId}`}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Document name"
               onClick={(e) => e.stopPropagation()}
+              autoFocus
             />
           </div>
           <DialogFooter>

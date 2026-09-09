@@ -11,8 +11,20 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Concord",
-  description: "Concord — collaborative documents",
+  title: {
+    default: "Concord",
+    template: "%s · Concord",
+  },
+  description:
+    "Concord — a local-first collaborative document workspace: rich-text editing with durable offline editing.",
+  applicationName: "Concord",
+  openGraph: {
+    title: "Concord",
+    description:
+      "A local-first collaborative document workspace. Edit rich-text documents with durable offline editing.",
+    siteName: "Concord",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

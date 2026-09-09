@@ -22,6 +22,8 @@ interface DocumentsTableProps {
   onLoadMore: () => void;
   /** Called after a local mutation (delete) so the row drops immediately. */
   onMutated: (documentId: string) => void;
+  /** Current search query (empty string when browsing). */
+  search?: string;
 }
 
 export const DocumentsTable = ({
@@ -31,9 +33,14 @@ export const DocumentsTable = ({
   error,
   onLoadMore,
   onMutated,
+  search,
 }: DocumentsTableProps) => {
+  const emptyMessage = search
+    ? `No documents matching “${search}”`
+    : "No documents yet — create one from a template above";
+
   return (
-    <div className="max-w-screen-xl mx-auto px-16 py-6 flex flex-col gap-5">
+    <div className="max-w-screen-xl mx-auto px-4 md:px-16 py-6 flex flex-col gap-5">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent border-none">
@@ -47,7 +54,7 @@ export const DocumentsTable = ({
           <TableBody>
             <TableRow className="hover:bg-transparent">
               <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
-                No documents found
+                {emptyMessage}
               </TableCell>
             </TableRow>
           </TableBody>
@@ -60,23 +67,33 @@ export const DocumentsTable = ({
         )}
       </Table>
       <div className="flex items-center justify-center">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onLoadMore}
-          disabled={!hasMore || isLoadingMore}
-        >
-          {isLoadingMore ? (
-            <LoaderIcon className="animate-spin size-4" />
-          ) : hasMore ? (
-            "Load more"
-          ) : (
-            "End of results"
-          )}
-        </Button>
+        {hasMore || isLoadingMore ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onLoadMore}
+            disabled={isLoadingMore}
+          >
+            {isLoadingMore ? (
+              <>
+                <LoaderIcon className="animate-spin size-4" aria-hidden="true" />
+                <span>Loading…</span>
+              </>
+            ) : (
+              "Load more"
+            )}
+          </Button>
+        ) : documents.length > 0 ? (
+          <p className="text-sm text-muted-foreground">End of results</p>
+        ) : null}
       </div>
       {error && (
-        <div className="text-center text-sm text-red-500">{error}</div>
+        <div className="flex flex-col items-center gap-2 text-center text-sm text-rose-700">
+          <p>{error}</p>
+          <Button variant="outline" size="sm" onClick={onLoadMore}>
+            Try again
+          </Button>
+        </div>
       )}
     </div>
   );

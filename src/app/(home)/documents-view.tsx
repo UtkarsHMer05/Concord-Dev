@@ -78,6 +78,7 @@ export const DocumentsView = ({
       hasMore={hasMore}
       isLoadingMore={isLoadingMore}
       error={error}
+      search={search}
       onLoadMore={() => void loadMore()}
       onMutated={removeLocal}
     />

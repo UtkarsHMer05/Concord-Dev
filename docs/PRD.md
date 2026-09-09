@@ -1,8 +1,8 @@
 # Concord — Product Requirements Document
 
-Status: Authoritative (Phase 0 completion)
-Version: 1.1
-Last updated: 2026-09-06
+Status: Authoritative (Phase 7 — v1 scope frozen in §25a)
+Version: 1.2
+Last updated: 2026-09-09
 
 Concord is a distributed, local-first collaborative document/workspace platform
 backed by a self-engineered synchronization stack: CRDT-based reconciliation,
@@ -321,6 +321,87 @@ control plane; Phase 2 C++ CRDT + WASM local-first client; Phase 3 Rust sync
 gateway; Phase 4 distributed multi-gateway; Phase 5 snapshots/recovery/compaction;
 Phase 6 verification/security/observability/chaos/CI; Phase 7
 productionization/deployment.
+
+## 25a. Concord v1 verified scope (Phase 7 boundary freeze)
+
+This section is the authoritative, truthful statement of what the v1 release
+does and does not include. It supersedes any aspirational wording elsewhere
+in this document for release purposes. No feature listed as unsupported may
+be implied by product UI, docs, or demo scripts.
+
+### A. Verified v1 features (with test evidence)
+
+| Feature | User surface | Evidence |
+|---|---|---|
+| Email sign-in/sign-out, organizations | Clerk-authenticated home page; org switcher scopes document lists server-side | `tests/db/acl.test.ts`, `tests/db/idor-matrix.test.ts` |
+| Document create (blank/template), rename, delete (owner-only), title search, paginated listing | Home dashboard; inline rename + dialogs; row menu | `tests/db/documents.test.ts`, `tests/db/hardening.test.ts`, `tests/authorization.test.ts` |
+| Rich-text editing (TipTap 3) | Headings, bold/italic/underline/strikethrough, font family/size, line height, alignment, lists, tasks, tables, images (URL/blob), links, colors/highlight, undo/redo, print/export (JSON/HTML/TXT/print-to-PDF), ruler margins | `tests/templates.test.ts`, `tests/content.test.ts`, manual product QA |
+| Local-first durable editing | CRDT replica in a Web Worker; snapshot + op-log durability in IndexedDB; editing works offline and survives reload | `tests/crdt/worker.test.ts`, `tests/crdt/harness.test.ts`, `tests/crdt/parity.test.ts`, `tests/crdt/bridge.test.ts` |
+| Transitional server content mirror | Debounced whole-document save with optimistic concurrency (409 conflict path, not silent overwrite) | `tests/db/content-save.test.ts` |
+| CRDT sync engine + realtime gateway | SyncSession/SyncTransport against the self-hosted Rust gateway: two-client collaboration, offline/reconnect reconciliation, duplicate-safe resends, gateway restart recovery, graceful drain, snapshot resync — **verified at library/protocol level in the test harness** (see B.1 for the v1 product boundary) | `tests/realtime/e2e.test.ts`, `tests/realtime/reliability.test.ts`, `tests/sync/*.test.ts` |
+| Permission model | OWNER/EDITOR/COMMENTER/VIEWER enforced server-side on every request; revoked access surfaces honestly ("no longer have permission") | `tests/db/acl.test.ts`, `tests/db/idor-matrix.test.ts`, realtime role tests |
+| Status truthfulness | Save/duability status UI states local-saved vs mirror-saved truthfully; never claims server/cloud save before the durable-ack point | Phase 7 product audit (SA-PRODUCT7) + unit tests for status mapping |
+
+### B. Intentionally unsupported in v1 (do not demo, do not imply)
+
+1. **Live multi-user collaboration in the shipped web UI.** The sync stack
+   (SyncSession + Rust gateway) is implemented and verified against real
+   WebSockets in the test harness, but the shipped document page does not
+   open a gateway session. The v1 product surface runs the local CRDT replica
+   plus the transitional content mirror. Realtime multi-user editing ships
+   when the editor→gateway wiring lands in a later release; the collaboration
+   seam (`src/lib/collaboration/`) and SyncSession API exist for exactly that.
+2. **Real-time cursors and presence UI.** No presence components exist;
+   presence is honestly reported as "unavailable" by the session provider.
+3. **Comments/threads and notifications.** No components; reported as
+   "unavailable" (Phase 1 seam retained).
+4. **History browsing / revision restore UI.** The durable update log,
+   snapshots, and WS protocol support revisions, but no web UI exists for
+   browsing or restoring revisions in v1. (Documented boundary, not a gap in
+   the sync stack.)
+5. **Image uploads to a server/object store in collaborative text.** Images
+   embed by URL or local blob only; no upload backend exists. Inserting an
+   image (or any content outside the collaborative subset) degrades the
+   session loudly to the non-collaborative save path (see C.1).
+6. **Mobile native apps, offline PWA install, share links, inline @mentions,
+   export to DOCX/PDF server-side** (print-to-PDF only), **any admin UI**.
+
+### C. Known limitations (shipped, honestly surfaced)
+
+1. **Collaborative content subset.** The CRDT model supports paragraphs and
+   headings-1..6, text with bold/italic/underline/strikethrough marks, and
+   block-level align/lineHeight attributes (per
+   [CONSISTENCY_MODEL.md](CONSISTENCY_MODEL.md) and `src/lib/crdt/pm-model.ts`).
+   Any other content (tables, images, task/bullet/ordered lists, colors,
+   highlights, font family/size, links, hard breaks) disables the
+   collaborative path **for that session** and the document continues on the
+   transitional whole-document save path. The v1 UI states this switch
+   truthfully (collaborative-mode indicator); it never silently pretends both
+   paths are equivalent.
+2. **Transitional content mirror.** Whole-document, version-checked saves
+   (not per-keystroke op sync) power cross-device freshness on the v1 surface.
+   Two tabs editing concurrently produce an explicit conflict toast, not a
+   merge.
+3. **Single-gateway durability.** ACK_DURABLE means PostgreSQL-local,
+   single-node commit (FAILURE_MODEL §1.1); multi-region/multi-broker
+   replication is a Phase 4 target, not a v1 claim.
+4. **Browser support.** Modern evergreen browsers with WebAssembly
+   (bulk-memory), module Web Workers, IndexedDB, and WebSockets required —
+   full matrix in [BROWSER_SUPPORT.md](BROWSER_SUPPORT.md).
+5. **Desktop-first responsive range.** The document page uses a fixed
+   816px-page metaphor; below tablet widths the content area scrolls
+   horizontally by design (the page is the unit of layout), with responsive
+   chrome around it.
+
+### D. Deferred ideas (post-v1 backlog, no commitment)
+
+- Presence avatars and live cursors on the shared canvas.
+- Comments/threads anchored to text ranges; comment inbox.
+- Revision history browser with restore (the protocol already speaks it).
+- Image upload service + storage quota management.
+- Full offline PWA (installable, background sync when the gateway returns).
+- Share links with role pickers; per-document sharing panel UI.
+- Multi-gateway/region deployment with broker fanout (Phase 4 architecture).
 
 ## 26. Final acceptance criteria
 

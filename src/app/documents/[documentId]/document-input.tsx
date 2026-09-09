@@ -2,14 +2,11 @@
 
 import { toast } from "sonner";
 import { useRef, useState } from "react";
-import { BsCloudCheck, BsCloudSlash } from "react-icons/bs";
 import { useRouter } from "next/navigation";
 
 import { useDebounce } from "@/hooks/use-debounce";
-import { useDocumentSession } from "@/lib/collaboration/provider";
 import { renameDocumentAction } from "@/app/actions/documents";
-
-import { LoaderIcon } from "lucide-react";
+import { SaveStatusIndicator } from "@/components/save-status-indicator";
 
 interface DocumentInputProps {
   title: string;
@@ -19,11 +16,10 @@ interface DocumentInputProps {
 };
 
 export const DocumentInput = ({ title, id, metadataVersion, canRename }: DocumentInputProps) => {
-  const { content } = useDocumentSession();
   const router = useRouter();
 
   const [value, setValue] = useState(title);
-  const [isPending, setIsPending] = useState(false);
+  const [, setIsPending] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
   // Local view of the server metadata version for conflict detection.
@@ -85,17 +81,18 @@ export const DocumentInput = ({ title, id, metadataVersion, canRename }: Documen
     setIsPending(false);
   };
 
-  const showLoader = isPending || content.status === "saving";
-  const showError = content.status === "error" || content.status === "conflict";
-
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0">
       {isEditing ? (
         <form onSubmit={handleSubmit} className="relative w-fit max-w-[50ch]">
-          <span className="invisible whitespace-pre px-1.5 text-lg">
+          <label htmlFor="document-title-input" className="sr-only">
+            Document title
+          </label>
+          <span className="invisible whitespace-pre px-1.5 text-lg" aria-hidden="true">
             {value || " "}
           </span>
           <input
+            id="document-title-input"
             ref={inputRef}
             value={value}
             onChange={onChange}
@@ -112,13 +109,24 @@ export const DocumentInput = ({ title, id, metadataVersion, canRename }: Documen
               inputRef.current?.focus();
             }, 0);
           }}
-          className={`text-lg px-1.5 truncate ${canRename ? "cursor-pointer" : "cursor-default"}`}>
+          role={canRename ? "button" : undefined}
+          tabIndex={canRename ? 0 : undefined}
+          onKeyDown={(e) => {
+            if (!canRename) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setIsEditing(true);
+              setTimeout(() => {
+                inputRef.current?.focus();
+              }, 0);
+            }
+          }}
+          title={canRename ? "Rename this document" : undefined}
+          className={`text-lg px-1.5 truncate ${canRename ? "cursor-pointer rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : "cursor-default"}`}>
           {title}
         </span>
       )}
-      {showError && <BsCloudSlash className="size-4" />}
-      {!showError && !showLoader && <BsCloudCheck className="size-4" />}
-      {showLoader && <LoaderIcon className="size-4 animate-spin text-muted-foreground" />}
+      <SaveStatusIndicator />
     </div>
   )
 }

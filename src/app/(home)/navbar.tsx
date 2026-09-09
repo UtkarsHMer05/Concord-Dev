@@ -6,15 +6,15 @@ import { SearchInput } from "./search-input";
 
 export const Navbar = () => {
   return (
-    <nav className="flex items-center justify-between h-full w-full">
-      <div className="flex gap-3 items-center shrink-0 pr-6">
-        <Link href="/">
-          <Image src="/logo.svg" alt="Logo" width={36} height={36} />
+    <nav className="flex items-center justify-between h-full w-full gap-x-2">
+      <div className="flex gap-3 items-center shrink-0 pr-2 sm:pr-6">
+        <Link href="/" aria-label="Concord home">
+          <Image src="/logo.svg" alt="Concord logo" width={36} height={36} priority />
         </Link>
-        <h3 className="text-xl">Docs</h3>
+        <h3 className="text-xl hidden sm:block">Concord</h3>
       </div>
       <SearchInput />
-      <div className="flex gap-3 items-center pl-6">
+      <div className="flex gap-3 items-center pl-2 sm:pl-6 shrink-0">
         <OrganizationSwitcher
           afterCreateOrganizationUrl="/"
           afterLeaveOrganizationUrl="/"

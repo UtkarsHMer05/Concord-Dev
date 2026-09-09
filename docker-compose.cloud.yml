@@ -1,0 +1,218 @@
+# P7-M021/M030 — Cloud compose stack (staging + production).
+#
+# Runs ON the EC2 instance (not for local dev — that's the root
+# docker-compose.yml). Differences from dev:
+#   - the web + gateways run the HARDENED RELEASE IMAGES (built from
+#     git archive HEAD, not bind-mounts);
+#   - the nginx LB is included here (dev runs it ad hoc);
+#   - observability is present but loopback-bound (inspect via SSH
+#     tunnel; never exposed);
+#   - Postgres port is NOT published to the host beyond 127.0.0.1
+#     (backups run on-instance);
+#   - secrets come from the environment file written at launch from
+#     AWS SSM/env injection (never baked into images; file mode 600).
+#
+# Env files required next to this compose file (git-ignored, written by
+# scripts/deploy/render-envs.sh at launch time):
+#   concord.env      — shared secrets/config (DATABASE_URL, Clerk keys)
+#   gateway.env      — GATEWAY_* overrides (ports are fixed per replica)
+#
+# Usage:  docker compose -f docker-compose.cloud.yml -p concord-${ENV} up -d
+
+services:
+  db:
+    image: postgres:18.6-alpine
+    container_name: concord-${ENV:-staging}-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-concord}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set in concord.env}
+      POSTGRES_DB: ${PG_DB:-concord}
+    # 127.0.0.1 publication ONLY: the on-instance backup cron and
+    # remote SSH debugging reach it; nothing public.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - concord_pgdata_cloud:/var/lib/postgresql
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-concord}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  nats:
+    image: nats:2.11.6-alpine
+    container_name: concord-${ENV:-staging}-nats
+    restart: unless-stopped
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    # No ports published — only the compose network + the host-side
+    # gateways reach it via the docker bridge gateway IP. JetStream
+    # data is a named volume (reprovisioning is automatic; PG is the
+    # durable truth — chaos-proven in Phase 6).
+    volumes:
+      - concord_nats_cloud:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:8.8.2-alpine
+    container_name: concord-${ENV:-staging}-redis
+    restart: unless-stopped
+    # No persistence by design (Phase 6 chaos proved wipe-safety); no
+    # ports published.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  web:
+    image: ${CONCORD_WEB_IMAGE:?set in concord.env}
+    container_name: concord-${ENV:-staging}-web
+    restart: unless-stopped
+    env_file: concord.env
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  gw1:
+    image: ${CONCORD_GATEWAY_IMAGE:?set in concord.env}
+    container_name: concord-${ENV:-staging}-gw1
+    restart: unless-stopped
+    env_file:
+      - gateway.env
+    environment:
+      GATEWAY_ID: 1
+      GATEWAY_BIND_HOST: 0.0.0.0
+      GATEWAY_BIND_PORT: 8791
+      GATEWAY_WORKER_BINARY: /app/concord-worker
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "db.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8791/api/v1/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  gw2:
+    image: ${CONCORD_GATEWAY_IMAGE:?}
+    container_name: concord-${ENV:-staging}-gw2
+    restart: unless-stopped
+    env_file:
+      - gateway.env
+    environment:
+      GATEWAY_ID: 2
+      GATEWAY_BIND_HOST: 0.0.0.0
+      GATEWAY_BIND_PORT: 8792
+      GATEWAY_WORKER_BINARY: /app/concord-worker
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8792/api/v1/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  gw3:
+    image: ${CONCORD_GATEWAY_IMAGE:?}
+    container_name: concord-${ENV:-staging}-gw3
+    restart: unless-stopped
+    env_file:
+      - gateway.env
+    environment:
+      GATEWAY_ID: 3
+      GATEWAY_BIND_HOST: 0.0.0.0
+      GATEWAY_BIND_PORT: 8793
+      GATEWAY_WORKER_BINARY: /app/concord-worker
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8793/api/v1/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  lb:
+    image: nginx:1.29-alpine
+    container_name: concord-${ENV:-staging}-lb
+    restart: unless-stopped
+    # Publishes the WS entrypoint ON THE HOST so the ALB target group
+    # points at host :8890. Config file is rendered at deploy time
+    # (scripts/deploy/render-nginx.sh) and mounted read-only.
+    ports:
+      - "8890:8890"
+    volumes:
+      - ./nginx.cloud.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      gw1:
+        condition: service_healthy
+      gw2:
+        condition: service_healthy
+      gw3:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: concord-${ENV:-staging}-prometheus
+    restart: unless-stopped
+    # 127.0.0.1 only — inspect via SSH tunnel. NEVER public.
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.cloud.yml:/etc/prometheus/prometheus.yml:ro
+      - concord_prometheus:/prometheus
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    container_name: concord-${ENV:-staging}-grafana
+    restart: unless-stopped
+    environment:
+      # LOCAL-ONLY anonymous admin (loopback-bound; documented). If
+      # ever exposed beyond loopback, this MUST become auth-required.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./grafana.cloud:/etc/grafana/provisioning:ro
+      - concord_grafana:/var/lib/grafana
+
+volumes:
+  concord_pgdata_cloud:
+  concord_nats_cloud:
+  concord_prometheus:
+  concord_grafana:

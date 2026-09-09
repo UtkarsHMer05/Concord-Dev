@@ -39,6 +39,17 @@ COPY --from=builder /build/rust/target/release/sync-gateway ./
 RUN addgroup -S -g 10001 concord && adduser -S -u 10001 -G concord concord
 USER concord
 EXPOSE 8791
-# Runtime env (bind, DB URL, NATS, Redis, Clerk issuer) supplied at run
-# time via env-file; never baked into the image.
+# HEALTHCHECK (P7-M016): the minimal runtime keeps busybox wget (alpine
+# base) — no curl/node in this image by design. /api/v1/health/live is the
+# process-liveness route (no DB dependency); /api/v1/health/ready would
+# additionally require Postgres reachability — a readiness concern for
+# orchestrators/load balancers, not an image health concern.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --spider -q -T 3 http://127.0.0.1:${GATEWAY_BIND_PORT:-8787}/api/v1/health/live || exit 1
+# Signal handling (P7-M016, VERIFIED): exec-form ENTRYPOINT → the binary is
+# PID 1 and tokio receives SIGTERM directly. Measured with `docker stop -t 30`:
+# drain notice → 2 s bounded grace → exit 0 in ~2.2 s total. Do NOT wrap in
+# a shell ENTRYPOINT (sh swallows signals).
+# Runtime env (bind, DB URL, NATS, Redis, Clerk issuer, optional worker
+# path) supplied at run time via env-file; never baked into the image.
 ENTRYPOINT ["/app/sync-gateway"]

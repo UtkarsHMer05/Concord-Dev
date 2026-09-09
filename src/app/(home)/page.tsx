@@ -41,17 +41,19 @@ const Home = async ({ searchParams }: HomePageProps) => {
         <Navbar />
       </div>
       <div className="mt-16">
-        <TemplatesGallery />
         {unauthenticated ? (
           <SignInGate />
         ) : (
-          <DocumentsView
-            key={search}
-            initialDocuments={initial!.documents}
-            initialHasMore={initial!.hasMore}
-            search={search}
-            pageSize={PAGE_SIZE}
-          />
+          <>
+            <TemplatesGallery />
+            <DocumentsView
+              key={search}
+              initialDocuments={initial!.documents}
+              initialHasMore={initial!.hasMore}
+              search={search}
+              pageSize={PAGE_SIZE}
+            />
+          </>
         )}
       </div>
     </div>
