@@ -109,9 +109,10 @@ impl GatewayRepo {
         Ok(row.get("cursor"))
     }
 
-    /// Idempotent batch ingestion (M018/M019). One transaction:
+    /// Idempotent batch ingestion (M018/M019, optimized P6-M041). One transaction:
     ///   1. recheck write authorization (P3-M037: every batch),
-    ///   2. INSERT ... ON CONFLICT (document_id, operation_id) DO NOTHING,
+    ///   2. one multi-row `INSERT ... ON CONFLICT DO NOTHING RETURNING`
+    ///      (rows returned = exactly the identities committed by THIS call),
     ///   3. report newly-inserted vs duplicates,
     ///   4. the returned durable_cursor exists only after COMMIT.
     ///
@@ -144,47 +145,63 @@ impl GatewayRepo {
             return Err(RepoError::WriteDenied);
         }
 
+        // 2. One multi-row INSERT for the whole batch (P6-M041): every op
+        // was previously an INSERT + SELECT-id round trip, and the selected
+        // ids were then discarded (the durable cursor comes from the MAX(id)
+        // query below) — N dead statements of pure per-op overhead. A single
+        // `unnest` INSERT keeps the idempotency contract exactly:
+        // ON CONFLICT (document_id, operation_id) DO NOTHING + RETURNING
+        // yields precisely the rows THIS call committed, so the
+        // newly-inserted vs duplicate split is preserved in one round trip
+        // (unique-index race semantics unchanged; intra-batch duplicate
+        // identities cannot reach here — decode rejects them — and PG skips
+        // such rows silently, matching the unique-index outcome).
+        let op_ids: Vec<String> = envelopes.iter().map(|env| env.identity.to_wire()).collect();
+        let replicas: Vec<i64> = envelopes
+            .iter()
+            .map(|env| env.identity.replica as i64)
+            .collect();
+        let sequences: Vec<i64> = envelopes
+            .iter()
+            .map(|env| env.identity.counter as i64)
+            .collect();
+        let payloads: Vec<Vec<u8>> = envelopes.iter().map(|env| env.bytes.clone()).collect();
+        let checksums: Vec<String> = payloads.iter().map(|p| hex_checksum(p)).collect();
+
+        let inserted_rows = tx
+            .query(
+                "INSERT INTO crdt_operations
+                    (document_id, operation_id, replica_id, replica_sequence,
+                     payload, payload_version, payload_checksum)
+                 SELECT $1::uuid, op_id, replica, seq, payload, 1, checksum
+                 FROM unnest($2::text[], $3::bigint[], $4::bigint[], $5::bytea[], $6::text[])
+                     AS t(op_id, replica, seq, payload, checksum)
+                 ON CONFLICT (document_id, operation_id) DO NOTHING
+                 RETURNING operation_id",
+                &[
+                    &document, &op_ids, &replicas, &sequences, &payloads, &checksums,
+                ],
+            )
+            .await?;
+        let inserted_set: std::collections::HashSet<&str> = inserted_rows
+            .iter()
+            .map(|r| r.get::<&str, &str>("operation_id"))
+            .collect();
+
+        // 3. Report newly-inserted vs duplicates, in original batch order.
         let mut newly = Vec::with_capacity(envelopes.len());
         let mut dups = Vec::new();
         let mut all_ids = Vec::with_capacity(envelopes.len());
-        let mut max_seq: i64 = 0;
-
-        for env in envelopes {
-            let op_id = env.identity.to_wire();
-            let replica = env.identity.replica as i64;
-            let seq = env.identity.counter as i64;
-            let payload = env.bytes.clone();
-            let checksum = hex_checksum(&payload);
-
-            let inserted = tx
-                .execute(
-                    "INSERT INTO crdt_operations
-                        (document_id, operation_id, replica_id, replica_sequence,
-                         payload, payload_version, payload_checksum)
-                     VALUES ($1::uuid, $2, $3, $4, $5, 1, $6)
-                     ON CONFLICT (document_id, operation_id) DO NOTHING",
-                    &[&document, &op_id, &replica, &seq, &payload, &checksum],
-                )
-                .await?;
-            if inserted == 1 {
+        for op_id in op_ids {
+            if inserted_set.contains(op_id.as_str()) {
                 newly.push(op_id.clone());
-                // Fetch the assigned server sequence for the new row.
-                let row = tx
-                    .query_one(
-                        "SELECT id FROM crdt_operations
-                         WHERE document_id = $1 AND operation_id = $2",
-                        &[&document, &op_id],
-                    )
-                    .await?;
-                let seq_now: i64 = row.get("id");
-                max_seq = max_seq.max(seq_now);
             } else {
                 dups.push(op_id.clone());
             }
             all_ids.push(op_id);
         }
 
-        // Durable cursor after the batch: max server seq in the document.
+        // 4. Durable cursor after the batch: max server seq in the document.
         let cursor_row = tx
             .query_one(
                 "SELECT COALESCE(MAX(id), 0) AS cursor FROM crdt_operations WHERE document_id = $1",
@@ -192,7 +209,6 @@ impl GatewayRepo {
             )
             .await?;
         let durable_cursor: i64 = cursor_row.get("cursor");
-        let _ = max_seq;
 
         tx.commit().await?;
 
