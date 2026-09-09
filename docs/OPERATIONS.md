@@ -1,8 +1,12 @@
-# Concord — Operations (local dev; Phase 4 current)
+# Concord — Operations
 
-Status: Authoritative (local operations only — production is Phase 7)
-Version: 1.0
-Last updated: 2026-09-07
+Status: Authoritative (local dev + production runbooks)
+Version: 2.0 (P7-M013/M016-M019: graceful shutdown, migrations, backup/DR)
+Last updated: 2026-09-09
+
+Deployment topology for staging/prod: `docs/DEPLOYMENT.md` +
+`docker-compose.cloud.yml`. Environment variable contract:
+`docs/CONFIGURATION.md`. Migration runbook: `docs/MIGRATIONS.md`.
 
 ## Local stack
 
@@ -365,3 +369,50 @@ node scripts/release/ws-smoke.mjs 8791   # must PASS again with full history
 4. Restart gateways (idempotent migrations are a no-op on restored data).
 5. Run the WS smoke; clients converge via catch-up.
 6. Post-incident: record what was lost (RPO window) in the incident doc.
+
+---
+
+## Release images: build, verify, reproducibility (P7-M016)
+
+Build + smoke all three release images from a clean export:
+
+```bash
+scripts/release/smoke-images.sh
+#   builds from `git archive HEAD` (clean committed tree) and verifies:
+#   - gateway: health/live + uid 10001 + SIGTERM→exit 0 (~2.2 s)
+#   - web:     HTTP responding + uid 1000 + SIGTERM→exit 143 (~0.2 s)
+#   - worker:  generate_ops stdin probe (status 0) + uid 10001
+# CONCORD_SMOKE_TREE=/path/to/export — build from a provided tree instead
+# (verification helper for staged-but-uncommitted release-file changes).
+```
+
+Measured smoke results (2026-09-09, Docker Desktop linux/arm64):
+gateway PASS (SIGTERM→exit 0 in 2222 ms), web PASS (exit 143 in 186 ms),
+worker PASS (probe status 0). All three from a clean `git archive HEAD`
+export.
+
+Worker image note: the C++ runtime is linked statically
+(`-static-libstdc++ -static-libgcc`) so the runtime stage is bare
+`alpine:3.22` + the binary — no libstdc++ package needed at runtime. The
+worker image HEALTHCHECK runs the same generate_ops probe the release
+workflow proved ([u32 24][u32 6][u64 1][u32 10][u32 2][u32 0], expect
+status 0 + 71-byte digest + ≥1 batch).
+
+Reproducibility (measured, honest):
+
+- **Same-day, same-input rebuilds with layer cache**: image digests are
+  byte-identical (worker image rebuilt twice: identical
+  `sha256:5c88592e…`).
+- **Full `--no-cache` rebuilds**: image digests DIFFER (BuildKit layer
+  metadata carries timestamps — 2 no-cache gateway builds produced
+  `ba06875…` vs `0319383…`), BUT the **gateway binary inside is
+  byte-identical** across both (sha256 `ea6f6f6a…` both times —
+  Rust Release builds are deterministic here).
+- **Across days**: base-tag drift (`alpine:3.22`, `node:24.20-alpine`
+  are floating minor tags) means digests differ; the SBOM
+  (`scripts/security/sbom.sh`) records the resolved base digest per
+  build — that is the audit trail, not the image digest.
+
+Practical rule: treat the SBOM + `SHA256SUMS` of exported artifacts as
+the reproducibility record; expect image digests to match only for
+cached same-day rebuilds.
