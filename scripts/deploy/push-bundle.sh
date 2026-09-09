@@ -56,6 +56,23 @@ set +a
 : "${CLERK_SECRET_KEY:?CLERK_SECRET_KEY missing in .env.local}"
 : "${CLERK_JWT_ISSUER_DOMAIN:?CLERK_JWT_ISSUER_DOMAIN missing in .env.local}"
 : "${DATABASE_URL:?DATABASE_URL missing in .env.local}"
+# PG_PASSWORD: per-environment cloud DB password. CRITICAL: on re-publish
+# (new RC, same environment) the password MUST be REUSED — the compose
+# Postgres volume initialized with it on first boot; a fresh value makes
+# every service fail DB auth against the existing volume (observed live
+# on staging: gateways crash-looped "database unreachable" after the
+# second push-bundle regenerated the password). Source order:
+#   1. PG_PASSWORD from the caller's environment (explicit override),
+#   2. the password inside the EXISTING SSM /concord/<env>/concord.env,
+#   3. freshly generated (first deploy of this environment only).
+if [ -z "${PG_PASSWORD:-}" ]; then
+  EXISTING_ENV=$(aws ssm get-parameter --region "$REGION" \
+    --name "/concord/${ENV}/concord.env" --with-decryption \
+    --query Parameter.Value --output text 2>/dev/null || true)
+  if [ -n "$EXISTING_ENV" ] && [ "$EXISTING_ENV" != "None" ]; then
+    PG_PASSWORD=$(printf '%s\n' "$EXISTING_ENV" | grep -E '^PG_PASSWORD=' | cut -d= -f2-)
+  fi
+fi
 PG_PASSWORD="${PG_PASSWORD:-$(openssl rand -hex 24)}"
 PG_USER=concord
 PG_DB=concord
