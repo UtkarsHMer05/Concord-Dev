@@ -106,11 +106,13 @@ case "${1:-ps}" in
     # to the value in the deployed concord.env. docker exec runs as the
     # container's local superuser, so no password is needed to connect —
     # the ALTER runs entirely on the instance; nothing secret passes
-    # through SSM JSON. Idempotent.
+    # through SSM JSON. Idempotent. (The SQL is piped via stdin: psql -v
+    # variables cannot substitute into ALTER USER ... PASSWORD.)
     NEWPW="$(grep -E '^PG_PASSWORD=' "${UD_DIR}/concord.env" | cut -d= -f2-)"
     [ -n "$NEWPW" ] || { echo "PG_PASSWORD not found in concord.env" >&2; exit 2; }
-    docker exec "concord-${ENV}-db" psql -U concord -d concord \
-      -v newpw="$NEWPW" -c 'ALTER USER concord WITH PASSWORD :newpw'
+    # shellcheck disable=SC2016  # single quotes keep $ literal for psql
+    printf 'ALTER USER concord WITH PASSWORD %s;\n' "'$NEWPW'" \
+      | docker exec -i "concord-${ENV}-db" psql -U concord -d concord
     echo "DB password aligned with concord.env"
     ;;
   bootstrap)
