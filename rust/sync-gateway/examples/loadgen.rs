@@ -267,6 +267,11 @@ async fn main() {
         nats_subject_prefix: "concord.bench".into(),
         gateway_id: 90,
         redis_url: None,
+        otel_enabled: false,
+        otel_endpoint: "http://127.0.0.1:4317".into(),
+        otel_sample_ratio: 1.0,
+        otel_exporter: "otlp".into(),
+        debug_op_ids: false,
     };
     let db = match Db::connect(&config).await {
         Ok(db) => db,

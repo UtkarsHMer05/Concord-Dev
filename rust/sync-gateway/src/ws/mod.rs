@@ -92,6 +92,11 @@ pub async fn upgrade(
         crate::telemetry::Metrics::global()
             .rate_limited_total
             .fetch_add(1, Ordering::Relaxed);
+        crate::observability::metrics::incr_labeled("concord_rate_limit_hits_total", &["connect"]);
+        crate::observability::metrics::incr_labeled(
+            "concord_ops_rejected_total",
+            &[crate::telemetry::reject_reason::RATE_LIMITED],
+        );
         tracing::info!(peer = %peer, "connection rejected: rate limited");
         return axum::http::StatusCode::TOO_MANY_REQUESTS.into_response();
     }
@@ -149,6 +154,9 @@ async fn handle_socket(
     Metrics::global()
         .active_connections
         .fetch_add(1, Ordering::Relaxed);
+    // P6-M010: prometheus-surface connection gauges (legacy counter above
+    // feeds /api/v1/metrics; this one feeds /metrics).
+    crate::observability::metrics::incr("concord_connections_accepted_total");
     let connection_id = Uuid::new_v4();
     tracing::info!(connection_id = %connection_id, peer = %peer, "connection open");
 
@@ -220,6 +228,9 @@ async fn handle_socket(
     Metrics::global()
         .active_connections
         .fetch_sub(1, Ordering::Relaxed);
+    // P6-M010: keep the prometheus gauge in lockstep with the legacy one.
+    let active = Metrics::global().active_connections.load(Ordering::Relaxed) as i64;
+    crate::observability::metrics::set_gauge("concord_active_connections", active);
     tracing::info!(connection_id = %connection_id, outcome = ?result, "connection closed");
 }
 
@@ -354,6 +365,10 @@ async fn handle_text(
             Metrics::global()
                 .malformed_frames_total
                 .fetch_add(1, Ordering::Relaxed);
+            crate::observability::metrics::incr_labeled(
+                "concord_malformed_frames_total",
+                &["control"],
+            );
             tracing::debug!(connection_id = %conn.id, ?e, "control frame rejected");
             let fatal = send_error(conn, code, "frame rejected", None);
             return if fatal { Err(FlowError::Close) } else { Ok(()) };
@@ -441,7 +456,10 @@ async fn handle_text(
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(connection_id = %conn.id, error = %e, error_class = "authn", token_len = auth.token.len(), token_head = ?auth.token.chars().take(12).collect::<String>(), "token verification failed");
+                    // P6-M009 security fix: log ONLY the token length —
+                    // never fragments (token_head used to leak a JWT
+                    // prefix into logs; removed).
+                    tracing::warn!(connection_id = %conn.id, error = %e, error_class = "authn", token_len = auth.token.len(), "token verification failed");
                     let fatal = send_error(
                         conn,
                         ProtocolError::Unauthorized,
@@ -640,6 +658,7 @@ async fn handle_join(
         Metrics::global()
             .authorization_denied_total
             .fetch_add(1, Ordering::Relaxed);
+        crate::observability::metrics::incr_labeled("concord_auth_denials_total", &["join_access"]);
         let fatal = send_error(
             conn,
             ProtocolError::Forbidden,
@@ -728,6 +747,10 @@ async fn handle_fetch_snapshot(conn: &mut Conn, fetch: FetchSnapshot, repo: &Arc
         crate::telemetry::Metrics::global()
             .authorization_denied_total
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::observability::metrics::incr_labeled(
+            "concord_auth_denials_total",
+            &["snapshot_access"],
+        );
         let _ = send_error(conn, ProtocolError::Forbidden, "snapshot unavailable", None);
         return;
     }
@@ -813,6 +836,10 @@ async fn conn_allows_snapshot_read(
             crate::telemetry::Metrics::global()
                 .rate_limited_total
                 .fetch_add(1, Ordering::Relaxed);
+            crate::observability::metrics::incr_labeled(
+                "concord_rate_limit_hits_total",
+                &["fetch"],
+            );
             tracing::info!(connection_id = %conn.id, "snapshot read rate limited");
             false
         }
@@ -854,7 +881,13 @@ async fn stream_catchup(
     after_cursor: i64,
     repo: &Arc<GatewayRepo>,
 ) {
+    // P6-M009: catch-up replay span + P6-M010 duration/size histograms.
+    let started = std::time::Instant::now();
+    // EnteredSpan is !Send: scope the guard before any await in the loop.
+    let catchup_span = tracing::info_span!("ws.catchup_replay");
+    let _catchup_guard = catchup_span.enter();
     let mut cursor = after_cursor.max(0);
+    let mut replayed: u64 = 0;
     loop {
         let page = match repo
             .catchup_page(document, cursor, crate::protocol::MAX_SYNC_PAGE_OPS as i64)
@@ -874,6 +907,7 @@ async fn stream_catchup(
         if page.ops.is_empty() {
             break;
         }
+        replayed += page.ops.len() as u64;
         let batch = SyncBatch {
             next_cursor: page.next_cursor.max(0) as u64,
             has_more: page.has_more,
@@ -900,6 +934,16 @@ async fn stream_catchup(
             break;
         }
     }
+    crate::observability::metrics::observe(
+        "concord_catchup_duration_seconds",
+        &["replay"],
+        started.elapsed().as_secs_f64(),
+    );
+    crate::observability::metrics::observe_value(
+        "concord_catchup_size",
+        &["replay"],
+        replayed as f64,
+    );
     send_control(conn, Frame::SyncDone(SyncDone {}), None);
     if conn.state == SessionState::Syncing {
         conn.state = SessionState::Ready;
@@ -921,15 +965,27 @@ async fn handle_binary(
         Metrics::global()
             .malformed_frames_total
             .fetch_add(1, Ordering::Relaxed);
+        crate::observability::metrics::incr_labeled(
+            "concord_malformed_frames_total",
+            &["client_ops_state"],
+        );
         let code = if conn.state == SessionState::Draining {
             ProtocolError::ServerDraining
         } else {
             ProtocolError::InvalidState
         };
+        crate::observability::metrics::incr_labeled(
+            "concord_ops_rejected_total",
+            &[crate::telemetry::reject_reason::INVALID_STATE],
+        );
         let fatal = send_error(conn, code, "client_ops not allowed in this state", None);
         return if fatal { Err(FlowError::Close) } else { Ok(()) };
     }
     if draining.load(Ordering::Relaxed) {
+        crate::observability::metrics::incr_labeled(
+            "concord_ops_rejected_total",
+            &[crate::telemetry::reject_reason::DRAINING],
+        );
         let fatal = send_error(
             conn,
             ProtocolError::ServerDraining,
@@ -956,6 +1012,10 @@ async fn handle_binary(
             Metrics::global()
                 .malformed_frames_total
                 .fetch_add(1, Ordering::Relaxed);
+            crate::observability::metrics::incr_labeled(
+                "concord_malformed_frames_total",
+                &["client_ops"],
+            );
             tracing::debug!(connection_id = %conn.id, ?e, "client_ops rejected");
             let code = match &e {
                 crate::protocol::DecodeError::UnsupportedVersion { .. } => {
@@ -964,6 +1024,10 @@ async fn handle_binary(
                 crate::protocol::DecodeError::TooLarge { .. } => ProtocolError::PayloadTooLarge,
                 _ => ProtocolError::MalformedFrame,
             };
+            crate::observability::metrics::incr_labeled(
+                "concord_ops_rejected_total",
+                &[crate::telemetry::reject_reason::MALFORMED],
+            );
             let fatal = send_error(conn, code, "operation batch rejected", None);
             return if fatal { Err(FlowError::Close) } else { Ok(()) };
         }
@@ -985,6 +1049,22 @@ async fn handle_binary(
         })
         .collect();
 
+    // M008: one correlation id per batch, attached at INGRESS and threaded
+    // through authz → persist → ack → publish → fanout. Fields carry only
+    // ids/latencies/outcomes — never content or tokens.
+    let correlation_id =
+        crate::observability::correlation::batch_correlation_id(gateway_id, ops.batch_id);
+    let ingress_started = Instant::now();
+    // P6-M009: ingress span. EnteredSpan is !Send so the guard cannot be
+    // held across the ingest await; enter/exit brackets the async work
+    // and every event below still carries the correlation id explicitly.
+    let ingress_span = tracing::info_span!(
+        "ws.ingress",
+        correlation_id = %correlation_id,
+        op_count = ops.ops.len(),
+    );
+    let _ingress_guard = ingress_span.enter();
+
     let started = std::time::Instant::now();
     let result = repo.ingest_batch(user, document, &envelopes).await;
     Metrics::global().record_db_write_latency(started.elapsed().as_micros() as u64);
@@ -999,6 +1079,32 @@ async fn handle_binary(
             Metrics::global()
                 .duplicate_operations_total
                 .fetch_add(ingest.duplicates.len() as u64, Ordering::Relaxed);
+            crate::observability::metrics::incr_by(
+                "concord_ops_accepted_total",
+                ingest.newly_inserted.len() as u64,
+            );
+            // M008: persist + ack milestones on the SAME correlation id.
+            // M010: ack latency histogram, both wire-visible stages.
+            let persist_latency = started.elapsed();
+            crate::observability::metrics::observe(
+                "concord_ack_latency_seconds",
+                &["persist"],
+                persist_latency.as_secs_f64(),
+            );
+            crate::observability::metrics::observe(
+                "concord_ack_latency_seconds",
+                &["ingress"],
+                ingress_started.elapsed().as_secs_f64(),
+            );
+            tracing::info!(
+                correlation_id = %correlation_id,
+                outcome = "durable_ack",
+                op_ids = %ingest.all_ids.len(),
+                newly = ingest.newly_inserted.len(),
+                duplicates = ingest.duplicates.len(),
+                persist_us = persist_latency.as_micros() as u64,
+                "operation batch durably committed; ack emitted"
+            );
             send_control(
                 conn,
                 Frame::DurableAck(DurableAck {
@@ -1023,7 +1129,13 @@ async fn handle_binary(
                     .map(|(bytes, _)| bytes.clone())
                     .collect();
                 if !publish_ops.is_empty() {
-                    if let Err(e) = bus
+                    tracing::info!(
+                        correlation_id = %correlation_id,
+                        outcome = "broker_publish",
+                        op_count = publish_ops.len(),
+                        "publishing committed batch to inter-gateway bus"
+                    );
+                    match bus
                         .publish_batch(
                             document,
                             ops.batch_id,
@@ -1032,13 +1144,24 @@ async fn handle_binary(
                         )
                         .await
                     {
-                        tracing::warn!(
-                            gateway_id,
-                            connection_id = %conn.id,
-                            error = %e,
-                            error_class = "broker_publish",
-                            "cross-gateway publish failed (durable ack unaffected)"
-                        );
+                        Ok(()) => crate::observability::metrics::incr_labeled(
+                            "concord_broker_publish_total",
+                            &[crate::telemetry::broker_outcome::OK],
+                        ),
+                        Err(e) => {
+                            crate::observability::metrics::incr_labeled(
+                                "concord_broker_publish_total",
+                                &[crate::telemetry::broker_outcome::FAILED],
+                            );
+                            tracing::warn!(
+                                correlation_id = %correlation_id,
+                                gateway_id,
+                                connection_id = %conn.id,
+                                error = %e,
+                                error_class = "broker_publish",
+                                "cross-gateway publish failed (durable ack unaffected)"
+                            );
+                        }
                     }
                 }
             }
@@ -1054,7 +1177,8 @@ async fn handle_binary(
                     Metrics::global()
                         .slow_consumer_disconnects_total
                         .fetch_add(1, Ordering::Relaxed);
-                    tracing::info!(connection_id = %slow_id, "slow consumer disconnect (outbound queue saturated)");
+                    crate::observability::metrics::incr("concord_slow_consumer_disconnects_total");
+                    tracing::info!(connection_id = %slow_id, correlation_id = %correlation_id, "slow consumer disconnect (outbound queue saturated)");
                     // The slow peer's own loop reaps it: its queue is full and
                     // the drain path signals closure via a sentinel.
                     // Phase 3 single-gateway: mark via broadcast; the writer
@@ -1066,6 +1190,22 @@ async fn handle_binary(
             Metrics::global()
                 .authorization_denied_total
                 .fetch_add(1, Ordering::Relaxed);
+            // M008/M010: authz deny on the same correlation id + labeled
+            // denial counters (bounded reason values only).
+            crate::observability::metrics::incr_labeled(
+                "concord_auth_denials_total",
+                &["write_role"],
+            );
+            crate::observability::metrics::incr_labeled(
+                "concord_ops_rejected_total",
+                &[crate::telemetry::reject_reason::AUTHZ],
+            );
+            tracing::info!(
+                correlation_id = %correlation_id,
+                outcome = "rejected",
+                reason = crate::telemetry::reject_reason::AUTHZ,
+                "ingest denied by write-role recheck"
+            );
             let fatal = send_error(conn, ProtocolError::Forbidden, "write denied", None);
             return if fatal { Err(FlowError::Close) } else { Ok(()) };
         }
@@ -1081,7 +1221,16 @@ async fn handle_binary(
         {
             // DB unavailable: NO durable ack (P3-M040) — safe error; the
             // client keeps its ops pending and retries.
-            tracing::warn!(connection_id = %conn.id, error = %e, "ingest failed (db)");
+            crate::observability::metrics::incr("concord_db_errors_total");
+            crate::observability::metrics::incr_labeled(
+                "concord_ops_rejected_total",
+                &[crate::telemetry::reject_reason::DB_UNAVAILABLE],
+            );
+            tracing::warn!(
+                correlation_id = %correlation_id,
+                error = %e,
+                "ingest failed (db)"
+            );
             let fatal = send_error(
                 conn,
                 ProtocolError::DatabaseUnavailable,
@@ -1091,7 +1240,16 @@ async fn handle_binary(
             return if fatal { Err(FlowError::Close) } else { Ok(()) };
         }
         Err(e) => {
-            tracing::error!(connection_id = %conn.id, error = %e, "ingest failed (internal)");
+            crate::observability::metrics::incr("concord_db_errors_total");
+            crate::observability::metrics::incr_labeled(
+                "concord_ops_rejected_total",
+                &[crate::telemetry::reject_reason::DB_UNAVAILABLE],
+            );
+            tracing::error!(
+                correlation_id = %correlation_id,
+                error = %e,
+                "ingest failed (internal)"
+            );
             let fatal = send_error(conn, ProtocolError::InternalError, "ingest failed", None);
             return if fatal { Err(FlowError::Close) } else { Ok(()) };
         }

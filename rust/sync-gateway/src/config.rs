@@ -46,6 +46,21 @@ pub struct Config {
     /// Redis URL; absent ⇒ no ephemeral tier (presence disabled, local
     /// rate limiting only).
     pub redis_url: Option<String>,
+    // --- Phase 6 observability (P6-M008/M009) ---
+    /// OpenTelemetry tracing enabled (GATEWAY_OTEL_ENABLED, default
+    /// false: zero behavior change when off).
+    pub otel_enabled: bool,
+    /// OTLP collector endpoint (GATEWAY_OTEL_ENDPOINT; default
+    /// http://127.0.0.1:4317 — loopback dev posture).
+    pub otel_endpoint: String,
+    /// Parent-based sampling ratio (GATEWAY_OTEL_SAMPLE_RATIO; default
+    /// 1.0 — local dev keeps every trace).
+    pub otel_sample_ratio: f64,
+    /// OTel exporter: "otlp" (default) | "stdout" | "memory" (tests).
+    pub otel_exporter: String,
+    /// Debug op-id attribution in spans/logs (GATEWAY_DEBUG_OP_IDS,
+    /// default false: keeps span attribute cardinality bounded).
+    pub debug_op_ids: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -152,6 +167,33 @@ impl Config {
         };
         let redis_url = env_optional("GATEWAY_REDIS_URL").filter(|s| !s.is_empty());
 
+        // --- Phase 6 observability config (P6-M009) ---
+        let otel_enabled = env_parse("GATEWAY_OTEL_ENABLED", "expected a boolean", false)?;
+        let otel_endpoint = env_optional("GATEWAY_OTEL_ENDPOINT")
+            .unwrap_or_else(|| "http://127.0.0.1:4317".to_string());
+        let otel_sample_ratio = env_parse(
+            "GATEWAY_OTEL_SAMPLE_RATIO",
+            "expected a ratio in [0.0, 1.0]",
+            1.0f64,
+        )?;
+        if !(0.0..=1.0).contains(&otel_sample_ratio) {
+            return Err(ConfigError::Invalid {
+                key: "GATEWAY_OTEL_SAMPLE_RATIO",
+                message: "must be within [0.0, 1.0]".into(),
+            });
+        }
+        let otel_exporter = env_optional("GATEWAY_OTEL_EXPORTER")
+            .unwrap_or_else(|| "otlp".to_string())
+            .to_ascii_lowercase();
+        if !matches!(otel_exporter.as_str(), "otlp" | "stdout" | "memory") {
+            return Err(ConfigError::Invalid {
+                key: "GATEWAY_OTEL_EXPORTER",
+                message: format!("unknown exporter \"{otel_exporter}\" (otlp|stdout|memory)"),
+            });
+        }
+        let debug_op_ids = env_parse("GATEWAY_DEBUG_OP_IDS", "expected a boolean", false)?;
+        crate::observability::correlation::set_debug_op_ids(debug_op_ids);
+
         if per_connection_queue_capacity == 0 {
             return Err(ConfigError::Invalid {
                 key: "GATEWAY_QUEUE_CAPACITY",
@@ -199,6 +241,11 @@ impl Config {
             nats_subject_prefix,
             gateway_id,
             redis_url,
+            otel_enabled,
+            otel_endpoint,
+            otel_sample_ratio,
+            otel_exporter,
+            debug_op_ids,
         })
     }
 }
@@ -228,6 +275,11 @@ mod tests {
             "GATEWAY_NATS_SUBJECT_PREFIX",
             "GATEWAY_ID",
             "GATEWAY_REDIS_URL",
+            "GATEWAY_OTEL_ENABLED",
+            "GATEWAY_OTEL_ENDPOINT",
+            "GATEWAY_OTEL_SAMPLE_RATIO",
+            "GATEWAY_OTEL_EXPORTER",
+            "GATEWAY_DEBUG_OP_IDS",
         ]
         .iter()
         .map(|k| (*k, env::var(k).ok()))
@@ -249,6 +301,11 @@ mod tests {
             "GATEWAY_NATS_SUBJECT_PREFIX",
             "GATEWAY_ID",
             "GATEWAY_REDIS_URL",
+            "GATEWAY_OTEL_ENABLED",
+            "GATEWAY_OTEL_ENDPOINT",
+            "GATEWAY_OTEL_SAMPLE_RATIO",
+            "GATEWAY_OTEL_EXPORTER",
+            "GATEWAY_DEBUG_OP_IDS",
         ] {
             env::remove_var(key);
         }

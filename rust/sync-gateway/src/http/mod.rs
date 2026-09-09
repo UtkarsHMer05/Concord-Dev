@@ -46,6 +46,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/health/live", get(live))
         .route("/api/v1/health/ready", get(ready))
         .route("/api/v1/metrics", get(metrics))
+        .route("/metrics", get(prometheus_metrics))
         .route("/api/v1/sync", get(ws::upgrade))
         .with_state(state)
 }
@@ -71,7 +72,12 @@ async fn ready(State(app): State<AppState>) -> (StatusCode, Json<Value>) {
 }
 
 /// Local metrics endpoint (M042): counters as plain text. No secrets.
-async fn metrics(State(_app): State<AppState>) -> (StatusCode, String) {
+async fn metrics(State(app): State<AppState>) -> (StatusCode, String) {
+    // Keep the legacy /api/v1/metrics body in lockstep with live gauges
+    // before rendering it (P6-M010: one source of truth for the gauge).
+    let active = Metrics::global().active_connections.load(Ordering::Relaxed);
+    crate::observability::metrics::set_gauge("concord_active_connections", active as i64);
+    let _ = &app;
     let m = Metrics::global();
     let mut out = String::new();
     macro_rules! emit {
@@ -124,6 +130,20 @@ async fn metrics(State(_app): State<AppState>) -> (StatusCode, String) {
         m.sync_batches_total.load(Ordering::Relaxed)
     );
     (StatusCode::OK, out)
+}
+
+/// Prometheus text-exposition endpoint (P6-M010): GET /metrics.
+///
+/// Unauthenticated BY DESIGN but on the SAME loopback-bound HTTP server as
+/// every other gateway route (the bind host is validated to an IP literal
+/// and defaults to 127.0.0.1 — see Config). Label cardinality is bounded
+/// by the registry's call-site rules (integration test asserts this).
+async fn prometheus_metrics(State(_app): State<AppState>) -> (StatusCode, String) {
+    // Refresh the live gauges so a scrape is current even without recent
+    // connection churn.
+    let active = Metrics::global().active_connections.load(Ordering::Relaxed);
+    crate::observability::metrics::set_gauge("concord_active_connections", active as i64);
+    (StatusCode::OK, crate::observability::metrics::render())
 }
 
 /// WebSocket upgrade route requires ConnectInfo — helper for the server

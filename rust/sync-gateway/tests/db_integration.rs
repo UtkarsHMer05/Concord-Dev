@@ -39,6 +39,11 @@ async fn test_db() -> Option<Db> {
         nats_subject_prefix: "concord.test".to_string(),
         gateway_id: 1,
         redis_url: None,
+        otel_enabled: false,
+        otel_endpoint: "http://127.0.0.1:4317".into(),
+        otel_sample_ratio: 1.0,
+        otel_exporter: "otlp".into(),
+        debug_op_ids: false,
     };
     Db::connect(&config).await.ok() // DB not running: skip (documented gate precondition)
 }
@@ -167,6 +172,11 @@ fn test_config() -> Config {
         nats_subject_prefix: "concord.test".to_string(),
         gateway_id: 1,
         redis_url: None,
+        otel_enabled: false,
+        otel_endpoint: "http://127.0.0.1:4317".into(),
+        otel_sample_ratio: 1.0,
+        otel_exporter: "otlp".into(),
+        debug_op_ids: false,
     }
 }
 

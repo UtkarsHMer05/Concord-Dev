@@ -101,9 +101,7 @@ fn valid_event(origin: u64, document: Uuid, event_id: u64) -> BrokerEvent {
 }
 
 async fn broker(namespace: &str, gateway_id: u64) -> Option<Broker> {
-    Broker::connect(NATS_URL, namespace, gateway_id)
-        .await
-        .ok()
+    Broker::connect(NATS_URL, namespace, gateway_id).await.ok()
 }
 
 async fn nats_up() -> bool {
@@ -172,15 +170,14 @@ async fn nats_wrong_document_event_never_reaches_other_document_or_db() {
     // hoping a consumer bug confuses rooms). A consumer for doc B
     // simply never sees it as B-related.
     let event = valid_event(999, doc_a, 1);
-    gw1.publish(&event).await.expect("hostile publish (valid bytes)");
+    gw1.publish(&event)
+        .await
+        .expect("hostile publish (valid bytes)");
 
     // The receiving gateway's consumer (modeled by the second broker
     // client) decodes it: the event IS valid — routing is the control.
     let gw2 = broker(&ns, 2).await.expect("gw2");
-    let messages = gw2
-        .fetch(4, Duration::from_secs(3))
-        .await
-        .expect("fetch");
+    let messages = gw2.fetch(4, Duration::from_secs(3)).await.expect("fetch");
     let mut saw_a = false;
     for m in &messages {
         let decoded = BrokerEvent::decode(&m.message.payload).expect("valid decode");
@@ -198,8 +195,16 @@ async fn nats_wrong_document_event_never_reaches_other_document_or_db() {
 
     // No durable rows for EITHER document: broker delivery never
     // persists (T15 core invariant).
-    assert_eq!(db_count(doc_a).await, 0, "doc A: no fabricated durable state");
-    assert_eq!(db_count(doc_b).await, 0, "doc B: no cross-tenant durable state");
+    assert_eq!(
+        db_count(doc_a).await,
+        0,
+        "doc A: no fabricated durable state"
+    );
+    assert_eq!(
+        db_count(doc_b).await,
+        0,
+        "doc B: no cross-tenant durable state"
+    );
 }
 
 /// Vector 2 — gateway-id impersonation: an event claiming to originate
@@ -226,17 +231,16 @@ async fn nats_event_claiming_foreign_gateway_id_is_inert() {
     let doc = Uuid::new_v4();
     let forged = valid_event(7, doc, 2);
     assert_ne!(forged.origin_gateway, gw.gateway_id);
-    gw.publish(&forged).await.expect("publish forged-origin event");
+    gw.publish(&forged)
+        .await
+        .expect("publish forged-origin event");
 
     // A consumer (as the impersonated gateway 7) fetches: it sees the
     // event with origin 7 == its own id and would SUPPRESS it (the
     // only effect of a forged origin id) — a self-inflicted loss of
     // realtime for gateway 7, never a security gain for the attacker.
     let gw7 = broker(&ns, 7).await.expect("gw7 consumer");
-    let messages = gw7
-        .fetch(4, Duration::from_secs(3))
-        .await
-        .expect("fetch");
+    let messages = gw7.fetch(4, Duration::from_secs(3)).await.expect("fetch");
     for m in &messages {
         let decoded = BrokerEvent::decode(&m.message.payload).expect("decode");
         assert_eq!(decoded.origin_gateway, 7, "origin id carried verbatim");
@@ -249,7 +253,11 @@ async fn nats_event_claiming_foreign_gateway_id_is_inert() {
     }
 
     // Durable state: nothing. The broker path has no ingest.
-    assert_eq!(db_count(doc).await, 0, "no durable rows from forged-origin event");
+    assert_eq!(
+        db_count(doc).await,
+        0,
+        "no durable rows from forged-origin event"
+    );
 }
 
 /// Vector 3 — oversized payload: both containment layers probed.
@@ -333,10 +341,7 @@ async fn nats_replayed_events_leave_durable_state_unchanged() {
     gw1.publish(&event).await.expect("publish 3 (same msg-id)");
 
     let gw2 = broker(&ns, 2).await.expect("gw2");
-    let messages = gw2
-        .fetch(8, Duration::from_secs(3))
-        .await
-        .expect("fetch");
+    let messages = gw2.fetch(8, Duration::from_secs(3)).await.expect("fetch");
     let matching = messages
         .iter()
         .filter(|m| {
@@ -386,7 +391,9 @@ async fn nats_malformed_payloads_are_structured_rejections() {
         // non-utf8 has no meaning in a binary envelope, but random bytes
         // must still be contained:
         (
-            (0..250u32).map(|i| (i.wrapping_mul(7).wrapping_add(3)) as u8).collect(),
+            (0..250u32)
+                .map(|i| (i.wrapping_mul(7).wrapping_add(3)) as u8)
+                .collect(),
             "random bytes",
         ),
     ];
@@ -407,7 +414,9 @@ async fn nats_malformed_payloads_are_structured_rejections() {
     bad_version[0] = 9; // unsupported schema version
     assert!(matches!(
         BrokerEvent::decode(&bad_version),
-        Err(sync_gateway::broker::BrokerEventError::UnsupportedVersion(9))
+        Err(sync_gateway::broker::BrokerEventError::UnsupportedVersion(
+            9
+        ))
     ));
 
     // A raw hostile publish of malformed bytes survives transport (the
@@ -419,10 +428,7 @@ async fn nats_malformed_payloads_are_structured_rejections() {
         .expect("raw publish");
     tokio::time::sleep(Duration::from_millis(400)).await;
     let gw2 = broker(&ns, 2).await.expect("gw2");
-    let messages = gw2
-        .fetch(4, Duration::from_secs(2))
-        .await
-        .expect("fetch");
+    let messages = gw2.fetch(4, Duration::from_secs(2)).await.expect("fetch");
     for m in &messages {
         match BrokerEvent::decode(&m.message.payload) {
             Err(_) => {
@@ -468,7 +474,10 @@ async fn nats_forged_checksum_is_rejected_at_decode() {
     }
 
     // Control: the UNMODIFIED envelope decodes.
-    assert!(BrokerEvent::decode(&bytes).is_ok(), "unmodified event decodes");
+    assert!(
+        BrokerEvent::decode(&bytes).is_ok(),
+        "unmodified event decodes"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -520,7 +529,10 @@ async fn redis_cross_namespace_key_poisoning_cannot_affect_other_tenants() {
 
     // Tenant A has a real presence entry for the victim doc.
     store_a.upsert(doc_victim, Uuid::new_v4(), 1).await.unwrap();
-    assert_eq!(store_a.document_presence_count(doc_victim).await.unwrap(), 1);
+    assert_eq!(
+        store_a.document_presence_count(doc_victim).await.unwrap(),
+        1
+    );
 
     // HOSTILE: a writer holding tenant B's handle (or a raw client)
     // writes keys that MIMIC tenant A's presence keys for the same
@@ -578,9 +590,7 @@ async fn redis_cross_namespace_key_poisoning_cannot_affect_other_tenants() {
         .unwrap()
         .as_secs();
     let window_start = now - (now % window_secs);
-    let victim_key = format!(
-        "concord:{ns_a}:rlim:p6test:victim-principal:{window_start}"
-    );
+    let victim_key = format!("concord:{ns_a}:rlim:p6test:victim-principal:{window_start}");
     let _: u64 = redis::cmd("INCR")
         .arg(&victim_key)
         .query(&mut conn)
@@ -593,7 +603,8 @@ async fn redis_cross_namespace_key_poisoning_cannot_affect_other_tenants() {
     );
     let outcome = limiter_a.check("p6test", "victim-principal").await;
     assert_eq!(
-        outcome, RateLimitOutcome::Limited,
+        outcome,
+        RateLimitOutcome::Limited,
         "budget is EXHAUSTED not bypassed (fail-closed direction)"
     );
     // Other principals unaffected:
@@ -608,7 +619,10 @@ async fn redis_cross_namespace_key_poisoning_cannot_affect_other_tenants() {
     );
 
     // Cleanup the hostile key.
-    let _: () = redis::cmd("DEL").arg(&foreign_key).query(&mut conn).unwrap();
+    let _: () = redis::cmd("DEL")
+        .arg(&foreign_key)
+        .query(&mut conn)
+        .unwrap();
     let _: () = redis::cmd("DEL").arg(&victim_key).query(&mut conn).unwrap();
 }
 
@@ -682,8 +696,14 @@ async fn redis_midsession_flushall_and_reinjection_is_degraded_but_safe() {
         },
     );
     let limiter = RateLimiter::new(Some(redis.clone()), policies);
-    assert_eq!(limiter.check("p6test", "user-1").await, RateLimitOutcome::Allowed);
-    assert_eq!(limiter.check("p6test", "user-1").await, RateLimitOutcome::Limited);
+    assert_eq!(
+        limiter.check("p6test", "user-1").await,
+        RateLimitOutcome::Allowed
+    );
+    assert_eq!(
+        limiter.check("p6test", "user-1").await,
+        RateLimitOutcome::Limited
+    );
 
     // Hostile: overwrite the counter key with a non-integer string.
     let p6_policy = Duration::from_secs(60); // mirrors the test policy above
@@ -836,10 +856,7 @@ async fn internal_infrastructure_cannot_fabricate_durable_state() {
     // Drain + ack everything (as the consumer would).
     tokio::time::sleep(Duration::from_millis(400)).await;
     let gw2 = broker(&ns, 2).await.expect("gw2");
-    let messages = gw2
-        .fetch(16, Duration::from_secs(3))
-        .await
-        .expect("fetch");
+    let messages = gw2.fetch(16, Duration::from_secs(3)).await.expect("fetch");
     for m in &messages {
         match BrokerEvent::decode(&m.message.payload) {
             Ok(_) => {
@@ -855,7 +872,8 @@ async fn internal_infrastructure_cannot_fabricate_durable_state() {
 
     // THE INVARIANT: zero durable rows from all of it.
     assert_eq!(
-        db_count(doc).await, 0,
+        db_count(doc).await,
+        0,
         "NATS + Redis abuse fabricates NO durable state — ingest is client-auth-only"
     );
     assert!(gw2.healthy().await, "consumer healthy after the full menu");

@@ -161,6 +161,11 @@ fn base_config() -> Config {
         nats_subject_prefix: "concord.test".to_string(),
         gateway_id: 1,
         redis_url: None,
+        otel_enabled: false,
+        otel_endpoint: "http://127.0.0.1:4317".into(),
+        otel_sample_ratio: 1.0,
+        otel_exporter: "otlp".into(),
+        debug_op_ids: false,
     }
 }
 
@@ -814,6 +819,11 @@ async fn db_outage_never_fakes_durable_ack_and_readiness_flips() {
         nats_subject_prefix: "concord.test".to_string(),
         gateway_id: 1,
         redis_url: None,
+        otel_enabled: false,
+        otel_endpoint: "http://127.0.0.1:4317".into(),
+        otel_sample_ratio: 1.0,
+        otel_exporter: "otlp".into(),
+        debug_op_ids: false,
     };
     // Startup fails fast — the gateway refuses to run against a dead DB.
     assert!(

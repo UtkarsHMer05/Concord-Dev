@@ -436,8 +436,7 @@ async fn seed_world(repo: &GatewayRepo) -> World {
              VALUES ($1, $2, 'member')",
             &[
                 &foreign_org,
-                ids.get("foreign_org_member")
-                    .expect("foreign_org_member"),
+                ids.get("foreign_org_member").expect("foreign_org_member"),
             ],
         )
         .await
@@ -468,9 +467,7 @@ async fn seed_world(repo: &GatewayRepo) -> World {
         .query_one(
             "INSERT INTO documents (owner_user_id, title, initial_content)
              VALUES ($1, 'p6a foreign doc', '') RETURNING id",
-            &[ids
-                .get("foreign_org_member")
-                .expect("foreign_org_member")],
+            &[ids.get("foreign_org_member").expect("foreign_org_member")],
         )
         .await
         .expect("seed foreign-owned doc")
@@ -487,11 +484,7 @@ async fn seed_world(repo: &GatewayRepo) -> World {
             .execute(
                 "INSERT INTO document_user_permissions (document_id, user_id, role)
                  VALUES ($1, $2, $3::text::document_role)",
-                &[
-                    &personal,
-                    ids.get(role_name).expect("grantee"),
-                    &acl_role,
-                ],
+                &[&personal, ids.get(role_name).expect("grantee"), &acl_role],
             )
             .await
             .expect("seed acl row");
@@ -642,11 +635,7 @@ async fn matrix_org_scoped_and_cross_tenant_documents() {
         handshake(&mut ws, world.clerk("org_member")).await;
         let joined = join_ready(&mut ws, &world.doc("org_doc").to_string()).await;
         assert_eq!(joined["payload"]["role"], "editor", "org-derived EDITOR");
-        send_binary(
-            &mut ws,
-            client_ops_frame(1, &[make_op_bytes(0x0B11, 1)]),
-        )
-        .await;
+        send_binary(&mut ws, client_ops_frame(1, &[make_op_bytes(0x0B11, 1)])).await;
         assert_eq!(
             next_control(&mut ws).await["type"],
             "durable_ack",
@@ -710,9 +699,7 @@ async fn matrix_catchup_and_fetch_snapshot_per_role() {
         let mut ws = connect(&server).await;
         handshake(&mut ws, world.clerk("owner")).await;
         join_ready(&mut ws, &doc_str).await;
-        let ops: Vec<Vec<u8>> = (1..=3)
-            .map(|c| make_op_bytes(0x0C11, c))
-            .collect();
+        let ops: Vec<Vec<u8>> = (1..=3).map(|c| make_op_bytes(0x0C11, c)).collect();
         send_binary(&mut ws, client_ops_frame(1, &ops)).await;
         assert_eq!(next_control(&mut ws).await["type"], "durable_ack");
     }
@@ -730,7 +717,10 @@ async fn matrix_catchup_and_fetch_snapshot_per_role() {
         let digest = format!(
             "sha256:{}",
             hex::encode(sync_gateway::db::snapshots::wrapper::encode_wrapper(
-                doc, 3, 3, b"p6a inner snapshot bytes"
+                doc,
+                3,
+                3,
+                b"p6a inner snapshot bytes"
             ))
         );
         let job_id = Uuid::new_v4();
@@ -738,11 +728,10 @@ async fn matrix_catchup_and_fetch_snapshot_per_role() {
             .create_attempt(doc, 3, 3, job_id, 1, &digest, "{}", &wrapper)
             .await
             .expect("create snapshot attempt");
-        assert!(
-            repo.transition_building_to_verifying(attempt.snapshot_id)
-                .await
-                .expect("verify transition")
-        );
+        assert!(repo
+            .transition_building_to_verifying(attempt.snapshot_id)
+            .await
+            .expect("verify transition"));
         assert!(
             repo.finalize(attempt.snapshot_id, None)
                 .await
@@ -849,7 +838,10 @@ async fn matrix_fetch_snapshot_cross_tenant_and_guessed_ids() {
             .create_attempt(target_doc, 0, 0, Uuid::new_v4(), 1, &digest, "{}", &wrapper)
             .await
             .expect("attempt");
-        assert!(repo.transition_building_to_verifying(attempt.snapshot_id).await.unwrap());
+        assert!(repo
+            .transition_building_to_verifying(attempt.snapshot_id)
+            .await
+            .unwrap());
         assert!(repo.finalize(attempt.snapshot_id, None).await.unwrap());
         ids.insert(name, attempt.snapshot_id);
     }
@@ -857,9 +849,7 @@ async fn matrix_fetch_snapshot_cross_tenant_and_guessed_ids() {
     let foreign_snapshot = *ids.get("foreign").expect("foreign");
 
     let fetch = |id: &str| {
-        format!(
-            r#"{{"v":1,"type":"fetch_snapshot","payload":{{"snapshotId":"{id}"}}}}"#
-        )
+        format!(r#"{{"v":1,"type":"fetch_snapshot","payload":{{"snapshotId":"{id}"}}}}"#)
     };
 
     // A joined EDITOR (acl_editor has read) tries ids that are NOT
@@ -934,9 +924,9 @@ async fn matrix_guessed_document_ids_indistinguishable() {
     // (random uuid), foreign-tenant document. All must produce the same
     // code + message.
     let cases = [
-        world.doc("personal").to_string(), // exists, no access
+        world.doc("personal").to_string(),    // exists, no access
         world.doc("foreign_doc").to_string(), // exists, other tenant
-        Uuid::new_v4().to_string(),          // does not exist
+        Uuid::new_v4().to_string(),           // does not exist
     ];
     let mut shapes: Vec<(String, String)> = Vec::new();
     for doc in &cases {
@@ -989,11 +979,7 @@ async fn matrix_revoke_and_downgrade_between_join_and_write() {
         let mut ws = connect(&server).await;
         handshake(&mut ws, world.clerk("acl_editor")).await;
         join_ready(&mut ws, &doc_str).await;
-        send_binary(
-            &mut ws,
-            client_ops_frame(1, &[make_op_bytes(0x0D11, 1)]),
-        )
-        .await;
+        send_binary(&mut ws, client_ops_frame(1, &[make_op_bytes(0x0D11, 1)])).await;
         assert_eq!(
             next_control(&mut ws).await["type"],
             "durable_ack",
@@ -1003,11 +989,7 @@ async fn matrix_revoke_and_downgrade_between_join_and_write() {
         // Revoke the grant via SQL (owner-side action simulated directly).
         revoke_grant(&server.repo, doc, world.clerk("acl_editor")).await;
 
-        send_binary(
-            &mut ws,
-            client_ops_frame(2, &[make_op_bytes(0x0D11, 2)]),
-        )
-        .await;
+        send_binary(&mut ws, client_ops_frame(2, &[make_op_bytes(0x0D11, 2)])).await;
         let denied = next_control(&mut ws).await;
         assert_eq!(
             denied["payload"]["code"], "forbidden",
@@ -1035,7 +1017,10 @@ async fn matrix_revoke_and_downgrade_between_join_and_write() {
             }
         }
         assert_eq!(next_control(&mut ws).await["type"], "sync_done");
-        assert_eq!(got, 1, "history readable after write denial (session alive)");
+        assert_eq!(
+            got, 1,
+            "history readable after write denial (session alive)"
+        );
     }
 
     // --- DOWNGRADE: the same user's grant is restored as EDITOR, they
@@ -1058,13 +1043,12 @@ async fn matrix_revoke_and_downgrade_between_join_and_write() {
         let mut ws = connect(&server).await;
         handshake(&mut ws, world.clerk("acl_editor")).await;
         let joined = try_join(&mut ws, &doc_str).await;
-        assert_eq!(joined["payload"]["role"], "editor", "re-grant resolves EDITOR");
+        assert_eq!(
+            joined["payload"]["role"], "editor",
+            "re-grant resolves EDITOR"
+        );
         assert_eq!(next_control(&mut ws).await["type"], "sync_done");
-        send_binary(
-            &mut ws,
-            client_ops_frame(4, &[make_op_bytes(0x0D11, 3)]),
-        )
-        .await;
+        send_binary(&mut ws, client_ops_frame(4, &[make_op_bytes(0x0D11, 3)])).await;
         assert_eq!(
             next_control(&mut ws).await["type"],
             "durable_ack",
@@ -1083,11 +1067,7 @@ async fn matrix_revoke_and_downgrade_between_join_and_write() {
             .expect("downgrade to VIEWER");
 
         // Same socket, next batch: denied (per-batch recheck sees VIEWER).
-        send_binary(
-            &mut ws,
-            client_ops_frame(5, &[make_op_bytes(0x0D11, 4)]),
-        )
-        .await;
+        send_binary(&mut ws, client_ops_frame(5, &[make_op_bytes(0x0D11, 4)])).await;
         let denied = next_control(&mut ws).await;
         assert_eq!(
             denied["payload"]["code"], "forbidden",

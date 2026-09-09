@@ -118,16 +118,42 @@ impl NatsSubscriber {
                 }
             };
             for message in messages {
+                // P6-M011 adjacent gauge: refresh lag/redelivery from
+                // consumer info when cheap (errors just keep last value).
+                // TODO(P6-M011): move to a periodic poll in main if the
+                // per-message call proves expensive.
+                if let Ok((ack_pending, redelivered)) = self.broker.consumer_info().await {
+                    crate::observability::metrics::set_gauge(
+                        "concord_broker_lag",
+                        ack_pending as i64,
+                    );
+                    crate::observability::metrics::incr_by(
+                        "concord_broker_redeliveries_total",
+                        redelivered,
+                    );
+                }
                 match BrokerEvent::decode(&message.message.payload) {
                     Ok(event) => {
                         crate::telemetry::Metrics::global()
                             .broker_events_consumed_total
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        // M008: reconstruct the ORIGIN's correlation id —
+                        // the same string the ingress gateway logged — so
+                        // one grep follows an op across gateways.
+                        let correlation_id =
+                            crate::observability::correlation::broker_correlation_id(
+                                event.origin_gateway,
+                                event.event_id,
+                            );
+                        crate::observability::metrics::incr_labeled(
+                            "concord_broker_deliver_total",
+                            &[crate::telemetry::broker_outcome::OK],
+                        );
                         // Correlation: the origin's event id + document flow
                         // through consume → local fanout (M040).
                         tracing::debug!(
+                            correlation_id = %correlation_id,
                             gateway_id = self.broker.gateway_id,
-                            document_id = %event.document_id,
                             origin_gateway = event.origin_gateway,
                             event_id = event.event_id,
                             op_count = event.ops.len(),
@@ -136,6 +162,11 @@ impl NatsSubscriber {
                         );
                         if event.origin_gateway == self.broker.gateway_id {
                             // Own event echoed back — suppress (M017).
+                            tracing::debug!(
+                                correlation_id = %correlation_id,
+                                outcome = "suppressed_self_event",
+                                "own event echoed back; suppressed"
+                            );
                             let _ = message.ack().await;
                             continue;
                         }
@@ -171,9 +202,17 @@ impl NatsSubscriber {
                                 crate::telemetry::Metrics::global()
                                     .slow_consumer_disconnects_total
                                     .fetch_add(1, Ordering::Relaxed);
+                                crate::observability::metrics::incr(
+                                    "concord_slow_consumer_disconnects_total",
+                                );
                                 let _ = slow_id;
                             }
                         }
+                        tracing::debug!(
+                            correlation_id = %correlation_id,
+                            outcome = "fanout_complete",
+                            "broker event fanned out to local room"
+                        );
                         let _ = message.ack().await;
                     }
                     Err(e) => {
@@ -182,6 +221,10 @@ impl NatsSubscriber {
                         crate::telemetry::Metrics::global()
                             .broker_poison_total
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        crate::observability::metrics::incr_labeled(
+                            "concord_broker_deliver_total",
+                            &[crate::telemetry::broker_outcome::FAILED],
+                        );
                         tracing::warn!(error = %e, error_class = "broker_poison", "invalid event terminated");
                         let _ = message.ack_with(async_nats::jetstream::AckKind::Term).await;
                     }

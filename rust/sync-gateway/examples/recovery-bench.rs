@@ -108,6 +108,11 @@ async fn bench_db() -> Db {
         nats_subject_prefix: "concord.bench".to_string(),
         gateway_id: 1,
         redis_url: None,
+        otel_enabled: false,
+        otel_endpoint: "http://127.0.0.1:4317".into(),
+        otel_sample_ratio: 1.0,
+        otel_exporter: "otlp".into(),
+        debug_op_ids: false,
     };
     let db = Db::connect(&config).await.expect("test DB reachable");
     run_migrations(&db).await.expect("migrations");

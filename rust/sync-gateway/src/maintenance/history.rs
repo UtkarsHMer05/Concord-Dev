@@ -841,6 +841,29 @@ impl RevisionService {
         actor: UserId,
         source_revision_id: Uuid,
     ) -> Result<RestoreOutcome, HistoryError> {
+        // P6-M009: restore-op span (bounded attributes: outcome only).
+        let started = std::time::Instant::now();
+        let _restore_span = tracing::info_span!("maintenance.restore_op").entered();
+        let result = self
+            .restore_revision_inner(document, actor, source_revision_id)
+            .await;
+        if let Ok(outcome) = &result {
+            tracing::info!(
+                reused_existing_snapshot = outcome.reused_existing_snapshot,
+                boundary = outcome.boundary,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "restore op completed"
+            );
+        }
+        result
+    }
+
+    async fn restore_revision_inner(
+        &self,
+        document: Uuid,
+        actor: UserId,
+        source_revision_id: Uuid,
+    ) -> Result<RestoreOutcome, HistoryError> {
         // H5: OWNER ONLY, checked FIRST (deny-by-default).
         self.require_access(actor, document, |r| r.is_owner())
             .await?;

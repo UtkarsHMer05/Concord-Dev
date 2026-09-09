@@ -18,8 +18,6 @@ use sync_gateway::ws;
 
 #[tokio::main]
 async fn main() {
-    telemetry_init();
-
     let config = match Config::from_env() {
         Ok(c) => c,
         Err(e) => {
@@ -27,6 +25,12 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    // P6-M009: optional OTel tracing. GATEWAY_OTEL_ENABLED=false (default)
+    // leaves the pre-M009 fmt subscriber untouched. The handle flushes the
+    // provider on Drop — held to the end of main so the SIGTERM graceful
+    // shutdown path completes first, then spans flush on exit.
+    let _otel_guard = otel_init(&config);
+    telemetry_init();
 
     // Fail-fast DB startup + migrations (never start "maybe").
     let db = match Db::connect(&config).await {
@@ -178,11 +182,39 @@ async fn main() {
         std::process::exit(1);
     }
     tracing::info!("gateway drained and stopped");
+    // _otel_guard Drops here (end of main): P6-M009 clean shutdown — the
+    // provider flushes buffered spans with a bounded timeout after the
+    // graceful path completes. The explicit exit() calls above are all
+    // pre-serve fail-fast paths (config/DB/bind) where nothing was traced.
 }
 
 fn telemetry_init() {
     let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_owned());
     sync_gateway::telemetry::init(&filter);
+}
+
+/// P6-M009: builds OTel options from config. `None` when disabled.
+fn otel_options(config: &Config) -> Option<sync_gateway::observability::otel::OtelOptions> {
+    if !config.otel_enabled {
+        return None;
+    }
+    let exporter = match config.otel_exporter.as_str() {
+        "stdout" => sync_gateway::observability::otel::Exporter::Stdout,
+        "memory" => sync_gateway::observability::otel::Exporter::InMemory,
+        _ => sync_gateway::observability::otel::Exporter::Otlp {
+            endpoint: config.otel_endpoint.clone(),
+        },
+    };
+    Some(sync_gateway::observability::otel::OtelOptions {
+        exporter,
+        sample_ratio: config.otel_sample_ratio,
+    })
+}
+
+/// Initializes tracing with the optional OTel layer (M009).
+fn otel_init(config: &Config) -> Option<sync_gateway::observability::otel::OtelHandle> {
+    let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_owned());
+    sync_gateway::observability::otel::init_with_otel(&filter, otel_options(config).as_ref())
 }
 
 async fn wait_for_shutdown_signal() -> &'static str {

@@ -13,6 +13,7 @@ pub mod ephemeral;
 pub mod error;
 pub mod http;
 pub mod maintenance;
+pub mod observability;
 pub mod protocol;
 pub mod sessions;
 pub mod telemetry;

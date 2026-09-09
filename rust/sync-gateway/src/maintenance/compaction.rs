@@ -271,6 +271,31 @@ pub async fn prune_to_boundary(
     boundary: i64,
     batch_rows: i64,
 ) -> Result<i64, CompactionError> {
+    // P6-M009/M010: compaction span + duration/rows/bytes metrics.
+    let started = std::time::Instant::now();
+    let _compaction_span = tracing::info_span!("maintenance.compaction").entered();
+    let result = prune_to_boundary_inner(db, snapshots, document, boundary, batch_rows).await;
+    if let Ok(rows) = &result {
+        crate::observability::metrics::incr_by("concord_compaction_rows_total", *rows as u64);
+        // TODO(P6-M010): bytes pruned needs RETURNING payload sizes —
+        // tracked as a follow-up; rows is the load-bearing signal today.
+        crate::observability::metrics::incr_by("concord_compaction_bytes_total", 0);
+    }
+    crate::observability::metrics::observe(
+        "concord_compaction_duration_seconds",
+        &["prune"],
+        started.elapsed().as_secs_f64(),
+    );
+    result
+}
+
+async fn prune_to_boundary_inner(
+    db: &Db,
+    snapshots: &SnapshotRepo,
+    document: Uuid,
+    boundary: i64,
+    batch_rows: i64,
+) -> Result<i64, CompactionError> {
     let snapshot_id = eligibility(db, snapshots, document, boundary).await?;
     let batch_rows = batch_rows.clamp(1, 10_000);
     let mut client = db.get().await?;

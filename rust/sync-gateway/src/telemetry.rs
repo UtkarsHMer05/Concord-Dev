@@ -1,4 +1,13 @@
-//! Structured tracing + lightweight runtime metrics (P3-M010 / P3-M042).
+//! Structured tracing + lightweight runtime metrics (P3-M010 / P3-M042,
+//! extended P6-M008..M010).
+//!
+//! Two metric surfaces share this file:
+//! - `Metrics` (process-wide `OnceLock` counters): the legacy plain-text
+//!   `/api/v1/metrics` body (kept byte-compatible: `multi_gateway`
+//!   asserts on `active_connections`).
+//! - `observability::metrics` (Prometheus exposition, P6-M010): the
+//!   `/metrics` endpoint. Recording helpers below mirror writes into
+//!   BOTH surfaces so the catalog stays coherent.
 
 use std::sync::atomic::AtomicU64;
 use std::sync::OnceLock;
@@ -10,6 +19,29 @@ pub fn init(default_filter: &str) {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+}
+
+/// Bounded reason classes for `concord_ops_rejected_total{reason}` (the
+/// ONLY allowed label values — cardinality audit in the integration test).
+pub mod reject_reason {
+    /// Frame failed structural decode/validation.
+    pub const MALFORMED: &str = "malformed";
+    /// Illegal for the current session state.
+    pub const INVALID_STATE: &str = "invalid_state";
+    /// Authorization denied (join/write/snapshot).
+    pub const AUTHZ: &str = "authz";
+    /// Persistence temporarily unavailable.
+    pub const DB_UNAVAILABLE: &str = "db_unavailable";
+    /// Draining: writes stopped.
+    pub const DRAINING: &str = "draining";
+    /// Rate limited (connect/write/fetch scope).
+    pub const RATE_LIMITED: &str = "rate_limited";
+}
+
+/// Bounded outcome values for broker publish/deliver counters.
+pub mod broker_outcome {
+    pub const OK: &str = "ok";
+    pub const FAILED: &str = "failed";
 }
 
 /// Process-wide operational counters (Phase 3 metrics, M042).
@@ -85,5 +117,11 @@ impl Metrics {
             samples.drain(..2048);
         }
         samples.push(micros);
+        // Prometheus surface (P6-M010): same observation, histogram form.
+        crate::observability::metrics::observe(
+            "concord_db_write_latency_seconds",
+            &["ingest_batch"],
+            micros as f64 / 1_000_000.0,
+        );
     }
 }

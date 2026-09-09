@@ -62,6 +62,19 @@ impl RecoverySelector {
     /// full replay. Every candidate passes the full M013 integrity
     /// matrix before being returned (M019).
     pub async fn select_latest_valid(&self, document: Uuid) -> SelectedRecovery {
+        // P6-M009/M010: recovery-selection span + duration histogram.
+        let started = std::time::Instant::now();
+        let _recovery_span = tracing::info_span!("maintenance.recovery_select").entered();
+        let selected = self.select_latest_valid_inner(document).await;
+        crate::observability::metrics::observe(
+            "concord_recovery_duration_seconds",
+            &["select"],
+            started.elapsed().as_secs_f64(),
+        );
+        selected
+    }
+
+    async fn select_latest_valid_inner(&self, document: Uuid) -> SelectedRecovery {
         // Finalized rows only, newest coverage first (list_historical is
         // coverage DESC; the status filter is applied here so the query
         // surface stays as shipped in M012).

@@ -62,6 +62,54 @@ services:
       timeout: 3s
       retries: 12
 
+  # Prometheus — local metric collection for the gateway cluster (P6-M011).
+  # Scrapes the HOST gateways' /metrics endpoints (host.docker.internal)
+  # and itself every 5s. Dev only: loopback-bound, no auth (documented).
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: concord-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=2d"
+    volumes:
+      - ./scripts/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # Grafana — provisioned dashboards over the local Prometheus (P6-M012).
+  # Dev-only anonymous ADMIN auth: acceptable strictly because the port
+  # is loopback-bound and the stack never leaves this machine — NEVER
+  # enable this in any shared deployment.
+  grafana:
+    image: grafana/grafana:12.2.0
+    container_name: concord-grafana
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_SERVER_HTTP_PORT: "3000"
+    volumes:
+      - ./scripts/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./scripts/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
 volumes:
   concord_pgdata:
   concord_nats:
@@ -70,3 +118,4 @@ volumes:
 # scripts/gateway-cluster.sh (the release binary is built for the host OS;
 # container images are Phase 7 work) behind an nginx load balancer container
 # (ws://127.0.0.1:8890/api/v1/sync). Infra services above are compose-managed.
+# Observability (P6): prometheus + grafana above; see docs/OBSERVABILITY.md.

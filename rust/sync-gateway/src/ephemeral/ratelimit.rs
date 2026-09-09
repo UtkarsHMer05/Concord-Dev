@@ -126,6 +126,7 @@ impl RateLimiter {
             let mut conn = redis.manager();
             let start = Self::window_start(policy);
             let key = format!("{key}:{start}");
+            let redis_started = std::time::Instant::now();
             let outcome = tokio::time::timeout(Duration::from_secs(1), async {
                 let count: u64 = redis::cmd("INCR")
                     .arg(&key)
@@ -143,13 +144,27 @@ impl RateLimiter {
                 Ok::<u64, EphemeralError>(count)
             })
             .await;
-            if let Ok(Ok(count)) = outcome {
-                if count > policy.max_events {
-                    self.limited_total
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    return RateLimitOutcome::Limited;
+            match outcome {
+                Ok(Ok(count)) => {
+                    // P6-M010: redis command latency (success path).
+                    crate::observability::metrics::observe(
+                        "concord_redis_latency_seconds",
+                        &["ratelimit_check"],
+                        redis_started.elapsed().as_secs_f64(),
+                    );
+                    if count > policy.max_events {
+                        self.limited_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        record_rate_limit_hit(scope);
+                        return RateLimitOutcome::Limited;
+                    }
+                    return RateLimitOutcome::Allowed;
                 }
-                return RateLimitOutcome::Allowed;
+                Ok(Err(_)) | Err(_) => {
+                    // P6-M010: redis command failure (timeout or error) —
+                    // degrade to the local fallback (M024).
+                    crate::observability::metrics::incr("concord_redis_errors_total");
+                }
             }
             // Redis degraded → local fallback (M024).
         }
@@ -174,6 +189,7 @@ impl RateLimiter {
         if entry.1 > policy.max_events {
             self.limited_total
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            record_rate_limit_hit(scope);
             RateLimitOutcome::Limited
         } else {
             RateLimitOutcome::Allowed
@@ -192,4 +208,24 @@ pub fn policies_with_env_connect(mut policies: Policies) -> Policies {
         }
     }
     policies
+}
+
+/// P6-M010 cardinality guard: the `{scope}` label value on
+/// `concord_rate_limit_hits_total` comes from this fixed table ONLY — any
+/// unknown scope degrades to "other" (never a caller-controlled string).
+fn record_rate_limit_hit(scope: &str) {
+    /// (raw scope key from `check`, bounded label value) — both 'static.
+    const TABLE: &[(&str, &[&str])] = &[
+        (SCOPE_CONNECT, &["connect"]),
+        (SCOPE_WRITE_OPS, &["write"]),
+        (SCOPE_MALFORMED, &["malformed"]),
+        (SCOPE_SNAPSHOT_FETCH, &["fetch"]),
+    ];
+    const OTHER: &[&str] = &["other"];
+    let labels = TABLE
+        .iter()
+        .find(|(raw, _)| *raw == scope)
+        .map(|(_, labels)| *labels)
+        .unwrap_or(OTHER);
+    crate::observability::metrics::incr_labeled("concord_rate_limit_hits_total", labels);
 }

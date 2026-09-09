@@ -30,6 +30,12 @@ thiserror.workspace = true
 futures-util.workspace = true
 async-nats.workspace = true
 redis.workspace = true
+# Phase 6 observability (P6-M009/M010).
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp.workspace = true
+opentelemetry-stdout.workspace = true
+tracing-opentelemetry.workspace = true
 
 [dev-dependencies]
 tokio-tungstenite.workspace = true

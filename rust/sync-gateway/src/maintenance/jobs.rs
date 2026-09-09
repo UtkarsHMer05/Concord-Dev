@@ -478,6 +478,25 @@ pub async fn execute_snapshot_job(
     claim_version: i64,
     pipeline: &SnapshotPipeline,
 ) -> Result<(), PipelineError> {
+    // P6-M009/M010: snapshot job span + duration histogram (bounded
+    // attributes only — job kind, not ids).
+    let started = std::time::Instant::now();
+    let _snapshot_span =
+        tracing::info_span!("maintenance.snapshot_job", kind = %job.kind).entered();
+    let result = execute_snapshot_job_inner(job, claim_version, pipeline).await;
+    crate::observability::metrics::observe(
+        "concord_snapshot_duration_seconds",
+        &["job"],
+        started.elapsed().as_secs_f64(),
+    );
+    result
+}
+
+async fn execute_snapshot_job_inner(
+    job: &JobRow,
+    claim_version: i64,
+    pipeline: &SnapshotPipeline,
+) -> Result<(), PipelineError> {
     let Some(document) = job.document_id else {
         return Err(PipelineError::Worker(
             crate::worker::WorkerError::MalformedResponse("snapshot job without document".into()),

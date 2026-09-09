@@ -27,3 +27,13 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["c
 rsa = "0.9"
 async-nats = "0.50"
 redis = { version = "1.7", default-features = false, features = ["tokio-comp", "connection-manager"] }
+# Phase 6 observability (P6-M009): OpenTelemetry + OTLP exporter +
+# tracing bridge. Compiled in, but runtime-optional — nothing is
+# initialized unless GATEWAY_OTEL_ENABLED=true (zero behavior change
+# when disabled). 0.32 line: rt-tokio on the SDK, tonic gRPC transport
+# on the OTLP exporter (tokio 1.x compatible).
+opentelemetry = { version = "0.32", features = ["trace"] }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "trace", "testing"] }
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic"] }
+opentelemetry-stdout = { version = "0.32", features = ["trace"] }
+tracing-opentelemetry = "0.33"
