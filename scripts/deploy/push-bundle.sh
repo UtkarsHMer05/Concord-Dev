@@ -210,6 +210,10 @@ cp scripts/deploy/initdb/01-extensions.sql "${STAGE}/initdb/"
 # Rendered user-data (ENV/BUCKET baked; secrets stay in SSM).
 sed -e "s/__ENV__/${ENV}/g" -e "s/__BUCKET__/${BUCKET}/g" \
   scripts/deploy/user-data.sh > "${STAGE}/user-data.sh"
+# On-instance ops helper (SSM RunCommand verbs: ps/health/logs/cron/
+# psql/smoke/restart/bootstrap) — ships in the bundle so ops commands
+# never need inline shell through the SSM JSON.
+cp scripts/deploy/instance-ops.sh "${STAGE}/instance-ops.sh"
 
 # COPYFILE_DISABLE: macOS bsdtar otherwise embeds AppleDouble `._*`
 # resource-fork files for every copied file — observed breaking Grafana
