@@ -492,4 +492,62 @@ describe("real worker-backed adapter through the real gateway (D16)", () => {
     await a.session.stop();
     await b.session.stop();
   }, 60_000);
+
+  /**
+   * P7-M024 staging regression: RAPID MULTI-BURST typing (the browser
+   * pattern — real keystrokes produce several back-to-back batches, not
+   * the single-op waves above). Observed live on staging: the receiving
+   * session's editor rendered the FIRST fanout batch then stalled until a
+   * reconnect, even though its worker converges (catch-up on rejoin always
+   * renders). This test drives the exact engine/session/transport layers
+   * with bursts; if it converges here, the stall is browser-render
+   * specific (TipTap), not a sync-layer defect.
+   */
+  it("rapid multi-burst typing: receiver converges on every batch", async () => {
+    if (!harness) return;
+    const h = harness;
+    const a = await makeTab(h.port, h.ownerClerk, h.documentId);
+    const b = await makeTab(h.port, h.ownerClerk, h.documentId);
+    await a.session.start();
+    await b.session.start();
+    await waitFor(async () => a.session.status === "ready" && b.session.status === "ready", 20_000);
+
+    // Burst typing: 4 bursts of multiple insert ops issued back-to-back,
+    // no fanout waits between them (real keystroke cadence through the
+    // bridge; the outbox batches and flushes asynchronously).
+    const bursts = ["burst-one-", "burst-two-", "burst-three-", "burst-four-"];
+    let streamIndex = 0;
+    for (const burst of bursts) {
+      for (const ch of burst) {
+        await a.client.localInsertText(streamIndex, ch.charCodeAt(0));
+        streamIndex += 1;
+      }
+    }
+    const acked = await waitFor(async () => (await a.store.unackedOps()).length === 0, 20_000);
+    expect(acked).toBe(true);
+
+    // Receiver's ENGINE converges on the FULL burst text (digest equality).
+    const digestsMatch = await waitFor(async () => {
+      const da = await a.client.digest();
+      const db = await b.client.digest();
+      return da === db;
+    }, 20_000);
+    expect(digestsMatch).toBe(true);
+
+    // Receiver's visible text contains EVERY burst (not just the first
+    // batch — the staging symptom was first-batch-only rendering).
+    const visible = JSON.parse(await b.client.visibleJson()) as {
+      blocks: { runs: { t: string }[] }[];
+    };
+    const text = visible.blocks.map((bl) => bl.runs.map((r) => r.t).join("")).join("");
+    for (const burst of bursts) {
+      expect(text).toContain(burst);
+    }
+
+    // And the render hook fired for more than the first batch.
+    expect(b.remoteRenders.count).toBeGreaterThanOrEqual(2);
+
+    await a.session.stop();
+    await b.session.stop();
+  }, 90_000);
 });

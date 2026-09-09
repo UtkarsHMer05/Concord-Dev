@@ -202,3 +202,91 @@ describe("editor bridge seed path (final gate)", () => {
         expect(restored.blocks[1].runs[0].t).toBe("second");
     });
 });
+// ---------------------------------------------------------------------------
+// P7-M024: renderRemote coalescing (staging fanout-render stall regression).
+// ---------------------------------------------------------------------------
+
+describe("renderRemote coalescing (P7-M024 staging regression)", () => {
+    /** A client whose visibleJson resolves after N ticks — models the async
+     *  worker RPC; `calls` counts RPCs issued. */
+    class CountingClient {
+        calls = 0;
+        constructor(private readonly delegate: CoreBackedClient) {}
+        // Full CrdtClient surface via prototype delegation — only
+        // visibleJson is instrumented (counts + async delay).
+        init = (documentId: string, replicaId: bigint) => this.delegate.init(replicaId);
+        exportStream = () => this.delegate.exportStream();
+        exportOps = () => this.delegate.exportOps();
+        async visibleJson(): Promise<string> {
+            this.calls += 1;
+            await new Promise((r) => setTimeout(r, 5));
+            return this.delegate.visibleJson();
+        }
+    }
+
+    it("a burst of renders coalesces to few RPCs and converges to the final state", async () => {
+        const core = new CrdtWorkerCore({ documentId: "coalesce-doc", replicaId: 9n, loadFactory, persistence: new MemoryPersistence() });
+        await core.handle({ id: 1, kind: "init", documentId: "coalesce-doc", replicaId: "9" });
+        const delegate = new CoreBackedClient(core, "coalesce-doc");
+        const client = new CountingClient(delegate);
+        const editor = fakeEditor();
+        const bridge = new CrdtEditorBridge({
+            editor,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            client: client as any,
+            documentId: "coalesce-doc",
+            seedPmDoc: null,
+        });
+        const state = await bridge.start();
+        expect(state.mode).toBe("crdt");
+
+        // Simulate a fanout burst: 6 rapid renderRemote calls, un-awaited —
+        // exactly what N consecutive onRemoteApplied batches produce.
+        const renders = Array.from({ length: 6 }, () => bridge.renderRemote());
+        await Promise.all(renders);
+        // All 6 calls resolved; the coalescer ran at most 2 sequential
+        // renders (one in-flight + one trailing) — never 6 racing RPCs.
+        expect(client.calls).toBeLessThanOrEqual(3);
+        // The editor holds a document (converged state rendered).
+        expect(editor.current).not.toBeNull();
+    });
+
+    it("a render failure never wedges the pipeline (next render still works)", async () => {
+        const core = new CrdtWorkerCore({ documentId: "wedge-doc", replicaId: 10n, loadFactory, persistence: new MemoryPersistence() });
+        await core.handle({ id: 1, kind: "init", documentId: "wedge-doc", replicaId: "10" });
+        const delegate = new CoreBackedClient(core, "wedge-doc");
+        // A client that fails the FIRST visibleJson, then recovers.
+        let failNext = false;
+        const flaky = {
+            init: (documentId: string, replicaId: bigint) => delegate.init(replicaId),
+            exportStream: () => delegate.exportStream(),
+            exportOps: () => delegate.exportOps(),
+            visibleJson: async () => {
+                if (failNext) {
+                    failNext = false;
+                    throw new Error("worker RPC failed (simulated)");
+                }
+                return delegate.visibleJson();
+            },
+        };
+        const editor = fakeEditor();
+        const bridge = new CrdtEditorBridge({
+            editor,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            client: flaky as any,
+            documentId: "wedge-doc",
+            seedPmDoc: null,
+        });
+        const state = await bridge.start();
+        expect(state.mode).toBe("crdt");
+
+        // Arm the failure AFTER start, then render: the failure must NOT
+        // reject (the old code's unhandled rejection silently killed every
+        // later render on staging).
+        failNext = true;
+        await expect(bridge.renderRemote()).resolves.toBeUndefined();
+        // The pipeline recovers on the next call.
+        await expect(bridge.renderRemote()).resolves.toBeUndefined();
+        expect(editor.current).not.toBeNull();
+    });
+});

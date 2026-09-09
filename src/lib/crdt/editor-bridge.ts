@@ -75,6 +75,9 @@ export class CrdtEditorBridge {
     private reconciling = false;
     /** Transactions that arrived while start() was still in flight. */
     private startPromise: Promise<void> | null = null;
+    /** Render coalescing (P7-M024): one render in flight, one trailing. */
+    private renderInFlight = false;
+    private renderRequested = false;
 
     constructor(private readonly init: BridgeInit) {}
 
@@ -264,18 +267,56 @@ export class CrdtEditorBridge {
     /**
      * Remote direction (M040): renders the converged canonical state into
      * the editor. setContent with emitUpdate=false — onUpdate never fires.
+     *
+     * P7-M024 hardening: renders are COALESCED. Fanout batches arrive in
+     * bursts (one onRemoteApplied per batch) and concurrent renders raced
+     * on the worker RPC; an exception in ANY render (worker RPC failure,
+     * transient) previously escaped as an unhandled rejection and could
+     * silently stop ALL further renders while the worker kept converging
+     * (observed live on staging: the editor froze mid-burst even though
+     * the replica was current; only a reload's catch-up rendered it).
+     * Now:
+     *   - a render in flight absorbs later requests into ONE trailing
+     *     render (a burst of N batches ⇒ ≤2 renders, no dropped state),
+     *   - a render error is caught + logged; the NEXT batch (or a
+     *     reconnect's catch-up) re-renders from the worker's then-current
+     *     state. The render pipeline can no longer wedge.
      */
     async renderRemote(): Promise<void> {
         if (this.state.mode !== "crdt") {
             return;
         }
-        const blocks = CrdtEditorBridge.toCanonicalBlocks(
-            await this.init.client.visibleJson(),
-        );
-        this.state = { mode: "crdt", lastBlocks: blocks };
-        this.init.editor.commands.setContent(blocksToPmDoc(blocks), {
-            emitUpdate: false,
-        });
+        if (this.renderInFlight) {
+            this.renderRequested = true; // coalesce into the trailing render
+            return;
+        }
+        this.renderInFlight = true;
+        this.renderRequested = false;
+        try {
+            do {
+                this.renderRequested = false;
+                const blocks = CrdtEditorBridge.toCanonicalBlocks(
+                    await this.init.client.visibleJson(),
+                );
+                if (this.state.mode !== "crdt") {
+                    return; // degraded mid-render: stop rendering
+                }
+                this.state = { mode: "crdt", lastBlocks: blocks };
+                this.init.editor.commands.setContent(blocksToPmDoc(blocks), {
+                    emitUpdate: false,
+                });
+            } while (this.renderRequested);
+        } catch (error) {
+            // Never let a render failure kill the render pipeline: the
+            // worker replica keeps converging; the next batch (or a
+            // reconnect's catch-up) re-renders. Log for diagnosis.
+            console.error(
+                "[concord-crdt] remote render failed:",
+                error instanceof Error ? error.message : error,
+            );
+        } finally {
+            this.renderInFlight = false;
+        }
     }
 
     private async streamEntries(): Promise<StreamEntryJson[]> {
