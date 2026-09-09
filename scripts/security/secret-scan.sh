@@ -103,8 +103,12 @@ NEXT_PUBLIC_SECRET_RE='NEXT_PUBLIC_[A-Z0-9_]*SECRET[A-Z0-9_]*[[:space:]]*='
 PG_URL_RE='postgres(ql)?://[^:/@[[:space:]]+:[^@[[:space:]"'"'"']{4,}@'
 
 # Non-secret markers: a match containing one of these is a documented
-# placeholder, not a credential.
-PLACEHOLDER_RE='replace_me|nobody|nopass|CHANGEME|<your[._-]'
+# placeholder, not a credential. `dummy`/`placeholder` cover CI and
+# Dockerfile build-time stand-ins (e.g. sk_test_dummy_ci_placeholder in
+# phase6-pr-ci.yml / web.Dockerfile — never a real credential; the SAME
+# lines carry comments stating dummy intent; real secrets never use
+# these words in their value).
+PLACEHOLDER_RE='replace_me|nobody|nopass|CHANGEME|<your[._-]|dummy|placeholder'
 
 # ---------------------------------------------------------------------------
 # Allowlist — "<path>:<pattern-name>:<reason>".
