@@ -303,3 +303,74 @@ One command for the full local gate (Phases 3+4+5):
 CI mirrors the deterministic subset in
 `.github/workflows/phase5-recovery.yml`; heavy benchmarks
 (recovery-bench) and long stress batteries stay local (documented).
+
+## 13. Phase 6 — verification, security, chaos, observability (2026-09-09)
+
+### Native (C++)
+
+- `test_seed_corpus.cpp` (+8): fixed-seed convergence scenarios — concurrent
+  same-position inserts, insert/delete overlap, LWW mark ranges, duplicate
+  delivery idempotence, partition heal, mid-stream snapshot-restore,
+  snapshot+tail==full-replay digest, mixed fault storm — each × {2,5,10}
+  replicas × ≥4 delivery permutations. In every sanitizer tree too.
+- `property_campaign.cpp` + `scripts/native/campaign.sh`: deterministic
+  randomized campaign. PR tier: 30 seeds × {5 replicas, 2k ops}.
+  Extended tier (`campaign.sh extended`): 100 seeds × {10 replicas, 10k ops}
+  (~226s Release; nightly lane). Same seed ⇒ byte-identical result.
+- `test_fuzz_regressions.cpp` (+2): fuzz-corpus replay + invariant gate
+  (corpus file without a registered case = review error).
+- Fuzz targets (5, standalone driver — libFuzzer absent on this host,
+  documented): `fuzz_op_apply`, `fuzz_op_decode`, `fuzz_snapshot_decode`,
+  `fuzz_recovery_stream` (snapshot+tail recovery path),
+  `fuzz_worker_protocol` (worker frame-bound chain; the worker TU itself is
+  byte-pinned by 51 protocol tests and deliberately not refactored out).
+
+### Rust gateway
+
+| Suite (cargo test --test …) | Covers | Count |
+|---|---|---|
+| protocol_fuzz_regressions | pinned broker panic fix (FUZZ-2026-09-001), structured-seed corpus per decoder, oversize containment, replay idempotence, deep-JSON nesting, state property | 10 |
+| lifecycle_integration | graceful-shutdown stress (25 conns), stalled-consumer boundedness, worker-crash mid-command recovery | 3 |
+| observability_integration | correlation-id grep-ability across hops, /metrics exposition + cardinality bounds, OTel runtime gating, log hygiene (no token fragments) | 5 |
+| phase6_authz_matrix | 7 roles × 5 surfaces incl. guessed/foreign IDs (no existence oracle), mid-session revoke/downgrade | 6 |
+| phase6_revocation | live revocation A–E across real gateway processes (both-gateway enforcement, live upgrade, interleaved rounds) | 6 |
+| phase6_internal_trust | hostile broker events, Redis namespace poisoning, FLUSHALL mid-session, forged checksums → 0 durable rows | 10 |
+| chaos_gateway / chaos_broker / chaos_redis / chaos_postgres / chaos_worker / chaos_compound | 27 deterministic chaos scenarios (see §13.2) — run via `scripts/chaos/run-suite.sh all` (release profile, serialized; skip-aware) | 27 |
+
+`examples/proto_fuzz.rs`: seeded mutational fuzz driver for the untrusted
+decode layers (5 targets; 250k smoke + 1M extended execs per target).
+
+### Web
+
+- `tests/db/idor-matrix.test.ts` (6): role×surface read/save/list/ACL/
+  delete/audit with masked denials (DB project 69/69 total).
+- `tests/realtime/reliability.test.ts` (10): multi-user, multi-tab,
+  offline+reload, gateway failover, pending-ACK refresh, stale-client
+  resync (large + zero tail), mid-session revocation, worker-restart
+  equivalent path, reconnect storm (realtime project 18/18 incl. e2e 8).
+
+### Security tooling
+
+- `scripts/security/secret-scan.sh [--history|--json]`: 8-pattern scanner,
+  tree + full git history; values redacted; 16 justified allowlist entries.
+  Lead-verified clean (exit 0) on both modes; positive control 10/10.
+- `scripts/security/dep-scan.sh [--json]`: npm/cargo-audit/docker-scout
+  aggregate. NOTE: exits 1 BY DESIGN while the dev-only container
+  base-image criticals are open — documented acceptance + remediation
+  path in SECURITY.md §9.2 (not a hidden failure).
+- `scripts/security/sbom.sh` → `scripts/sbom/*.cdx.json` (deterministic
+  CycloneDX; byte-identical regeneration).
+
+### Release images (local only — deployment is Phase 7)
+
+`scripts/release/smoke-images.sh`: builds gateway + web images from a
+`git archive HEAD` clean tree (multi-stage, pinned bases, non-root
+uid 10001/1000), boots them, asserts health + non-root uids. PASS 2/2.
+
+### Serialization rules (CI-relevant)
+
+All Rust integration suites and the TS db/realtime projects share the
+`concord_test` PostgreSQL DB. Rust suites serialize via
+`--test-threads=1`; the TS realtime/db suites and the chaos suites MUST
+be sequenced against each other (never concurrent) — the chaos runner and
+the phase-6 CI workflows encode this ordering.
