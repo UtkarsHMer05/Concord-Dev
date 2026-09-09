@@ -66,6 +66,18 @@ case "${1:-ps}" in
     docker exec "concord-${ENV}-db" psql -U concord -d concord -c \
       "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1;"
     ;;
+  # dbq '<sql>' — ad-hoc SQL against the cloud DB (read-only usage
+  # intended). Piped via stdin so SSM JSON never touches the SQL.
+  dbq)
+    [ -n "${2:-}" ] || { echo "usage: instance-ops.sh dbq '<sql>'" >&2; exit 2; }
+    printf '%s\n' "$2" | docker exec -i "concord-${ENV}-db" psql -U concord -d concord
+    ;;
+  # dbops <documentId> — durable op-log stats for one document.
+  dbops)
+    DOC="${2:?document id}"
+    printf "SELECT count(*) AS ops, max(id) AS max_seq FROM crdt_operations WHERE document_id = '%s';\n" "$DOC" \
+      | docker exec -i "concord-${ENV}-db" psql -U concord -d concord
+    ;;
   smoke)
     echo "WS-adjacent HTTP smoke via LB (auth not exercised here):"
     for i in 1 2 3 4 5 6; do
@@ -119,7 +131,7 @@ case "${1:-ps}" in
     bash "${UD_DIR}/user-data.sh"
     ;;
   *)
-    echo "usage: instance-ops.sh {ps|health|logs <svc>|cron|cron-check|psql|smoke|restart <svc>|bootstrap}" >&2
+    echo "usage: instance-ops.sh {ps|health|logs <svc>|cron|cron-check|psql|dbq <sql>|dbops <doc>|worker|prom|grafana|smoke|restart <svc>|db-reset-password|bootstrap}" >&2
     exit 2
     ;;
 esac
