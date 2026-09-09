@@ -396,7 +396,7 @@ async function main() {
   };
 
   // Load the WASM module ONCE (browser reality: one module instance per worker).
-  const module = await loadWasmModule();
+  const wasmModule = await loadWasmModule();
   const rssBefore = process.memoryUsage().rss;
   console.log(`wasm module loaded (RSS before campaign: ${(rssBefore / 1024 / 1024).toFixed(1)} MiB)`);
 
@@ -407,7 +407,7 @@ async function main() {
     const perOpMs = [];
     let gate = true;
     for (let r = 0; r < ROUNDS; r++) {
-      const engine = WasmEngine.create(module, 42n + BigInt(r));
+      const engine = WasmEngine.create(wasmModule, 42n + BigInt(r));
       for (let i = 0; i < OPS; i++) {
         const t0 = performance.now();
         engine.localInsertText(i, 0x61 + (i % 26));
@@ -449,7 +449,7 @@ async function main() {
     const batchMs = [];
     let gate = true;
     for (let r = 0; r < ROUNDS; r++) {
-      const engine = WasmEngine.create(module, 142n + BigInt(r));
+      const engine = WasmEngine.create(wasmModule, 142n + BigInt(r));
       const t0 = performance.now();
       for (let i = 0; i < OPS; i++) {
         engine.localInsertText(i, 0x61 + (i % 26));
@@ -498,7 +498,7 @@ async function main() {
     let gate = true;
     let lastDigest = null;
     for (let r = 0; r < ROUNDS; r++) {
-      const engine = WasmEngine.create(module, 242n + BigInt(r));
+      const engine = WasmEngine.create(wasmModule, 242n + BigInt(r));
       const ops = generated ? generated.ops : makeLocalOps(engine, OPS);
       const t0 = performance.now();
       for (const op of ops) {
@@ -564,7 +564,7 @@ async function main() {
       const importMs = [];
       let gate = true;
       for (let r = 0; r < ROUNDS; r++) {
-        const engine = WasmEngine.importFromSnapshot(module, 4242n, fullRef.snapshot);
+        const engine = WasmEngine.importFromSnapshot(wasmModule, 4242n, fullRef.snapshot);
         importMs.push(engine.importMs);
         if (engine.digest() !== fullRef.digest) gate = false;
         engine.free();
@@ -602,7 +602,7 @@ async function main() {
       let gate = true;
       for (let r = 0; r < ROUNDS; r++) {
         const t0 = performance.now();
-        const engine = WasmEngine.importFromSnapshot(module, 5252n, baseRef.snapshot);
+        const engine = WasmEngine.importFromSnapshot(wasmModule, 5252n, baseRef.snapshot);
         for (const op of tailOps) {
           engine.applyRemote(op);
         }
