@@ -22,7 +22,12 @@
 set -euo pipefail
 
 UD_DIR="$(cd "$(dirname "$0")" && pwd)"   # /opt/concord
-ENV="$(grep -E '^ENV=' "${UD_DIR}/concord.env" | cut -d= -f2 || echo staging)"
+# Compose interpolation vars (PG_PASSWORD, image refs) live in the
+# deployed concord.env — source it (KEY=VALUE lines) before compose.
+set -a
+. "${UD_DIR}/concord.env"
+set +a
+ENV="${ENV:?ENV not in concord.env}"
 PROJECT="concord-${ENV}"
 compose() { docker compose -f "${UD_DIR}/docker-compose.cloud.yml" -p "$PROJECT" "$@"; }
 
