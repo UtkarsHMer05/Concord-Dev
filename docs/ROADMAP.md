@@ -165,10 +165,22 @@ DEC-031..034, docs/OPERATIONS.md, docs/SECURITY.md §6.
   OpenTelemetry/Prometheus/Grafana observability; structured logs/tracing;
   CI (PR + nightly chaos/fuzz/bench + sanitizer matrices); performance
   regression gates; release artifacts; supply-chain scanning.
-- **Prerequisites:** Phase 5 gate.
-- **Forbidden:** Feature growth; deployment.
+- **Prerequisites:** Phase 5 gate. **PASSED 2026-09-09**
+  (`phase-6-complete`; evidence index: `docs/VERIFICATION.md`, full gate
+  report in the private checkpoints).
+- **Forbidden:** Feature growth; deployment. (Both held: no feature
+  scope added; images built and smoke-tested locally only.)
 - **Completion gate:** Hard evidence produced: simulator + chaos + security
   suites green; CI enforced; observability live; benchmark gates wired.
+  **Met:** 181/181 correctness scenarios (0 lost durable-ACKed ops,
+  0 divergent replicas within the defined fault model); 27/27 chaos;
+  sanitizer matrix + 5M fuzz execs clean; threat model 32/32 rows mapped
+  to executable tests; secret scan clean (tree + full history); five
+  phase-6 CI workflows + regression comparator; Prometheus/Grafana +
+  OTel live; benchmark schema + baselines wired (98.6% recovery,
+  +6.9 % ack-p95 at 4 gateways, 50.1 % compaction bytes, −91.4 % ack
+  p50 profiling-driven optimization — all MEASURED, environments
+  recorded).
 
 ## Phase 7 — Product polish, productionization, deployment, final metrics
 
