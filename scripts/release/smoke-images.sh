@@ -41,17 +41,18 @@ smoke_gateway() {
   cid=$(docker run -d --rm \
     -e GATEWAY_BIND_HOST=0.0.0.0 \
     -e GATEWAY_BIND_PORT=8791 \
-    --network host \
-    -e GATEWAY_DATABASE_URL=postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test \
+    -e GATEWAY_DATABASE_URL=postgres://concord:concord_local_dev@host.docker.internal:5433/concord_test \
     -e GATEWAY_CLERK_ISSUER=https://fun-blowfish-5798.clerk.accounts.dev \
-    "$tag")
+    -p 127.0.0.1:18791:8791 "$tag")
   # The gateway fail-fast-exits (by design) without a reachable DB, so the
-  # smoke uses the real loopback dev DB via host networking; no NATS/Redis
-  # env → gateway runs degraded (local-only bus + no redis), which is the
-  # documented posture for a packaging smoke. No client traffic is sent.
+  # smoke points at the real dev DB via host.docker.internal (macOS Docker
+  # Desktop runs containers in a VM — 127.0.0.1 would hit the VM, not the
+  # host Postgres). No NATS/Redis env → gateway runs degraded (local-only
+  # bus + no redis), the documented posture for a packaging smoke. No
+  # client traffic is sent.
   local live=1
   for _ in $(seq 1 20); do
-    if curl -sf "http://127.0.0.1:8791/api/v1/health/live" >/dev/null 2>&1; then live=0; break; fi
+    if curl -sf "http://127.0.0.1:18791/api/v1/health/live" >/dev/null 2>&1; then live=0; break; fi
     sleep 0.5
   done
   local uid
