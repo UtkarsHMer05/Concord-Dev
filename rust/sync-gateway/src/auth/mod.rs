@@ -199,6 +199,16 @@ impl<S: JwksSource> TokenVerifier<S> {
         validation.validate_exp = true;
         validation.validate_nbf = true;
         validation.leeway = 5;
+        // aud is NOT a gateway security boundary — disable jsonwebtoken's
+        // default audience check. The boundary is issuer + RS256 signature
+        // (pinned above) + required exp/sub/iss claims; Clerk controls the
+        // aud/azp claims per JWT template (this instance's default template
+        // carries aud="convex" from the pre-Concord tutorial era), and the
+        // gateway performs no aud-based authorization. Found live on
+        // staging: real Clerk tokens failed with InvalidAudience
+        // (classified "claims") while local E2E passed because test-JWKS
+        // tokens carry no aud claim.
+        validation.validate_aud = false;
 
         let key = self.key_for(&kid).await.ok_or(AuthError::Invalid {
             reason: "unknown key id",
@@ -294,6 +304,20 @@ mod tests {
         iss: String,
     }
 
+    /// Claims mirroring a REAL Clerk template token: includes `aud`
+    /// (this project's Clerk default template still carries aud="convex"
+    /// from the pre-Concord tutorial era) and `azp`. Regression for the
+    /// staging incident where jsonwebtoken's default validate_aud=true
+    /// rejected every real Clerk token while aud-less test tokens passed.
+    #[derive(Serialize)]
+    struct ClaimsWithAud {
+        sub: String,
+        exp: u64,
+        iss: String,
+        aud: String,
+        azp: String,
+    }
+
     /// Generate an RSA keypair via the `rsa` crate is heavy; instead use a
     /// fixed 2048-bit test key encoded as DER PKCS8, used only in tests.
     /// Load a test signing key from its PKCS#8 DER file as a jsonwebtoken
@@ -367,7 +391,7 @@ mod tests {
         )
     }
 
-    fn sign(claims: &Claims, key: &EncodingKey, kid: &str) -> String {
+    fn sign<T: serde::Serialize>(claims: &T, key: &EncodingKey, kid: &str) -> String {
         let mut header = Header::new(jsonwebtoken::Algorithm::RS256);
         header.kid = Some(kid.to_owned());
         encode(&header, claims, key).expect("sign test token")
@@ -407,6 +431,30 @@ mod tests {
             .block_on(verifier(KID, include_bytes!("test_rsa_key.der")).verify(&token))
             .expect("valid token verifies");
         assert_eq!(principal.clerk_user_id, "user_test123");
+    }
+
+    /// P7 staging regression: real Clerk tokens carry an `aud` claim the
+    /// gateway does not authorize on — verification must NOT fail on it.
+    #[test]
+    fn token_with_aud_claim_verifies() {
+        let key = test_encoding_key();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_secs();
+        let claims = ClaimsWithAud {
+            sub: "user_clerk_real".to_owned(),
+            exp: now + 600,
+            iss: ISSUER.to_owned(),
+            aud: "convex".to_owned(),
+            azp: "http://concord-staging.example.internal".to_owned(),
+        };
+        let token = sign(&claims, &key, KID);
+        let rt = tokio::runtime::Runtime::new().expect("test runtime");
+        let principal = rt
+            .block_on(verifier(KID, include_bytes!("test_rsa_key.der")).verify(&token))
+            .expect("token with aud claim verifies (aud is not an authz boundary)");
+        assert_eq!(principal.clerk_user_id, "user_clerk_real");
     }
 
     #[test]
