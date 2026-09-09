@@ -93,12 +93,21 @@ if [ -z "$alb_sg_id" ] || [ "$alb_sg_id" = "None" ]; then
     --group-name "${NAME}-alb-sg" --description "Concord ${ENV} ALB: public 443/80 only" \
     --query GroupId --output text)
   # Public HTTPS (and plain HTTP while DEC-050's no-domain posture holds —
-  # the HTTP listener redirects to HTTPS once CERT_ARN is set).
-  aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$alb_sg_id" \
-    --protocol tcp --port 443 --cidr 0.0.0.0/0 >/dev/null
-  aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$alb_sg_id" \
-    --protocol tcp --port 80 --cidr 0.0.0.0/0 >/dev/null
-  echo "  created ALB sg ${alb_sg_id} (public: 443, 80)"
+  # the HTTP listener redirects to HTTPS once CERT_ARN is set). The
+  # no-cert posture ALSO serves the sync WS listener on :8890 — open it
+  # publicly in that mode ONLY (with a cert, sync moves to :8443 and
+  # 8890 stays closed). Rule is added inside the if-block below.
+  if [ -n "$CERT_ARN" ]; then
+    aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$alb_sg_id" \
+      --protocol tcp --port 443 --cidr 0.0.0.0/0 >/dev/null
+    echo "  created ALB sg ${alb_sg_id} (public: 443 — TLS mode)"
+  else
+    aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$alb_sg_id" \
+      --protocol tcp --port 80 --cidr 0.0.0.0/0 >/dev/null
+    aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$alb_sg_id" \
+      --protocol tcp --port 8890 --cidr 0.0.0.0/0 >/dev/null
+    echo "  created ALB sg ${alb_sg_id} (public: 80 web + 8890 sync — DEC-050 no-cert posture)"
+  fi
 else
   echo "  reuse ALB sg ${alb_sg_id}"
 fi
