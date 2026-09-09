@@ -45,7 +45,12 @@ RUN cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
 FROM alpine:3.22 AS runtime
 # CA certs for Clerk HTTPS verification. Nothing else: no shell tools
 # beyond busybox defaults, no package manager, no build toolchain.
-RUN apk add --no-cache ca-certificates
+# apk upgrade: pull security-fixed package versions from the pinned
+# base release repo (observed 2026-09-09: base ships openssl 3.5.7-r0
+# with 2 CRITICAL CVEs; 3.5.8-r0 is in the v3.22 repo). Pinned-minor +
+# upgrade keeps the SBOM honest: the resolved digests land in the image
+# manifest, and ECR scan-on-push re-verifies.
+RUN apk add --no-cache ca-certificates && apk upgrade
 WORKDIR /app
 # Workspace target dir lives at the workspace root (rust/target), not the
 # member crate dir.

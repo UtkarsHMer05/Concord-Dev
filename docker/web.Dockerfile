@@ -46,6 +46,10 @@ RUN npm run build
 
 # --- Stage 3: runtime --------------------------------------------------------
 FROM node:24.20-alpine AS runtime
+# Security-fixed package versions from the pinned base release repo
+# (2026-09-09: base openssl 3.5.7-r0 → 3.5.8-r0 with 2 CRITICAL CVE
+# fixes; ECR scan-on-push re-verifies after build).
+RUN apk upgrade
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
