@@ -1,0 +1,266 @@
+# P6-M045 — Nightly reliability workflow (sanitizers, fuzz, chaos).
+#
+# Schedule: cron "0 2 * * *" (02:00 UTC nightly). UTC is the only sane
+# choice for a repo-level nightly — GitHub cron is UTC-only and documenting
+# one zone keeps the "nightly" label meaningful. Also workflow_dispatch
+# for manual runs (reproducing a nightly failure on demand).
+#
+# SERIALIZATION DESIGN (shared-DB hazard): every job below owns its own
+# runner + its own service set — nothing overlaps another job's database.
+#   - native-sanitizers / native-fuzz / rust-fuzz: NO database at all.
+#   - chaos: brings up its OWN docker compose project (db+nats+redis),
+#     manipulates containers by the compose names (concord-db, concord-nats,
+#     concord-redis — the exact names the suites address), and is the only
+#     job on its runner while running. No TS db/realtime suite is scheduled
+#     in this workflow, so the chaos↔TS concurrency hazard cannot arise.
+#
+# Jobs:
+#   native-sanitizers — ASan+UBSan tree and TSan tree on ubuntu (the C++
+#     tree is portable C++20; the sanitizer cmake options are platform-
+#     neutral). Runs core+worker suites IN EACH TREE, then the randomized
+#     convergence campaign (PR tier) against the SANITIZED binaries.
+#     scripts/native/campaign.sh hardcodes ./build/native (no tree-dir
+#     arg), so the sanitized campaign runs the property_campaign binary
+#     from each tree directly with the PR-tier parameters (documented —
+#     same seeds/replicas/ops/burst as campaign.sh's pr tier).
+#   native-fuzz       — standalone-driver fuzz targets (bounded 300k
+#     execs/target; the driver takes a run count) + campaign.sh extended
+#     (100 seeds × 10 replicas × 10k ops) on the Release tree.
+#   rust-fuzz         — proto_fuzz example with a documented exec budget.
+#   chaos             — scripts/chaos/run-suite.sh all under its own
+#     compose project (docker stop/restart/pause + volume rm need a
+#     runner-owned daemon; GitHub-hosted ubuntu provides exactly this).
+#     Artifacts: per-suite scenario JSONs + summaries (no secrets —
+#     scenario records carry ids/timings/results only).
+
+name: phase6-nightly-reliability
+
+on:
+  schedule:
+    # Nightly 02:00 UTC. Runs only on the default branch's workflow copy.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: phase6-nightly-reliability
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # ASan+UBSan and TSan trees: core+worker suites + PR-tier campaign run
+  # against the SANITIZED binaries (per SA-CPP6's local matrix, ported to
+  # ubuntu per the M043 native-portability decision: raw cmake, no
+  # verify-native.sh because of its macOS -DCMAKE_OSX_ARCHITECTURES pin).
+  # ---------------------------------------------------------------------------
+  native-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      # ---- ASan + UBSan tree (build/sanitize) ----
+      - name: Configure + build ASan/UBSan tree
+        run: |
+          cmake -S cpp -B build/sanitize -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCONCORD_SANITIZE_ADDRESS=ON -DCONCORD_SANITIZE_UNDEFINED=ON \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build/sanitize
+      - name: Core + worker suites (ASan/UBSan)
+        run: |
+          ./build/sanitize/crdt/tests/concord_crdt_tests
+          ./build/sanitize/worker/tests/concord_worker_tests
+      # campaign.sh hardcodes ./build/native — no tree-dir flag exists, so
+      # the sanitized campaign drives property_campaign from the tree
+      # DIRECTLY with campaign.sh's documented PR-tier parameters
+      # (seeds 1..30, replicas 5, ops 2000, burst 16; same JSON line per
+      # seed as the script prints).
+      - name: Randomized convergence campaign, PR tier (ASan/UBSan tree)
+        run: |
+          PASS=0; FAIL=0
+          for SEED in $(seq 1 30); do
+            if ./build/sanitize/crdt/tests/property_campaign \
+                --seed "$SEED" --replicas 5 --ops 2000 --burst 16 > out.txt 2>&1; then
+              PASS=$((PASS+1)); grep '^{' out.txt || true
+            else
+              FAIL=$((FAIL+1)); cat out.txt >&2
+              echo "CAMPAIGN FAILED seed=$SEED" >&2
+            fi
+          done
+          echo "asan+ubsan campaign: $PASS passed, $FAIL failed"
+          [ "$FAIL" -eq 0 ]
+      # ---- TSan tree (build/tsan) ----
+      - name: Configure + build TSan tree
+        run: |
+          cmake -S cpp -B build/tsan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCONCORD_SANITIZE_THREAD=ON \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+          cmake --build build/tsan
+      - name: Core + worker suites (TSan)
+        run: |
+          ./build/tsan/crdt/tests/concord_crdt_tests
+          ./build/tsan/worker/tests/concord_worker_tests
+      - name: Randomized convergence campaign, PR tier (TSan tree)
+        run: |
+          PASS=0; FAIL=0
+          for SEED in $(seq 1 30); do
+            if ./build/tsan/crdt/tests/property_campaign \
+                --seed "$SEED" --replicas 5 --ops 2000 --burst 16 > out.txt 2>&1; then
+              PASS=$((PASS+1)); grep '^{' out.txt || true
+            else
+              FAIL=$((FAIL+1)); cat out.txt >&2
+              echo "CAMPAIGN FAILED seed=$SEED" >&2
+            fi
+          done
+          echo "tsan campaign: $PASS passed, $FAIL failed"
+          [ "$FAIL" -eq 0 ]
+
+  # ---------------------------------------------------------------------------
+  # Standalone-driver fuzz (bounded 300k execs/target — the driver takes a
+  # run count as its non-flag argument) + extended randomized campaign on
+  # the Release tree via scripts/native/campaign.sh extended.
+  # ---------------------------------------------------------------------------
+  native-fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - name: Configure + build fuzz tree (standalone driver) + Release campaign tree
+        run: |
+          cmake -S cpp -B build/fuzz -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCONCORD_BUILD_FUZZ=ON
+          cmake --build build/fuzz
+          cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native
+      # Bounded exec budget: 300,000 runs per target over the committed
+      # corpus seeds (driver signature: fuzz_<target> <corpus-files...>
+      # <runs> — files enumerated, last numeric arg = run count). Exit 0 =
+      # no crash; a crash is a finding (documented in cpp/crdt/fuzz/ headers).
+      - name: Fuzz all 5 targets (300k execs each, standalone driver)
+        run: |
+          set -euo pipefail
+          RUNS=300000
+          for target in fuzz_op_decode fuzz_snapshot_decode fuzz_op_apply fuzz_recovery_stream fuzz_worker_protocol; do
+            CORPUS_DIR=""
+            case "$target" in
+              fuzz_worker_protocol) CORPUS_DIR=cpp/crdt/fuzz/corpus/worker ;;
+              fuzz_recovery_stream) CORPUS_DIR=cpp/crdt/fuzz/corpus/recovery ;;
+              *) CORPUS_DIR=cpp/crdt/fuzz/corpus/ops ;;
+            esac
+            echo "== $target: $RUNS runs over $(ls "$CORPUS_DIR" | wc -l | tr -d ' ') corpus seed(s) =="
+            "./build/fuzz/crdt/$target" "$CORPUS_DIR"/* "$RUNS"
+          done
+      - name: Randomized convergence campaign, extended tier (Release tree)
+        run: scripts/native/campaign.sh extended
+
+  # ---------------------------------------------------------------------------
+  # Rust protocol fuzz: deterministic-seeded mutational loop over the
+  # gateway's untrusted-input decode layers (P6-M018). Budget: 1,000,000
+  # runs per target (the example's smoke tier default is 250k; nightly uses
+  # the documented deeper budget; pass a seed via FUZZ_SEED for reruns).
+  # ---------------------------------------------------------------------------
+  rust-fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      # Documented exec budget: 1,000,000 runs per target (5 targets —
+      # control frame, data frame, op envelope, broker event, session
+      # property sequences). Any panic/unbounded allocation = finding.
+      - name: proto_fuzz (1,000,000 runs per target)
+        run: cargo run --release --example proto_fuzz -- 1000000
+        working-directory: rust
+
+  # ---------------------------------------------------------------------------
+  # Chaos: the full suite set under a compose project this job OWNS.
+  # Docker-in-docker is not needed — the GitHub-hosted runner's own daemon
+  # works: `docker compose up -d db nats redis` from the repo compose file
+  # creates concord-db/concord-nats/concord-redis with the volume the
+  # volume-rm scenario deletes (concord_nats) and recreates. The job is the
+  # ONLY DB-mutating workload on its runner (TS db/realtime are not part
+  # of this workflow) — the shared-DB hazard cannot arise.
+  # ---------------------------------------------------------------------------
+  chaos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GATEWAY_DATABASE_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+      GATEWAY_CLERK_ISSUER: https://ci-placeholder.clerk.accounts.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - uses: lukka/get-cmake@latest
+      # concord-worker binary at build/native/worker/concord-worker is
+      # required by the chaos_worker suite (it probes both candidate paths).
+      - name: Build native worker (Release) for chaos_worker
+        run: |
+          cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native
+      # CI E2E JWKS key material (same generation step as the distributed
+      # workflow): throwaway RSA pair, kid e2e-key-1, at the git-ignored
+      # scratch path the chaos suites read.
+      - name: Generate CI E2E JWKS + key material
+        run: |
+          node - <<'EOF'
+          const { generateKeyPairSync, createPrivateKey } = require("crypto");
+          const { writeFileSync, mkdirSync } = require("fs");
+          const dir = ".agent/scratch/phase-3";
+          mkdirSync(dir, { recursive: true });
+          const pair = generateKeyPairSync("rsa", {
+            modulusLength: 2048,
+            publicKeyEncoding: { type: "spki", format: "jwk" },
+            privateKeyEncoding: { type: "pkcs8", format: "jwk" },
+          });
+          writeFileSync(`${dir}/e2e-jwks.json`, JSON.stringify({
+            keys: [{ kty: "RSA", kid: "e2e-key-1", alg: "RS256", use: "sig",
+                     n: pair.publicKey.n, e: pair.publicKey.e }],
+          }, null, 2));
+          const pem = createPrivateKey({ key: pair.privateKey, format: "jwk" })
+            .export({ format: "pem", type: "pkcs8" });
+          writeFileSync(`${dir}/e2e-key.der`,
+            Buffer.from(pem.replace(/-----(BEGIN|END) PRIVATE KEY-----|\s+/g, ""), "base64"));
+          console.log("CI E2E key material written (throwaway pair)");
+          EOF
+      # Always-run teardown FIRST as a registered step so a dirty state
+      # from an aborted prior attempt on this runner can't leak in.
+      - name: Pre-clean any stray compose project
+        run: |
+          docker compose down -v --remove-orphans 2>/dev/null || true
+          pkill -9 -f 'target/release/sync-gateway' 2>/dev/null || true
+      - name: Run chaos suite (all scenarios, serialized internally)
+        run: scripts/chaos/run-suite.sh all
+      # Scenario records land under .agent/bench/runs/<runId>-chaos/ —
+      # collect them all into one artifact. Records carry scenario ids,
+      # seeds, timings, invariants and observed results only: no secrets by
+      # construction (the harness never prints token material).
+      - name: Collect chaos scenario artifacts
+        if: always()
+        run: |
+          mkdir -p chaos-artifacts
+          if ls .agent/bench/runs/*-chaos >/dev/null 2>&1; then
+            cp -R .agent/bench/runs/*-chaos chaos-artifacts/ 2>/dev/null || true
+          fi
+          find chaos-artifacts -name 'test-output.log' -size +10M -delete || true
+      - name: Upload chaos artifacts (scenario JSONs + summaries)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-scenarios-${{ github.run_id }}
+          path: chaos-artifacts/
+          retention-days: 30
+      # ALWAYS-RUN cleanup: compose down INCLUDING volumes (the volume-rm
+      # scenario recreates the NATS volume; leaving it is harmless, but a
+      # clean teardown keeps repeat runs deterministic).
+      - name: Cleanup compose project (always)
+        if: always()
+        run: |
+          pkill -9 -f 'target/release/sync-gateway' 2>/dev/null || true
+          docker compose down -v --remove-orphans 2>/dev/null || true

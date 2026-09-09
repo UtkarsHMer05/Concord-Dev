@@ -1,0 +1,187 @@
+# P6-M046 — Nightly/manual benchmark workflow (regression DETECTION only).
+#
+# ============================ READ THIS FIRST =============================
+# CI benchmark runs are for TREND/REGRESSION DETECTION, NOT headline
+# claims. The LOCAL machine is the headline source per the benchmark
+# matrix (.agent/scratch/phase-6/benchmark-matrix.md "Run discipline" and
+# the M004 matrix): shared GitHub-hosted runner variance (noisy
+# neighbors, no hardware pin, hypervisor jitter) makes absolute numbers
+# non-comparable to the local baselines — run-throughput cells at 200
+# ops/s would either saturate differently or show ambient-load noise
+# that has nothing to do with Concord. Therefore:
+#   - The scheduled nightly trigger is OFF BY DEFAULT (commented out
+#     below with the rationale); the workflow runs via workflow_dispatch.
+#   - compare-baseline.mjs (P6-M042) enforces like-with-like: it compares
+#     only same-environment results by default and WARNS LOUDLY on
+#     machine mismatch. This workflow still runs the comparison with
+#     --force to record the trend verdict + artifact for humans, but the
+#     job verdict is informational: CI-vs-LOCAL mismatches never gate.
+#   - Baseline inputs come from artifacts of a pinned release tag
+#     (downloaded with gh run download into baseline/); the tool is
+#     path-agnostic so the LOCAL flows (unforced) work identically.
+# ===========================================================================
+#
+# Inputs (workflow_dispatch):
+#   cells     headline (default) | full | single — passed to
+#             scripts/bench/run-throughput.mjs --cells
+#   baseline  optional: artifact name to download from the pinned
+#             baseline release (default: latest accepted baseline of
+#             the local headline set — see baseline job)
+#
+# Services: the campaign uses IN-PROCESS gateways (no gateway cluster
+# needed) but writes through Postgres and uses NATS+Redis when present —
+# run-throughput's documented preconditions are docker compose db+nats+
+# redis. The compose project is owned by this job alone (no shared-DB
+# hazard: nothing else runs on this runner).
+#
+# Artifacts: per-cell result.jsons + campaign-summary.json + the
+# comparison verdict JSON + env snapshot; schema-validated via
+# scripts/bench/result-schema.mjs (M007 contract) before upload.
+
+name: phase6-nightly-benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      cells:
+        description: "Campaign matrix: headline | full | single"
+        required: false
+        default: headline
+        type: choice
+        options: [headline, full, single]
+      baseline_artifact:
+        description: "Baseline artifact name to download from the pinned baseline release (empty = compare only against committed baseline if env matches)"
+        required: false
+        default: ""
+  # Nightly schedule stays OFF by default — rationale above. To enable
+  # trend collection on a fixed cadence, uncomment:
+  # schedule:
+  #   - cron: "0 3 * * *"
+  # (02:00 UTC is taken by phase6-nightly-reliability; benchmarking a
+  # shared runner while reliability runs on OTHER runners is fine, but
+  # the chosen hour should not coincide with any same-repo load.)
+
+concurrency:
+  group: phase6-nightly-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GATEWAY_DATABASE_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+      GATEWAY_CLERK_ISSUER: https://ci-placeholder.clerk.accounts.dev
+      DATABASE_TEST_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Pre-clean any stray compose project
+        run: |
+          docker compose down -v --remove-orphans 2>/dev/null || true
+          pkill -9 -f 'target/release/sync-gateway' 2>/dev/null || true
+      # Infra under THIS job's control: db + nats + redis (compose names
+      # concord-db/concord-nats/concord-redis). The loadgen campaign
+      # talks to them on the host ports.
+      - name: Boot infra (db + nats + redis)
+        run: |
+          docker compose up -d db nats redis
+          for _ in $(seq 1 30); do
+            ok=1
+            docker exec concord-db pg_isready -U concord -d concord >/dev/null 2>&1 || ok=0
+            curl -sf http://127.0.0.1:8222/healthz >/dev/null 2>&1 || ok=0
+            docker exec concord-redis redis-cli ping >/dev/null 2>&1 || ok=0
+            [ "$ok" = "1" ] && { echo "infra healthy"; break; }
+            sleep 2
+          done
+          [ "$ok" = "1" ] || { echo "infra did not become healthy"; exit 1; }
+      - name: Create + migrate the test database
+        run: |
+          docker exec concord-db psql -U concord -d concord -c "CREATE DATABASE concord_test" || true
+          npm ci
+          node scripts/db/migrate.mjs "$DATABASE_TEST_URL"
+      # The campaign spawns in-process gateways and needs the release
+      # loadgen example at rust/target/release/examples/loadgen.
+      - name: Build release loadgen
+        run: cargo build --release --example loadgen
+        working-directory: rust
+      - name: Run throughput campaign (${{ inputs.cells || 'headline' }})
+        run: |
+          node scripts/bench/run-throughput.mjs --cells "${{ inputs.cells || 'headline' }}"
+      - name: Locate the run directory
+        id: run
+        run: |
+          RUN_DIR=$(ls -td .agent/bench/runs/run-* | head -1)
+          echo "run_dir=$RUN_DIR" >> "$GITHUB_OUTPUT"
+          echo "campaign run at $RUN_DIR"
+      # M007 schema validation gate before anything is compared/uploaded.
+      - name: Validate result schema (M007)
+        run: |
+          node scripts/bench/result-schema.mjs \
+            "${{ steps.run.outputs.run_dir }}"/*.result.json
+      # Baseline acquisition, in priority order:
+      #   1. --baseline_artifact input: artifact previously uploaded by
+      #      this workflow (from THIS repo's pinned baseline release run),
+      #      downloaded with the gh CLI.
+      #   2. No baseline available → comparison SKIPPED honestly (recorded
+      #      in the artifact, never silently green).
+      - name: Download baseline (optional)
+        id: baseline
+        if: inputs.baseline_artifact != ''
+        run: |
+          mkdir -p baseline-download
+          if gh run download --name "${{ inputs.baseline_artifact }}" --dir baseline-download; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::baseline artifact '${{ inputs.baseline_artifact }}' not found — comparison will be skipped"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      # Trend comparison. --force because a GH runner NEVER matches the
+      # local headline machine (that is the documented mode for CI trend
+      # detection): the verdict artifact records envMismatch: true per
+      # cell and the verdict is informational — see the header comment.
+      # The step fails the job only on REAL regressions; env-mismatch
+      # warnings alone never fail it (compare-baseline's design).
+      - name: Compare against baseline (trend verdict; cross-machine → informational)
+        if: steps.baseline.outputs.available == 'true' || inputs.baseline_artifact == ''
+        run: |
+          if [ -d baseline-download ] && compgen -G "baseline-download/**/*.result.json" >/dev/null; then
+            node scripts/bench/compare-baseline.mjs \
+              --results  "${{ steps.run.outputs.run_dir }}" \
+              --baseline baseline-download \
+              --threshold-pct 25 \
+              --force \
+              --json "${{ steps.run.outputs.run_dir }}/comparison.json" || {
+                echo "::error::regression vs baseline (same-environment cells only are authoritative; see comparison.json)"
+                exit 1
+              }
+          else
+            echo '{"schema":"concord.bench.comparison/1","verdict":"SKIPPED","reason":"no baseline artifact supplied/found — CI trend baseline not yet pinned"}' \
+              > "${{ steps.run.outputs.run_dir }}/comparison.json"
+            echo "comparison SKIPPED (no baseline) — recorded in comparison.json"
+          fi
+      - name: Upload benchmark artifacts (results + summaries + verdict)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ inputs.cells || 'headline' }}-${{ github.run_id }}
+          path: |
+            ${{ steps.run.outputs.run_dir }}/*.result.json
+            ${{ steps.run.outputs.run_dir }}/campaign-summary.json
+            ${{ steps.run.outputs.run_dir }}/comparison.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Cleanup compose project (always)
+        if: always()
+        run: |
+          pkill -9 -f 'target/release/sync-gateway' 2>/dev/null || true
+          docker compose down -v --remove-orphans 2>/dev/null || true

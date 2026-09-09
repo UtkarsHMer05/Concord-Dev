@@ -1,0 +1,198 @@
+# P6-M044 — Distributed integration CI (cross-gateway suites + TS realtime E2E).
+#
+# Triggers: push to main/phase branches + PRs (same cadence as the
+# phase2-5 gates — this is the Phase 6 distributed layer's regression
+# surface, not a nightly).
+#
+# Jobs:
+#   distributed  One job, strictly SEQUENTIAL steps (see serialization
+#                design below). Services: Postgres (job service) + NATS
+#                JetStream (step container; compose services can't pass a
+#                custom command — house pattern from phase4-distributed) +
+#                Redis (job service). Order:
+#                  1. build the release gateway binary
+#                     (rust/target/release/sync-gateway — multi_gateway,
+#                     phase6_revocation, and the TS realtime suites spawn
+#                     THIS exact path)
+#                  2. generate CI E2E JWKS key material (see keygen step)
+#                  3. db_integration (migrations run inside the suite)
+#                  4. ws_integration
+#                  5. multi_gateway (cross-gateway, spawns real processes)
+#                  6. broker_integration (NATS JetStream)
+#                  7. redis_integration
+#                  8. phase6_authz_matrix (in-process, DB only)
+#                  9. phase6_revocation (spawns real gateway processes)
+#                 10. phase6_internal_trust (NATS+Redis poison vectors,
+#                     FLUSHALL — global, hence serialized last before TS)
+#                 11. TS realtime project (e2e + reliability; spawns the
+#                     release binary; needs DATABASE_TEST_URL + JWKS +
+#                     migrations already applied)
+#                 12. ALWAYS-RUN cleanup (teardown step with if: always).
+#
+# SERIALIZATION DESIGN (shared-DB hazard, SA-CHAOS6/SA-WEB6):
+#   ALL Rust integration suites and the TS db/realtime projects share ONE
+#   concord_test database — anything truncating it (tests/db/helpers.ts
+#   truncateAll, TS db project) corrupts concurrently-running suites. This
+#   workflow therefore uses a SINGLE job whose DB-touching steps run in a
+#   fixed sequential order, never in parallel: Rust suites are serialized
+#   with --test-threads=1 (house convention), and the TS realtime project
+#   runs strictly AFTER all Rust suites (sequential steps in one job
+#   execute in order). The TS db project is NOT in this workflow (it has
+#   no distributed surface; running it concurrently with Rust suites on a
+#   shared DB would truncate their fixtures). No other job in this
+#   workflow touches the DB, so the parallel-job surface is zero.
+#
+# PORTS: suites use fixed 93xx gateway ranges with pkill-based
+# collision-avoidance first (multi_gateway/phase6_revocation kill stray
+# `target/release/sync-gateway` processes before spawning) — safe on this
+# dedicated runner where nothing else runs the binary.
+name: phase6-distributed
+
+on:
+  push:
+    branches: [main, "phase/**"]
+  pull_request:
+
+concurrency:
+  group: phase6-distributed-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  distributed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: concord
+          POSTGRES_PASSWORD: concord_local_dev
+          POSTGRES_DB: concord
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U concord -d concord"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        image: redis:8.8.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      GATEWAY_DATABASE_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+      GATEWAY_CLERK_ISSUER: https://ci-placeholder.clerk.accounts.dev
+      DATABASE_TEST_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # JetStream-enabled NATS — compose-style job services can't pass a
+      # custom command, so it runs as a step container (phase4-distributed
+      # house pattern). --name is FIXED: phase6_revocation and internal_trust
+      # constants address 127.0.0.1:4222 directly; only the port matters.
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name nats-js -p 4222:4222 -p 8222:8222 nats:2.11.6-alpine -js -sd /data -m 8222
+          for _ in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8222/healthz >/dev/null; then echo "nats healthy"; exit 0; fi
+            sleep 2
+          done
+          echo "nats did not become healthy"; exit 1
+      - name: Create the test database
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test" || true
+      - run: npm ci
+      # TWO migration families (rust/.../db/migrations.rs doc): drizzle
+      # owns Phase 1 app tables (users/documents/ACLs — the Rust suites
+      # seed these via SQL, the gateway binary's run_migrations does NOT
+      # create them); the Rust runner owns crdt_* + maintenance_jobs.
+      # Apply drizzle FIRST on the fresh concord_test; each Rust suite /
+      # spawned gateway then applies its own idempotent runner.
+      # NOTE for the TS realtime step at the end: vitest's globalSetup
+      # (tests/db/global-setup.ts) wipes + replays drizzle migrations when
+      # DATABASE_TEST_URL is set; the realtime gateways re-apply the Rust
+      # family at startup (main.rs run_migrations). Sequential steps keep
+      # that wipe away from every Rust suite above.
+      - name: Apply drizzle migrations (Phase 1 tables) to concord_test
+        run: node scripts/db/migrate.mjs "$DATABASE_TEST_URL"
+      - name: Build the release gateway binary
+        run: cargo build --release
+        working-directory: rust
+      # CI E2E key material: multi_gateway / phase6_revocation / chaos
+      # suites + tests/realtime read `.agent/scratch/phase-3/e2e-jwks.json`
+      # (kid e2e-key-1) and `.agent/scratch/phase-3/e2e-key.der` — git-
+      # ignored local files. CI generates a FRESH throwaway RSA pair
+      # (documented dummy/test value; never a real secret — the secret-
+      # scanner's placeholder guard sees no key material in the repo) and
+      # writes both files at the exact paths the suites expect. Node's
+      # crypto exports PKCS8 DER, matching what createPrivateKey and the
+      # Rust rsa::pkcs8 DecodePrivateKey::from_pkcs8_der consume.
+      - name: Generate CI E2E JWKS + key material
+        run: |
+          node - <<'EOF'
+          const { generateKeyPairSync, createPrivateKey } = require("crypto");
+          const { writeFileSync, mkdirSync } = require("fs");
+          const dir = ".agent/scratch/phase-3";
+          mkdirSync(dir, { recursive: true });
+          const pair = generateKeyPairSync("rsa", {
+            modulusLength: 2048,
+            publicKeyEncoding: { type: "spki", format: "jwk" },
+            privateKeyEncoding: { type: "pkcs8", format: "jwk" },
+          });
+          writeFileSync(`${dir}/e2e-jwks.json`, JSON.stringify({
+            keys: [{ kty: "RSA", kid: "e2e-key-1", alg: "RS256", use: "sig",
+                     n: pair.publicKey.n, e: pair.publicKey.e }],
+          }, null, 2));
+          const pem = createPrivateKey({ key: pair.privateKey, format: "jwk" })
+            .export({ format: "pem", type: "pkcs8" });
+          writeFileSync(`${dir}/e2e-key.der`,
+            Buffer.from(pem.replace(/-----(BEGIN|END) PRIVATE KEY-----|\s+/g, ""), "base64"));
+          console.log("CI E2E key material written (throwaway pair, kid e2e-key-1)");
+          EOF
+      # --- SEQUENTIAL Rust DB suites (--test-threads=1; shared concord_test) ---
+      - name: DB integration tests (migrations run inside the suite)
+        run: cargo test --test db_integration -- --test-threads=1
+        working-directory: rust
+      - name: WebSocket integration + security suites
+        run: cargo test --test ws_integration -- --test-threads=1
+        working-directory: rust
+      - name: Multi-gateway E2E (cross-gateway, faults, drain)
+        run: cargo test --test multi_gateway -- --test-threads=1
+        working-directory: rust
+      - name: Broker (NATS JetStream) distributed suite
+        run: cargo test --test broker_integration -- --test-threads=1
+        working-directory: rust
+      - name: Redis distributed suite
+        run: cargo test --test redis_integration -- --test-threads=1
+        working-directory: rust
+      - name: Phase 6 authz/IDOR matrix (M021)
+        run: cargo test --test phase6_authz_matrix -- --test-threads=1
+        working-directory: rust
+      - name: Phase 6 live revocation (M022; spawns real gateways)
+        run: cargo test --test phase6_revocation -- --test-threads=1
+        working-directory: rust
+      - name: Phase 6 internal trust abuse (M023; NATS/Redis poison, FLUSHALL)
+        run: cargo test --test phase6_internal_trust -- --test-threads=1
+        working-directory: rust
+      # --- TS realtime AFTER all Rust suites (never concurrent with a
+      #     DB-mutating Rust suite; sequential steps guarantee ordering) ---
+      # (npm ci already ran above, before the drizzle migration step.)
+      - name: TS realtime E2E + reliability (release binary + real WebSockets)
+        run: npx vitest run --project realtime
+      # ALWAYS-RUN cleanup: stop the NATS step container and any stray
+      # gateway processes; job services are torn down by the runner itself.
+      - name: Cleanup (always)
+        if: always()
+        run: |
+          pkill -9 -f 'target/release/sync-gateway' 2>/dev/null || true
+          docker rm -f nats-js 2>/dev/null || true
