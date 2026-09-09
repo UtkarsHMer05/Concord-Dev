@@ -166,6 +166,7 @@ fn base_config() -> Config {
         otel_sample_ratio: 1.0,
         otel_exporter: "otlp".into(),
         debug_op_ids: false,
+        worker_binary: None,
     }
 }
 
@@ -824,6 +825,7 @@ async fn db_outage_never_fakes_durable_ack_and_readiness_flips() {
         otel_sample_ratio: 1.0,
         otel_exporter: "otlp".into(),
         debug_op_ids: false,
+        worker_binary: None,
     };
     // Startup fails fast — the gateway refuses to run against a dead DB.
     assert!(

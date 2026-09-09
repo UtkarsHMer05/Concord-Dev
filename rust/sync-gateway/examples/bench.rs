@@ -238,6 +238,7 @@ async fn main() {
         otel_sample_ratio: 1.0,
         otel_exporter: "otlp".into(),
         debug_op_ids: false,
+        worker_binary: None,
     };
     let db = match Db::connect(&config).await {
         Ok(db) => db,

@@ -44,6 +44,10 @@ async fn main() {
         eprintln!("migration failed: {e}");
         std::process::exit(3);
     }
+    // Maintenance gets its own pool handle: the scheduler shares the
+    // same PostgreSQL pool (bounded), so snapshot folds never open an
+    // unbounded connection set (DEC-038 policy).
+    let maintenance_db = db.clone();
 
     let addr: SocketAddr = format!("{}:{}", config.bind_host, config.bind_port)
         .parse()
@@ -147,6 +151,39 @@ async fn main() {
         });
     }
 
+    // Maintenance scheduler (P6 lifecycle-audit F-1 fix): with
+    // GATEWAY_WORKER_BINARY set, this gateway claims and executes
+    // snapshot/verify jobs (bounded workers, heartbeated leases, graceful
+    // drain on shutdown). Absent ⇒ maintenance stays off (the Phase 5
+    // test-driven posture), which keeps dev/E2E single-process runs
+    // deterministic.
+    let mut maintenance_stop: Option<tokio::sync::watch::Sender<bool>> = None;
+    if let Some(worker_path) = &config.worker_binary {
+        use sync_gateway::maintenance::{
+            BoundedRunner, JobRepo, MaintenanceLimits, Scheduler, SnapshotPipeline,
+        };
+        let repo = GatewayRepo::new(maintenance_db.clone());
+        let snapshots = sync_gateway::db::snapshots::SnapshotRepo::new(maintenance_db.clone());
+        let workers =
+            sync_gateway::worker::WorkerPool::new(worker_path.clone(), Duration::from_secs(600));
+        let pipeline = Arc::new(SnapshotPipeline::new(repo.clone(), snapshots, workers));
+        let limits = MaintenanceLimits::default();
+        let scheduler = Arc::new(Scheduler::new(
+            JobRepo::new(maintenance_db.clone()),
+            pipeline,
+            limits.clone(),
+            gateway_id as i64,
+        ));
+        let (stop_tx, running_rx) = tokio::sync::watch::channel(true);
+        let runner = BoundedRunner::new(scheduler, &limits, running_rx);
+        tokio::spawn(async move {
+            let executed = runner.run_bounded(None).await;
+            tracing::info!(executed, "maintenance scheduler drained and stopped");
+        });
+        maintenance_stop = Some(stop_tx);
+        tracing::info!(worker = %worker_path, "maintenance scheduler running (snapshots/verify jobs)");
+    }
+
     let app = http::router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -163,11 +200,17 @@ async fn main() {
 
     // Graceful shutdown (P3-M041): on SIGTERM/SIGINT stop accepting,
     // mark draining, notify connections, give in-flight work a bounded
-    // grace window, then exit.
+    // grace window, then exit. The maintenance scheduler stops claiming
+    // first (leases lapse if death is ungraceful; the sweep requeues).
     let drain_state = state.clone();
     let shutdown = async move {
         let sig = wait_for_shutdown_signal().await;
         tracing::info!(signal = ?sig, "shutdown signal received");
+        // 0. Maintenance scheduler: stop claiming new jobs (in-flight
+        //    workers are kill-on-drop; leases lapse → sweep requeues).
+        if let Some(stop) = maintenance_stop.as_ref() {
+            let _ = stop.send(false);
+        }
         // 1. Stop accepting (axum stops serving when the future completes).
         // 2. Mark draining: new connections/auth/writes rejected.
         drain_state.draining.store(true, Ordering::SeqCst);

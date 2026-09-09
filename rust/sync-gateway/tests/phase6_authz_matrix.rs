@@ -152,6 +152,7 @@ fn base_config() -> Config {
         otel_sample_ratio: 1.0,
         otel_exporter: "otlp".into(),
         debug_op_ids: false,
+        worker_binary: None,
     }
 }
 

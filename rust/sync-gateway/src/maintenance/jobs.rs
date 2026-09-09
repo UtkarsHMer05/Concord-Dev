@@ -21,6 +21,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use super::pipeline::{PipelineError, SnapshotPipeline};
+use tracing::Instrument;
 
 /// Job kinds (mirror the migration v2 CHECK constraint).
 pub mod kind {
@@ -479,11 +480,15 @@ pub async fn execute_snapshot_job(
     pipeline: &SnapshotPipeline,
 ) -> Result<(), PipelineError> {
     // P6-M009/M010: snapshot job span + duration histogram (bounded
-    // attributes only — job kind, not ids).
+    // attributes only — job kind, not ids). The span INSTRUMENTS the
+    // inner future instead of being `.entered()` across the await:
+    // `EnteredSpan` is !Send, which made the scheduler future !Send and
+    // broke the P6-F1 main.rs `tokio::spawn` wiring.
     let started = std::time::Instant::now();
-    let _snapshot_span =
-        tracing::info_span!("maintenance.snapshot_job", kind = %job.kind).entered();
-    let result = execute_snapshot_job_inner(job, claim_version, pipeline).await;
+    let span = tracing::info_span!("maintenance.snapshot_job", kind = %job.kind);
+    let result = execute_snapshot_job_inner(job, claim_version, pipeline)
+        .instrument(span)
+        .await;
     crate::observability::metrics::observe(
         "concord_snapshot_duration_seconds",
         &["job"],

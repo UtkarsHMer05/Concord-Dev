@@ -44,6 +44,7 @@ async fn test_db() -> Option<Db> {
         otel_sample_ratio: 1.0,
         otel_exporter: "otlp".into(),
         debug_op_ids: false,
+        worker_binary: None,
     };
     Db::connect(&config).await.ok() // DB not running: skip (documented gate precondition)
 }
@@ -177,6 +178,7 @@ fn test_config() -> Config {
         otel_sample_ratio: 1.0,
         otel_exporter: "otlp".into(),
         debug_op_ids: false,
+        worker_binary: None,
     }
 }
 

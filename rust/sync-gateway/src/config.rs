@@ -61,6 +61,13 @@ pub struct Config {
     /// Debug op-id attribution in spans/logs (GATEWAY_DEBUG_OP_IDS,
     /// default false: keeps span attribute cardinality bounded).
     pub debug_op_ids: bool,
+    // --- Phase 6 maintenance scheduler (F-1 fix, P6 audit) ---
+    /// Path to the native maintenance worker binary. Absent ⇒ the
+    /// maintenance scheduler stays OFF (snapshots/compaction/retention
+    /// jobs are enqueued by the pipeline but not executed by this
+    /// process — the documented Phase 5 test-driven posture). Set ⇒ the
+    /// BoundedRunner claims and executes jobs with graceful drain.
+    pub worker_binary: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -194,6 +201,16 @@ impl Config {
         let debug_op_ids = env_parse("GATEWAY_DEBUG_OP_IDS", "expected a boolean", false)?;
         crate::observability::correlation::set_debug_op_ids(debug_op_ids);
 
+        let worker_binary = env_optional("GATEWAY_WORKER_BINARY").filter(|s| !s.is_empty());
+        if let Some(path) = &worker_binary {
+            if !std::path::Path::new(path).is_file() {
+                return Err(ConfigError::Invalid {
+                    key: "GATEWAY_WORKER_BINARY",
+                    message: format!("worker binary not found at \"{path}\" (leave GATEWAY_WORKER_BINARY unset to disable maintenance scheduling)"),
+                });
+            }
+        }
+
         if per_connection_queue_capacity == 0 {
             return Err(ConfigError::Invalid {
                 key: "GATEWAY_QUEUE_CAPACITY",
@@ -246,6 +263,7 @@ impl Config {
             otel_sample_ratio,
             otel_exporter,
             debug_op_ids,
+            worker_binary,
         })
     }
 }
