@@ -100,6 +100,19 @@ case "${1:-ps}" in
   restart)
     compose restart "${2:?service name}"
     ;;
+  db-reset-password)
+    # Recovery verb (used ONCE on staging 2026-09-09 after a re-publish
+    # regenerated PG_PASSWORD): set the compose Postgres user's password
+    # to the value in the deployed concord.env. docker exec runs as the
+    # container's local superuser, so no password is needed to connect —
+    # the ALTER runs entirely on the instance; nothing secret passes
+    # through SSM JSON. Idempotent.
+    NEWPW="$(grep -E '^PG_PASSWORD=' "${UD_DIR}/concord.env" | cut -d= -f2-)"
+    [ -n "$NEWPW" ] || { echo "PG_PASSWORD not found in concord.env" >&2; exit 2; }
+    docker exec "concord-${ENV}-db" psql -U concord -d concord \
+      -v newpw="$NEWPW" -c 'ALTER USER concord WITH PASSWORD :newpw'
+    echo "DB password aligned with concord.env"
+    ;;
   bootstrap)
     bash "${UD_DIR}/user-data.sh"
     ;;
