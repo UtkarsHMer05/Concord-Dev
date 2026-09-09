@@ -1263,3 +1263,51 @@ retained and will not be removed.
   tiers; benchmark CI is dispatch-only for trend detection with the
   local machine as the headline source. Drizzle migrations run before
   Rust suites — the two migration families are independent.
+
+## DEC-050 — Phase 7 deployment topology: AWS EC2 (Graviton) + docker compose per environment; ALB for TLS/WSS; no Kubernetes
+
+- **Context:** Phase 7 must deploy staging first, then production
+  (prompt §6/§7). Hard requirements from the actual architecture:
+  long-lived secure WebSockets, multiple Rust gateway instances, a
+  native C++ worker binary executed by the gateway, PostgreSQL, NATS
+  JetStream, Redis, private service networking, TLS, secrets, health
+  checks, and observability. Concord's local topology is already
+  validated as "3 gateway processes + nginx LB + compose-managed
+  Postgres/NATS/Redis" (Phase 4), and the release images are hardened
+  multi-stage arm64 builds (Phase 6 M027).
+- **Decision:** deploy on AWS EC2 Graviton (arm64 — the exact arch the
+  hardened images are built for; zero cross-compilation) in ap-south-1,
+  one compose stack per environment (staging, production) on separate
+  instances, an Application Load Balancer terminating TLS and forwarding
+  `/api/v1/sync` as WSS to the gateway replicas (ALB supports
+  long-lived WebSocket connections natively; the nginx LB pattern from
+  Phase 4 remains the in-instance fan-out layer behind it), security
+  groups providing the public/private split (only ALB → web/gateway
+  ports are public; Postgres/NATS/Redis ports locked to the instance /
+  VPC), secrets via environment injection at launch (never baked into
+  images), and the C++ worker shipped in the gateway image with
+  `GATEWAY_WORKER_BINARY` set (the F-1 wiring from Phase 6).
+  Observability stays loopback-scraped per instance in v1 (Prometheus
+  is not exposed publicly; see the security rules).
+- **Rejected alternatives:** Kubernetes/EKS (explicitly unjustified at
+  1–3 gateway replicas — orchestration complexity without a
+  requirement; the prompt forbids keyword-driven choices); Fly.io /
+  Railway / Render (no installed CLI, no account/auth present, and the
+  native C++ worker + private-network topology favor full instance
+  control); AWS ECS on EC2 or Fargate (a second orchestration model to
+  learn and debug for zero v1 benefit; compose already encodes the
+  exact validated topology); Vercel for the web tier (would split the
+  runtime across providers while the web app must reach the gateway —
+  a single-stack deploy keeps networking, secrets and TLS in one
+  place); on-prem/self-hosted (no public endpoint possible).
+- **Honest constraints recorded:** the AWS account in use holds ROOT
+  credentials (flagged in the security milestone — deployment scripts
+  use scoped temporary credentials where possible; IAM hardening
+  recommended post-v1). No Route53 hosted zone exists, so v1 uses the
+  stable provider-assigned endpoint (ALB DNS name + CNAME path
+  documented honestly in the README) rather than a custom domain; a
+  custom domain remains a documented one-step upgrade. NATS and Redis
+  remain single-node per environment in v1 — multi-node NATS or Redis
+  Cluster is NOT implemented and therefore NOT claimed (the durable
+  truth is PostgreSQL either way; the failure model already covers
+  single-node loss of both).
