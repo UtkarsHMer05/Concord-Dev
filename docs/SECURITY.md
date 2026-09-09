@@ -299,21 +299,21 @@ ending in `PLANNED → P6-Mxxx` declare the gap and its owner milestone.
 | T1 | Forged/expired/wrong-issuer JWT replayed at `authenticate` | AT1 | RS256 via JWKS, issuer/exp/nbf, algorithm pinned | `src/auth/mod.rs` unit tests (`forged_signature_rejected`, `expired_token_rejected`, `wrong_issuer_rejected`, `malformed_and_empty_rejected`, `unknown_kid…`, `jwks_refresh_resolves_rotated_kid`); `ws_integration::unauthorized_and_forged_tokens_rejected` |
 | T2 | JWT replay beyond expiry / cross-service token reuse | AT1/AT2 | Short-lived Clerk session tokens; exp enforced server-side; no refresh path in gateway | Same auth unit tests as T1. Note: the WS session itself lives as long as the socket; revocation semantics for live sockets → row T9 |
 | T3 | Client-supplied identity/role claims honored (identity spoofing) | AT1/AT2 | Verified `sub` is the only principal source (§1.3) | `ws_integration::adversarial_forged_identity_claims_never_trusted` |
-| T4 | IDOR — guessed or cross-tenant `documentId` at join/read/write/snapshot/history/restore | AT2/AT3 | PostgreSQL join resolves effective role; no-access == nonexistent (`forbidden`); UUID shape gate | `ws_integration::join_no_access_is_forbidden_without_leak`; `phase5_history::revision_lifecycle_and_acl_matrix`, `::restore_requires_owner_and_anchors_the_target`; `phase5_restore_concurrency::restore_authorization_matrix_and_concurrent_edits`; `phase5_security::sec5_clean_cross_document_fetch_refused_uniformly`; `tests/authorization.test.ts` (product layer); full cross-role/cross-org matrix `PLANNED → P6-M021` |
-| T5 | Tenant cross-talk through fan-out (ops delivered to wrong room/connection) | AT4 | Route only to connections joined to that exact document id | `broker_integration::publish_and_cross_gateway_delivery`; wrong-document/forged event routing `PLANNED → P6-M023` |
+| T4 | IDOR — guessed or cross-tenant `documentId` at join/read/write/snapshot/history/restore | AT2/AT3 | PostgreSQL join resolves effective role; no-access == nonexistent (`forbidden`); UUID shape gate | `ws_integration::join_no_access_is_forbidden_without_leak`; `phase5_history::revision_lifecycle_and_acl_matrix`, `::restore_requires_owner_and_anchors_the_target`; `phase5_restore_concurrency::restore_authorization_matrix_and_concurrent_edits`; `phase5_security::sec5_clean_cross_document_fetch_refused_uniformly`; `tests/authorization.test.ts` (product layer); full cross-role/cross-org gateway matrix `phase6_authz_matrix` (P6-M021, LIVE); web-side IDOR matrix `tests/db/idor-matrix.test.ts` (P6-M021, LIVE) |
+| T5 | Tenant cross-talk through fan-out (ops delivered to wrong room/connection) | AT4 | Route only to connections joined to that exact document id | `broker_integration::publish_and_cross_gateway_delivery`; wrong-document/forged event routing `phase6_internal_trust::nats_wrong_document_event_never_reaches_other_document_or_db` (P6-M023, LIVE) |
 | T6 | Malformed/oversized frames (header bombs, hostile binary layouts, truncated ops) | AT1/AT2 | Bounded decoders (8 MiB frame, 1024 ops/batch, 64 KiB/op, 32 KiB token), reject-before-allocate | `src/protocol/tests.rs` (`control_decode_rejects_hostile_shapes`, `control_decode_rejects_oversized_token`, `data_decode_rejects_hostile_inputs`, `data_encode_enforces_limits`); `ws_integration::malformed_frames_are_safe_errors`, `::adversarial_oversized_frame_is_rejected_and_closed`; continuous fuzzing of decoders `PLANNED → P6-M018` |
 | T7 | Protocol-state abuse (frames out of order, second join, ops before READY) | AT1/AT2 | Connection state machine rejects illegal transitions (PROTOCOL §9.13) | `ws_integration::state_machine_rejects_out_of_order_frames` |
 | T8 | Op replay/duplication (resent batches double-apply or double-ACK) | AT2 | SQL-layer idempotency on op identities; deterministic ACK | `ws_integration::duplicate_resend_yields_single_durable_row_and_deterministic_ack`; `tests/realtime/e2e.test.ts` "duplicate resend across the network boundary"; `broker_integration::replayed_event_is_idempotent_at_every_layer` |
-| T9 | Stale permissions — role downgraded/revoked while a session is live | AT3/AT4 | Write authorization rechecked per batch inside the ingest transaction (live downgrade denied) | `tests/realtime/e2e.test.ts` "live downgrade"; multi-gateway/revocation propagation matrix `PLANNED → P6-M022` |
-| T10 | Resource exhaustion — connect storms, fetch spam, slow consumers, oversized snapshots | AT1/AT2 | Rate scopes (connect 240/min/peer, fetch 30/min/conn), bounded outbound queue + slow-consumer disconnect, `payload_too_large` serve refusal | `multi_gateway::reconnect_storm_is_contained_by_admission_control`, `::slow_consumer_does_not_stall_global_collaboration`; `ws_integration::adversarial_rapid_reconnects_are_contained`, `::slow_consumer_disconnected_not_blocking_writer`; `phase5_security::sec5_1_fetch_snapshot_spam_is_throttled`, `::sec5_1_fetch_scope_exists_and_limits`; residual: `write`/`malformed` scopes defined but unenforced at frame layer (§5) — enforcement `PLANNED → P6-M021` edge work |
-| T11 | Error/message/log leakage (SQL text, stack traces, token material in errors) | any | Safe error vocabulary; banned-substring sweep; token logging is header prefix only | `ws_integration::adversarial_error_messages_never_leak_internals`; `token_head` documented LOW/INFO in §7.6; log redaction sweep `PLANNED → P6-M023` (log-surface assertions) |
-| T12 | Existence oracle via differentiated errors (found vs forbidden) | AT2 | Uniform `forbidden`/`unavailable`/not-found outcomes | `ws_integration::join_no_access_is_forbidden_without_leak`; `phase5_security::sec5_clean_cross_document_fetch_refused_uniformly`; uniform-refusal regression in IDOR matrix `PLANNED → P6-M021` |
+| T9 | Stale permissions — role downgraded/revoked while a session is live | AT3/AT4 | Write authorization rechecked per batch inside the ingest transaction (live downgrade denied) | `tests/realtime/e2e.test.ts` "live downgrade"; multi-gateway/revocation propagation matrix `phase6_revocation` (P6-M022, LIVE: revoke ACL row mid-stream, revoke across two live gateways, org-membership removal, live VIEWER→EDITOR upgrade, no stale-cache window) |
+| T10 | Resource exhaustion — connect storms, fetch spam, slow consumers, oversized snapshots | AT1/AT2 | Rate scopes (connect 240/min/peer, fetch 30/min/conn), bounded outbound queue + slow-consumer disconnect, `payload_too_large` serve refusal | `multi_gateway::reconnect_storm_is_contained_by_admission_control`, `::slow_consumer_does_not_stall_global_collaboration`; `ws_integration::adversarial_rapid_reconnects_are_contained`, `::slow_consumer_disconnected_not_blocking_writer`; `phase5_security::sec5_1_fetch_snapshot_spam_is_throttled`, `::sec5_1_fetch_scope_exists_and_limits`; residual: `write`/`malformed` scopes defined but unenforced at frame layer (§5) — documented target for Phase 6 edge work |
+| T11 | Error/message/log leakage (SQL text, stack traces, token material in errors) | any | Safe error vocabulary; banned-substring sweep; token logging is header prefix only | `ws_integration::adversarial_error_messages_never_leak_internals`; `token_head` documented LOW/INFO in §7.6; log redaction verified across the P6 suites (`phase6_authz_matrix`, `phase6_revocation`, `phase6_internal_trust` assert error frames carry only the safe vocabulary — P6-M023 log-surface assertions, LIVE) |
+| T12 | Existence oracle via differentiated errors (found vs forbidden) | AT2 | Uniform `forbidden`/`unavailable`/not-found outcomes | `ws_integration::join_no_access_is_forbidden_without_leak`; `phase5_security::sec5_clean_cross_document_fetch_refused_uniformly`; uniform-refusal regression in IDOR matrix `phase6_authz_matrix::matrix_guessed_document_ids_indistinguishable`, `::matrix_fetch_snapshot_cross_tenant_and_guessed_ids` (P6-M021, LIVE); `tests/db/idor-matrix.test.ts` masked-NotFound cells |
 
 #### B5 — PostgreSQL service boundary
 
 | # | Threat | Attacker | Control | Mapping |
 |---|---|---|---|---|
-| T13 | SQL injection via document ids, token material, snapshot ids | AT1/AT2 | Static parameterized statements everywhere; UUID/document-id shape gates reject SQLi-shaped values | `ws_integration::malformed_frames_are_safe_errors`; hardening tests `tests/db/hardening.test.ts`; injection-shaped corpus into decoders+DB `PLANNED → P6-M021` |
+| T13 | SQL injection via document ids, token material, snapshot ids | AT1/AT2 | Static parameterized statements everywhere; UUID/document-id shape gates reject SQLi-shaped values | `ws_integration::malformed_frames_are_safe_errors`; hardening tests `tests/db/hardening.test.ts`; injection-shaped corpus into decoders+DB: `phase6_authz_matrix::matrix_fetch_snapshot_cross_tenant_and_guessed_ids` (SQLi-shaped snapshot/document ids, P6-M021, LIVE); `phase6_internal_trust::nats_malformed_payloads_are_structured_rejections` (P6-M023, LIVE) |
 | T14 | Durable-ACK forgery — acking ops that were not durably committed | AT4 (or crash timing) | ACK is emitted only after the PostgreSQL commit (FAILURE_MODEL contract); DB outage never fakes ACK | `ws_integration::db_outage_never_fakes_durable_ack_and_readiness_flips`; `phase5_crash::crash_matrix_leaves_documents_recoverable` |
 | T15 | Durable state corruption via forged broker-originated "ops" | AT4 | Durable rows only originate from the authenticated client-ingest path; broker events are never persisted | `broker_integration::forged_broker_cannot_fabricate_durable_state` |
 | T16 | Maintenance-job hijack — stale worker finalizes/steals snapshot jobs | AT4 | Lease fencing: CAS on (state, claim_version), one clock, stale-owner rejection (§7.3) | `phase5_races::two_workers_same_job_single_winner`, `::lease_expiry_midwork_fences_stale_finalizer`, `::duplicate_triggers_from_many_gateways_coalesce` |
@@ -325,7 +325,7 @@ ending in `PLANNED → P6-Mxxx` declare the gap and its owner milestone.
 |---|---|---|---|---|
 | T18 | Forged/malformed/oversized broker events crash or poison consumers | AT4 | Same strict envelope validation as client frames; `+TERM` bounded deliveries | `broker_integration::malformed_event_is_rejected_without_crash`, `::oversized_broker_payload_is_contained` |
 | T19 | Replayed broker events re-fan-out or double-apply | AT4 | Msg-id dedup + idempotency at every layer | `broker_integration::duplicate_publish_is_deduped_by_msg_id`, `::replayed_event_is_idempotent_at_every_layer` |
-| T20 | Redis key collision/prefix manipulation across tenants or scopes | AT4 | `concord:<env>:` namespacing, TTLs; no document data in Redis (DEC-033) | `redis_integration::presence_upsert_count_remove_with_ttl`, `::full_wipe_loses_nothing_durable_and_presence_rebuilds`; cross-tenant key collision corpus `PLANNED → P6-M023` |
+| T20 | Redis key collision/prefix manipulation across tenants or scopes | AT4 | `concord:<env>:` namespacing, TTLs; no document data in Redis (DEC-033) | `redis_integration::presence_upsert_count_remove_with_ttl`, `::full_wipe_loses_nothing_durable_and_presence_rebuilds`; cross-tenant key collision corpus `phase6_internal_trust::redis_cross_namespace_key_poisoning_cannot_affect_other_tenants`, `::redis_midsession_flushall_and_reinjection_is_degraded_but_safe`, `::redis_hostile_presence_values_are_never_trusted` (P6-M023, LIVE) |
 | T21 | Rate-limit evasion via gateway hopping or Redis outage fail-open | AT1/AT2 | Shared Redis budgets across instances; bounded local fallback | `redis_integration::distributed_rate_limit_across_instances`, `::local_fallback_when_redis_is_down` (accepted N× residual, F4-1); no-authn NATS in dev (F4-2, Phase 7) |
 
 #### B7 — Native worker boundary
@@ -350,7 +350,7 @@ ending in `PLANNED → P6-Mxxx` declare the gap and its owner milestone.
 | # | Threat | Attacker | Control | Mapping |
 |---|---|---|---|---|
 | T29 | Secret leakage into git history, logs, docs, or client bundle (`NEXT_PUBLIC_`) | any (opsec) | Multi-pattern secret scanner over tree + full git history with redacted reporting (§9.1) | `scripts/security/secret-scan.sh` (this phase, P6-M024); CI wiring `PLANNED → P6-M043/M045` (workflows owned by SA-CI6) |
-| T30 | Vulnerable dependencies (npm prod/dev, Rust crates, container base images) | supply chain | Per-ecosystem audit scripts with severity classification and exact scanner versions (§9.2) | `scripts/security/dep-scan.sh` (this phase, P6-M025); SBOM generation `PLANNED → P6-M026`; image hardening `PLANNED → P6-M027` |
+| T30 | Vulnerable dependencies (npm prod/dev, Rust crates, container base images) | supply chain | Per-ecosystem audit scripts with severity classification and exact scanner versions (§9.2) | `scripts/security/dep-scan.sh` (this phase, P6-M025); SBOMs generated + committed as the release-candidate inventory (P6-M026, LIVE): `scripts/sbom/{web,rust-gateway,native-worker}.cdx.json`, reproducible via `scripts/security/sbom.sh` (deterministic: byte-identical regeneration proven); image hardening `PLANNED → P6-M027` |
 | T31 | Dev-loopback exposure (compose ports, plaintext ws/pg in dev) | AT5 | All compose services bind 127.0.0.1 only; documented non-production credentials; `.env*` gitignored | `docker-compose.yml` (loopback binds are reviewable config); posture documented §8.1; production TLS/broker-authn is Phase 7 (ROADMAP) |
 | T32 | C/C++ third-party supply chain | supply chain | The CRDT core and worker vendor no third-party libraries (CMake confirms header-only stdlib usage; no fetch/find_package of externals) | Verified in P6-M025 review — see `scripts/security/dep-scan.sh` header note and the CMake audit trail in `cpp/CMakeLists.txt` |
 
@@ -372,14 +372,17 @@ that this model pins:
 
 ### 8.5 Coverage accounting
 
-Threat rows: 32. Mapped to existing executable tests: **24**.
-`PLANNED → P6-Mxxx` gaps (some rows carry both an existing partial test
-and a planned deepening): T4 (P6-M021), T5 (P6-M023), T6 (P6-M018),
-T9 (P6-M022), T10 (P6-M021), T11 (P6-M023), T12 (P6-M021), T13 (P6-M021),
-T20 (P6-M023), T22 (P6-M017), T24 (P6-M017), T29 (P6-M043/M045),
-T30 (P6-M026/M027). Rows T2 and T31 are documented posture statements
-(T2: WS-session lifetime vs token lifetime — revocation behavior is
-owned by T9/P6-M022; T31: dev loopback posture with Phase 7 hardening).
+Threat rows: 32. Mapped to existing executable tests: **32** (as of
+P6-M021/M022/M023, 2026-09-09: the four Phase 6 authorization/trust
+milestones landed — T4, T5, T9, T10 residual note, T11, T12, T13, T20
+now carry their `phase6_*` suite mappings, LIVE).
+`PLANNED → P6-Mxxx` gaps remaining: T6 (P6-M018), T22 (P6-M017),
+T24 (P6-M017), T29 (P6-M043/M045), T30 (P6-M026 SBOM — generated,
+`scripts/sbom/`, reproducible via `scripts/security/sbom.sh`; remaining
+planning covers P6-M027 image hardening). Rows T2 and T31 are
+documented posture statements (T2: WS-session lifetime vs token
+lifetime — revocation behavior is owned by T9/P6-M022, now LIVE; T31:
+dev loopback posture with Phase 7 hardening).
 
 ---
 
@@ -481,3 +484,40 @@ Scan-of-record (2026-09-09): npm 11.19.0 / node v24.20.0; cargo-audit
 time with `bash scripts/security/dep-scan.sh` (`--json` for
 machine-readable). CI wiring is deferred to the Phase 6 CI milestones
 (P6-M043/M045).
+
+### 9.3 SBOMs (P6-M026)
+
+`scripts/security/sbom.sh` generates CycloneDX 1.5 SBOMs for every
+shipped component; the outputs are committed once as the
+release-candidate inventory under `scripts/sbom/` and are reproducible
+byte-for-byte from the same lockfiles:
+
+- **web.cdx.json** — the Next.js app via npm 11's built-in `npm sbom
+  --sbom-format cyclonedx --omit dev --package-lock-only` (production
+  tree, 251 components). Determinism: the random `serialNumber` and
+  `metadata.timestamp` are normalized to fixed values by the script
+  (documented inside the SBOM's own metadata properties).
+- **rust-gateway.cdx.json** — 331 crates parsed from `rust/Cargo.lock`
+  by the script itself (name/version from the lockfile; licenses
+  best-effort resolved OFFLINE from the local cargo registry cache —
+  crates without a cached Cargo.toml carry no license: honest absence,
+  never a guess). The generation method is stated in the SBOM's
+  metadata: a lockfile-derived inventory, deterministic for a given
+  Cargo.lock. `cargo-cyclonedx` was evaluated but not installed to
+  avoid toolchain drift; the lockfile parser is the honest, minimal
+  alternative.
+- **native-worker.cdx.json** — hand-authored manifest (the C++ CRDT
+  core, the concord-worker, and the WASM build of the same source have
+  ZERO third-party dependencies per the P6-M025 CMake audit), listing
+  the components plus the build toolchains (clang 21.0.0, cmake 4.2.1,
+  ninja 1.13.2, emcc 6.0.9-git — captured via `--version` at
+  generation, mirroring `scripts/bench/capture-env.mjs`). The WASM
+  component is included with build metadata noting the Emscripten
+  toolchain and identical source.
+
+Validation performed: every SBOM parses as JSON; `secret-scan.sh` runs
+clean against the tree including `scripts/sbom/` (SBOMs contain package
+names/versions/licenses only — no secrets by construction); double
+regeneration produced byte-identical files for all three. Regenerate
+any time with `bash scripts/security/sbom.sh` (`web` / `rust` /
+`native` / `all` / `validate` subcommands).

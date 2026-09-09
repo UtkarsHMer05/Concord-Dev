@@ -1,8 +1,8 @@
 # Concord — Authorization Model (Phase 1)
 
 Status: Authoritative
-Version: 1.0
-Last updated: 2026-09-06
+Version: 1.1
+Last updated: 2026-09-09
 
 This document defines how Concord decides *what an authenticated actor may do
 to a specific resource*. Authentication (who the actor is) is delegated to
@@ -156,6 +156,32 @@ Notes:
   capabilities) but do not grant document-level capabilities in Phase 1.
 - **Ownership transfer:** not implemented in Phase 1 (no product surface);
   the model does not prevent adding it as an owner-only operation later.
-- **Permission revocation propagation to live sessions:** realtime sessions
-  do not exist yet (Phases 2–3). Phase 1 reauthorizes every request, so
-  revocation is effective immediately for all HTTP paths.
+
+## 8. Realtime session revocation (gateway policy, proven P6-M022)
+
+The Rust sync gateway enforces the same effective-role policy on live
+WebSocket sessions, and permission changes are enforced on every batch:
+
+**Policy:** Permission changes are enforced on every batch via an
+in-transaction authorization recheck; no TTL cache exists at the
+gateway; enforcement is immediate at the next batch boundary.
+
+Concretely (all E2E-proven in `rust/sync-gateway/tests/phase6_revocation.rs`,
+across real gateway processes with shared PostgreSQL + NATS):
+
+- Join-time check gates room entry (read role), and every `client_ops`
+  batch re-runs the authorization query INSIDE the ingest transaction
+  against a fresh snapshot — revoking a direct ACL grant, downgrading
+  EDITOR→VIEWER, or removing an org membership denies the very next
+  batch on every gateway the session is connected to, without any
+  reconnect.
+- A denied write is a non-fatal `forbidden` error frame: the session
+  stays alive for reads (catch-up/ping continue on the same socket).
+- Upgrades are live in the same direction: a VIEWER promoted to EDITOR
+  may write the next batch without reconnecting.
+- Ordering semantics: a batch whose ingest transaction begins before
+  the revoke commit is acked (durable under the then-current grant);
+  one that begins after is denied. There is no third outcome — no TTL
+  window, no stale-cache bypass.
+- The web (HTTP/server-action) surface reauthorizes every request
+  identically (`tests/db/idor-matrix.test.ts`, P6-M021).

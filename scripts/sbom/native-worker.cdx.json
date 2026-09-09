@@ -1,0 +1,98 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:00000000-0000-4000-8000-000000000000",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-09-09T00:00:00.000Z",
+    "tools": [
+      {
+        "vendor": "Concord",
+        "name": "scripts/security/sbom.sh (hand-authored manifest)",
+        "version": "1.0.0"
+      }
+    ],
+    "properties": [
+      {
+        "name": "concord:sbom:method",
+        "value": "Hand-authored manifest: the C++ CRDT core, concord-worker, and the WASM build vendor ZERO third-party dependencies (verified in P6-M025 \u2014 cpp/*/CMakeLists.txt use no FetchContent/ExternalProject/find_package of externals; C++20 standard library only), so the SBOM surface is the components themselves plus the build toolchains. Toolchain versions are captured at generation time via --version (mirrors scripts/bench/capture-env.mjs)."
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "application",
+      "bom-ref": "pkg:generic/concord-worker@0.1.0",
+      "name": "concord-worker",
+      "version": "0.1.0",
+      "description": "C++ native snapshot/restore worker (cpp/worker): C++20 stdlib only, no third-party libraries",
+      "purl": "pkg:generic/concord-worker@0.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:generic/concord-crdt-cpp@0.1.0",
+      "name": "concord-crdt-cpp",
+      "version": "0.1.0",
+      "description": "C++ CRDT core (cpp/crdt): header+impl C++20 stdlib only, no third-party libraries",
+      "purl": "pkg:generic/concord-crdt-cpp@0.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:generic/concord-crdt-wasm@0.1.0",
+      "name": "concord-crdt-wasm",
+      "version": "0.1.0",
+      "description": "WASM build of the SAME C++ CRDT core (wasm/): compiled with the Emscripten toolchain; identical source to the native component, browser-side replica engine",
+      "purl": "pkg:generic/concord-crdt-wasm@0.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "framework",
+      "bom-ref": "pkg:generic/clang-toolchain",
+      "name": "clang-toolchain",
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "description": "C/C++ compiler used for native builds (build-time dependency)"
+    },
+    {
+      "type": "framework",
+      "bom-ref": "pkg:generic/cmake-build-system",
+      "name": "cmake-build-system",
+      "version": "cmake version 4.2.1",
+      "description": "Native build generator (build-time dependency)"
+    },
+    {
+      "type": "framework",
+      "bom-ref": "pkg:generic/ninja-build-runner",
+      "name": "ninja-build-runner",
+      "version": "1.13.2",
+      "description": "Build runner for native + WASM builds (build-time dependency)"
+    },
+    {
+      "type": "framework",
+      "bom-ref": "pkg:generic/emscripten-toolchain",
+      "name": "emscripten-toolchain",
+      "version": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.9-git",
+      "description": "Emscripten toolchain for the WASM CRDT build (build-time dependency)"
+    }
+  ]
+}

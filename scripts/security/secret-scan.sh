@@ -131,6 +131,8 @@ PLACEHOLDER_RE='replace_me|nobody|nopass|CHANGEME|<your[._-]'
   "rust/sync-gateway/src/protocol/tests.rs:JWT:decoder test fixture token (no signature/claims)"
   "rust/sync-gateway/src/auth/:PEM:TEST-ONLY RSA keys compiled in as the local JWKS fixture (unit and integration suites); never a production signing key - production verifies against the live issuer over HTTPS"
   "scripts/security/secret-scan.sh:PG_URL:this scanner documents its own patterns and guards"
+  "scripts/security/secret-scan.sh:NEXT_PUBLIC_SECRET:this scanner defines the pattern name NEXT_PUBLIC_SECRET_RE in its own source; it assigns no NEXT_PUBLIC_* variable"
+  "scripts/security/sbom.sh:NEXT_PUBLIC_SECRET:the SBOM generator references the pattern name while invoking this scanner; it assigns no NEXT_PUBLIC_* variable"
 )
 
 # ---------------------------------------------------------------------------
