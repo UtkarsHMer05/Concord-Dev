@@ -1,0 +1,11 @@
+# Grafana datasource provisioning (P6-M012): the local Prometheus.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # The compose-network name of the prometheus service.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

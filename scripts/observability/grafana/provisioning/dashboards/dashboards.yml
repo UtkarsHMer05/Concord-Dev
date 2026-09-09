@@ -1,0 +1,14 @@
+# Grafana dashboard provisioning (P6-M012): load every dashboard JSON
+# from the mounted ../dashboards directory.
+apiVersion: 1
+
+providers:
+  - name: concord
+    orgId: 1
+    folder: Concord
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

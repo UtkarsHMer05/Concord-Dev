@@ -1,0 +1,112 @@
+{
+  "title": "Concord — Broker & Queues",
+  "uid": "concord-broker-queues",
+  "tags": ["concord", "phase6"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "NATS publish / deliver per second (by outcome)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(concord_broker_publish_total[1m]))",
+          "legendFormat": "publish:{{outcome}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (outcome) (rate(concord_broker_deliver_total[1m]))",
+          "legendFormat": "deliver:{{outcome}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Broker lag (ack pending) + redeliveries /s",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "concord_broker_lag",
+          "legendFormat": "lag",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(concord_broker_redeliveries_total[1m])",
+          "legendFormat": "redeliveries",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Outbound queue depth (per-connection channels)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "concord_queue_depth{queue=\"conn_send\"}",
+          "legendFormat": "conn_send",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Slow-consumer disconnects /s",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(concord_slow_consumer_disconnects_total[1m])",
+          "legendFormat": "slow consumers",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Reconnects /s + catch-up size p50",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "rate(concord_reconnects_total[1m])",
+          "legendFormat": "reconnects",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(concord_catchup_size_bucket[5m])))",
+          "legendFormat": "catchup ops p50",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    }
+  ]
+}

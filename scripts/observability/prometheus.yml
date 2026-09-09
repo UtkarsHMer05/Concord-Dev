@@ -1,0 +1,28 @@
+# Concord local Prometheus (P6-M011).
+#
+# Scrapes the three host gateways (8791/8792/8793, run via
+# scripts/gateway-cluster.sh or a single gateway on 8791) and itself.
+# The gateways expose Prometheus text exposition at GET /metrics
+# (unauthenticated, loopback-bound — same posture as the gateway's
+# other HTTP routes). No secrets in this file.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # The three-gateway local cluster (host processes).
+  - job_name: concord-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "host.docker.internal:8791"
+          - "host.docker.internal:8792"
+          - "host.docker.internal:8793"
+        labels:
+          service: concord-sync-gateway
+
+  # Prometheus itself (up-time / self-scrape).
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
