@@ -47,6 +47,12 @@ RUN cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
 # Static-friendly minimal runtime: alpine + nothing but the binary. musl
 # already matches the builder's libc; libstdc++ is linked in statically.
 FROM alpine:3.22 AS runtime
+# Security-fixed package versions from the pinned base release repo
+# (2026-09-09: base libcrypto3/libssl3 3.5.7-r0 → 3.5.8-r0; the CVE
+# fixes flagged by ECR scan-on-push — same round as the gateway/web
+# images). The worker itself links libstdc++/libgcc statically; the
+# upgrade covers the base's own libcrypto3.
+RUN apk upgrade
 # Non-root, fixed uid (mirrors the gateway image's concord user so a shared
 # deployment can mount/copy the binary with one ownership story).
 RUN addgroup -S -g 10001 concord && adduser -S -u 10001 -G concord concord
