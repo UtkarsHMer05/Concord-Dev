@@ -110,9 +110,17 @@ cp public/wasm/concord-crdt.js public/wasm/concord-crdt.wasm "${WORK}/public/was
 
 # ---------------------------------------------------------------------------
 # 4. Build + push ARM64 images (from the clean tree, NOT the worktree).
+# CRITICAL: the image TAG is commit+ENV — the web image is
+# ENVIRONMENT-SPECIFIC (the ALB DNS is baked into the client bundle at
+# build time), so one commit legitimately produces TWO different web
+# images. A commit-only tag made the production push reuse the staging
+# image via push_if_absent (observed live: prod served the staging sync
+# URL). The gateway image is env-independent but keeps the same tag
+# scheme for a single coherent release identity per environment.
 # ---------------------------------------------------------------------------
-WEB_IMAGE="${REGISTRY}/concord-web:${COMMIT}"
-GW_IMAGE="${REGISTRY}/concord-gateway:${COMMIT}"
+IMG_TAG="${COMMIT}-${ENV}"
+WEB_IMAGE="${REGISTRY}/concord-web:${IMG_TAG}"
+GW_IMAGE="${REGISTRY}/concord-gateway:${IMG_TAG}"
 
 # Resolve the sync URL from the ALB DNS name for this environment.
 ALB_DNS=$(aws elbv2 describe-load-balancers --region "$REGION" \
@@ -129,13 +137,13 @@ echo "  building web image (NEXT_PUBLIC baked: sync=${SYNC_URL})…"
 docker build -q -f docker/web.Dockerfile \
   --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}" \
   --build-arg NEXT_PUBLIC_SYNC_GATEWAY_URL="${SYNC_URL}" \
-  -t concord-web:"${COMMIT}" "${WORK}" >/dev/null
-docker tag concord-web:"${COMMIT}" "$WEB_IMAGE"
+  -t concord-web:"${IMG_TAG}" "${WORK}" >/dev/null
+docker tag concord-web:"${IMG_TAG}" "$WEB_IMAGE"
 
 echo "  building gateway image (rust + native C++ worker)…"
 docker build -q -f docker/gateway.Dockerfile \
-  -t concord-gateway:"${COMMIT}" "${WORK}" >/dev/null
-docker tag concord-gateway:"${COMMIT}" "$GW_IMAGE"
+  -t concord-gateway:"${IMG_TAG}" "${WORK}" >/dev/null
+docker tag concord-gateway:"${IMG_TAG}" "$GW_IMAGE"
 
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "https://${REGISTRY}" >/dev/null
