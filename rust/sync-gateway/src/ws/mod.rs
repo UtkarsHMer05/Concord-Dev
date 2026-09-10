@@ -72,12 +72,46 @@ impl Conn {
 }
 
 /// The upgrade route: `/api/v1/sync` (PROTOCOL §9.1). Rejects upgrades
-/// with disallowed origins BEFORE any protocol work (P3-M022).
+/// with disallowed origins BEFORE any protocol work (P3-M022; enforcement
+/// landed in P7 — finding F-P7-SEC-01 closed).
 pub async fn upgrade(
     ws: WebSocketUpgrade,
     State(app): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
 ) -> axum::response::Response {
+    // Origin admission (F-P7-SEC-01 / CSWSH defense): a browser MUST only
+    // open this socket from an allowed origin. Non-browser clients omit
+    // Origin entirely — allowed (the JWT still gates them; Origin is a
+    // browser-scoped defense, not the auth boundary). A present-but-
+    // disallowed Origin is a cross-site WebSocket hijack attempt or a
+    // misconfigured deployment: reject with 403 before any protocol work.
+    if let Some(origin) = headers.get(axum::http::header::ORIGIN) {
+        let origin_str = origin
+            .to_str()
+            .map(|value| value.trim_end_matches('/'))
+            .unwrap_or("");
+        let allowed = app
+            .config
+            .allowed_origins
+            .iter()
+            .any(|allowed_origin| allowed_origin.trim_end_matches('/') == origin_str);
+        if !allowed {
+            crate::telemetry::Metrics::global()
+                .rate_limited_total
+                .fetch_add(1, Ordering::Relaxed);
+            crate::observability::metrics::incr_labeled(
+                "concord_ops_rejected_total",
+                &[crate::telemetry::reject_reason::AUTHZ],
+            );
+            tracing::info!(
+                origin = %origin_str,
+                peer = %peer,
+                "upgrade rejected: origin not allowed"
+            );
+            return axum::http::StatusCode::FORBIDDEN.into_response();
+        }
+    }
     // Admission control (P4-M031/M023): bounded new-connection rate per
     // peer; distributed when Redis is up, local fallback otherwise.
     if app

@@ -988,3 +988,60 @@ async fn adversarial_forged_identity_claims_never_trusted() {
     let err = next_control(&mut ws).await;
     assert_eq!(err["payload"]["code"], "forbidden", "no-access user denied");
 }
+
+// ---------------------------------------------------------------------------
+// P7 (F-P7-SEC-01): Origin admission on the upgrade route. GATEWAY_ALLOWED_
+// ORIGINS was previously config-only (parsed, validated, never enforced);
+// a cross-site WebSocket could present a foreign Origin and reach the
+// authenticate handshake. Enforcement now rejects present-but-disallowed
+// Origins with 403 BEFORE any protocol work; absent Origin (non-browser
+// clients, this test harness) stays allowed — the JWT remains the auth
+// boundary.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn upgrade_rejects_disallowed_origin_before_protocol_work() {
+    let Some(server) = boot().await else {
+        eprintln!("SKIP: db down");
+        return;
+    };
+    // The harness boots with allowed_origins: [] (base_config) — the
+    // production default posture is env-provided; an empty list plus a
+    // PRESENT Origin must reject. (Empty-list semantics: nothing is
+    // browser-allowed; non-browser clients still pass — that shape is
+    // covered by every other test in this file connecting without Origin.)
+    let url = format!("http://{}/api/v1/sync", server.addr);
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .header("Origin", "https://evil.example.com")
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .send()
+        .await
+        .expect("http request");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::FORBIDDEN,
+        "disallowed Origin must be rejected with 403 before any upgrade"
+    );
+    // And the allowed default case: no Origin header → upgrade proceeds
+    // (the handshake-level success is observable as a 101 or a protocol
+    // response, never 403).
+    let no_origin = client
+        .get(&url)
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .send()
+        .await
+        .expect("http request");
+    assert_ne!(
+        no_origin.status(),
+        reqwest::StatusCode::FORBIDDEN,
+        "absent Origin (non-browser client) must not be origin-rejected"
+    );
+}
