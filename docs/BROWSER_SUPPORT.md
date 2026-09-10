@@ -22,7 +22,7 @@ are load-bearing (no polyfills are shipped):
 |---|---|---|---|
 | 1 | **WebAssembly with bulk-memory** (`memory.copy`, `memory.fill`) | CRDT core (C++ compiled via Emscripten; 150 `memory.copy` + 7 `memory.fill` sites in the shipped binary) | `wasm-dis public/wasm/concord-crdt.wasm` |
 | 2 | **WebAssembly i64 with JS BigInt integration** (`-sWASM_BIGINT=1`) | replica ids, counters, Lamport clocks cross the JS/WASM boundary as BigInt; `setBigUint64` in the sync protocol encoder | `wasm/CMakeLists.txt`, `src/lib/crdt/wasm-types.ts`, `src/lib/sync/protocol.ts:452` |
-| 3 | **Module Web Workers** (`new Worker(url, { type: "module" })`) | CRDT engine runs in a dedicated worker (main thread stays free) | `src/lib/crdt/worker/client.ts:37-40` |
+| 3 | **Web Workers — classic, constructed from a blob** (pre-bundled `/crdt-worker.js` fetched and loaded via `URL.createObjectURL`; the WASM glue loads inside the worker via `importScripts()` on an absolute same-origin URL) | CRDT engine runs in a dedicated worker (main thread stays free) | `src/lib/crdt/worker/client.ts` (blob construction), `src/lib/crdt/worker/crdt-worker.ts` (importScripts glue) |
 | 4 | **IndexedDB** (basic CRUD: open, transactions, `getAll` via index, `put`, `delete`) | local replica durability (snapshot + op log) and the sync outbox | `src/lib/crdt/worker/idb.ts`, `src/lib/sync/pending-store.ts` |
 | 5 | **WebSocket** | realtime sync transport to the Rust gateway (URL supplied explicitly — `ws://`/`wss://` chosen by deployment config, not page protocol inference) | `src/lib/sync/transport.ts:167` |
 | 6 | **TextEncoder / TextDecoder** | UTF-8 encode/decode across the worker/WASM boundary | `src/lib/crdt/runtime.ts` |
@@ -43,10 +43,12 @@ Combining the audit above, a browser must support:
 - **WebAssembly bulk-memory**: shipped in Chrome 75+, Firefox 62+ (preview) /
   Firefox 68+ (stable), Safari 15+ (Safari shipped bulk-memory in 15.0).
 - **WASM BigInt integration**: Chrome 85+, Firefox 78+, Safari 15+.
-- **Module workers**: Chrome 80+, Firefox 114+, Safari 15+.
+- **Classic blob workers** (the shipped P7-M032 form — no module-worker
+  requirement): Chrome 20+, Firefox 13+, Safari 7+ (far older than every
+  other constraint; the module-worker Firefox 114 floor no longer applies).
 
 Therefore the **minimum feature baseline is roughly Safari 15 / Chrome 85 /
-Firefox 114**. Concord v1 targets and verifies current evergreen versions,
+Firefox 78-86** (bulk-memory + WASM BigInt are the binding constraints). Concord v1 targets and verifies current evergreen versions,
 with the following matrix:
 
 ## 3. Support matrix (v1)
@@ -54,12 +56,12 @@ with the following matrix:
 | Browser | Status | Notes |
 |---|---|---|
 | Chrome/Chromium (last 2 majors) | **Supported** (primary dev target) | WASM smoke + full unit/realtime harnesses run on Node/Chromium-adjacent toolchains; interactive validation by the release lead (M036) |
-| Safari on macOS (16.4+) | **Supported** | All required APIs present since Safari 15; WASM BigInt + module workers stable in 16.x. Local WebKit validation is the lead's M036 checklist item |
-| Firefox (last 2 majors) | **Supported (API-level)** | Module workers require Firefox 114+; bulk-memory + BigInt satisfied. Interactive verification pending M036; no known incompatibilities in the API audit |
-| Safari 15.x | Partial (untested) | APIs exist; not covered by the WASM BigInt/module-worker validation matrix — treated as unsupported for v1 claims |
+| Safari on macOS (16.4+) | **Supported** | All required APIs present since Safari 15; WASM BigInt stable in 16.x; the shipped worker is a classic blob worker (no module-worker requirement). Local WebKit validation was performed in the Phase 7 production E2E (the CSP 'wasm-unsafe-eval' finding was a live WebKit behavior) |
+| Firefox (last 2 majors) | **Supported (API-level)** | Bulk-memory + WASM BigInt satisfied (Firefox 78+); the shipped classic blob worker lifts the old module-worker Firefox-114 floor. Interactive verification pending; no known incompatibilities in the API audit |
+| Safari 15.x | Partial (untested) | APIs exist (bulk-memory, BigInt, classic workers); not covered by the interactive validation matrix — treated as unsupported for v1 claims |
 | Edge/Opera (Chromium) | Expected to work (Chromium engine); not separately tested | |
 | iOS/iPadOS Safari | Not verified for v1 (desktop-first product; see PRD §25a.C.5) | Responsive chrome is in place but the 816px document page is desktop-first |
-| IE 11, legacy Edge, Safari < 15 | **Not supported** | No WASM bulk-memory/BigInt/module-worker support; the CRDT engine cannot instantiate |
+| IE 11, legacy Edge, Safari < 15 | **Not supported** | No WASM bulk-memory/BigInt support; the CRDT engine cannot instantiate |
 | Browsers with JavaScript disabled | Not supported | The product is a client-rendered application |
 
 ## 4. Degradation behavior (honest, not silent)
@@ -80,11 +82,20 @@ with the following matrix:
 
 ## 5. Known compatibility notes
 
-- The Emscripten glue is fetched as a static asset and evaluated inside the
-  worker (`src/lib/crdt/worker/crdt-worker.ts`) because dynamic import of an
-  absolute URL is disallowed in module workers in some engines; this fetch +
-  `new Function` pattern is broadly supported but requires the `/wasm/*`
-  assets to be served with the app (deployment runbook dependency).
+- The worker itself is pre-bundled as a CLASSIC worker
+  (`public/crdt-worker.js` via `npm run worker:bundle`), fetched with
+  `cache: 'reload'` and constructed from a blob URL; inside the worker the
+  Emscripten glue loads via `importScripts()` on an absolute same-origin URL
+  and the binary via `fetch()` (`src/lib/crdt/worker/crdt-worker.ts`).
+  (History: the glue was once evaluated via `new Function` — blocked by the
+  shipped CSP — and earlier via a module worker, which proved unreliable in
+  embedded WebViews; the classic importScripts form is CSP-clean and the one
+  that shipped.) This requires the `/wasm/*` assets and `/crdt-worker.js` to
+  be served with the app (deployment runbook dependency).
+- **WebKit note (live-found, P7-M033):** WebAssembly compilation is
+  script-src-gated in WebKit — the CSP must carry `'wasm-unsafe-eval'` or the
+  worker's engine init rejects with a CompileError (observed live on
+  production; fixed with the narrow directive).
 - The WASM module is built with `-sENVIRONMENT=web,worker` — it deliberately
   does not run in Node except through the explicit-instantiation smoke test
   (`wasm/smoke.mjs`).

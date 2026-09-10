@@ -1,0 +1,55 @@
+# NOTICE
+
+This file asserts provenance and third-party attribution for the Concord
+project as required for honest distribution.
+
+## Project origin
+
+Concord originated from the Code With Antonio "Google Docs Clone"
+tutorial (a commercial Next.js/React/Clerk/Convex/Liveblocks course
+product). The project was deliberately rebuilt into an original
+engineering work: the synchronization stack — the C++20/WASM sequence
+CRDT, the Rust sync gateways, the binary wire protocol, the PostgreSQL
+durable plane (schema, ingest, snapshots, recovery, history), and the
+browser local-first runtime — is original to this repository. The
+pristine tutorial baseline is preserved for transparency at the git tag
+`antonio-original-baseline`.
+
+**Tutorial-derived assets still shipped in v1** (provenance retained
+deliberately; replace or clear with upstream licensing before any
+redistribution):
+
+- Document template thumbnails: `public/blank-document.svg`,
+  `public/software-proposal.svg`, `public/project-proposal.svg`,
+  `public/business-letter.svg`, `public/resume.svg`,
+  `public/cover-letter.svg`, `public/letter.svg`
+- Assorted product-shell icons and starter assets under `public/`
+  (e.g. `public/file.svg`, `public/globe.svg`, `public/next.svg`) and
+  the initial editor/product page structure derived from the tutorial
+  shell (since heavily reworked).
+
+No official public upstream repository or license for the tutorial has
+been identified (tracked as risk R1 in `docs/PRD.md` and
+`docs/DECISIONS.md`); upstream licensing remains under review before
+any public release or redistribution of this repository.
+
+## Third-party runtime components (notable)
+
+- **libvips (LGPL-3.0)** — shipped as transitive binaries through the
+  `sharp` npm package (used by Next.js image optimization). LGPL notice:
+  <https://www.gnu.org/licenses/lgpl-3.0.html>. Source availability on
+  request per LGPL §6; the SBOMs (`sbom/`) list the exact versions.
+- **Clerk** (identity SaaS), **TipTap/ProseMirror** (MIT), **Next.js/
+  React** (MIT), **axum/tokio** and the Rust crate set (MIT/Apache-2.0 —
+  331 crates, per the gateway SBOM), **Emscripten** toolchain output
+  (runtime is MIT-linked; build-time only).
+- No GPL/AGPL/SSPL components exist anywhere in the runtime dependency
+  tree (738-entry lockfile census + SBOMs; the only copyleft is the
+  LGPL-3.0 libvips above). Full machine-readable inventories:
+  `sbom/web.cdx.json`, `sbom/rust-gateway.cdx.json`,
+  `sbom/native-worker.cdx.json`.
+
+## Licensing status of this repository
+
+Not yet licensed for redistribution; a license is resolved before
+public release (see README "License").

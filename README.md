@@ -75,8 +75,9 @@ references; smoke tests assert their old endpoints 404.
 
 History is the operation log; snapshots compress it. Recovery can replay
 100 k operations (65.2 s p50) or import a snapshot at the 99 % boundary
-plus the 1 k tail (0.927 s p50) — **98.6 %** faster, digest verified on
-every run, reproduced three times. Safe compaction prunes operations
+plus the 1 k tail (0.964 s p50) — **98.4 %** faster, digest verified on
+every run, reproduced four times (98.6 / 98.5 / 98.6 / 98.4 across the
+Phase-6 and final-release campaigns). Safe compaction prunes operations
 covered by a snapshot boundary (staged, crash-safe, integrity-checked,
 revision boundaries preserved): after full compaction of a 50 k-op
 document, **50.1 %** of durable bytes remain.
@@ -88,9 +89,9 @@ every number: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 | Claim | Measured |
 |---|---|
-| Durable-ACK ingest, 25-op batch | p50 31.45 → **2.72 ms** (−91.4 %) after replacing per-op INSERT round trips with one multi-row `unnest` INSERT; ingest 771 → **8 558 ops/s** (11.1×) — profiler-driven, replay digests identical |
-| Multi-gateway scale-out (1→4 gateways, 200 ops/s open-loop) | ack p95 15.42 → 16.49 ms (**+6.9 %**), zero loss, 0.000 % errors — gateway addition is ~free at this scale |
-| Snapshot+tail recovery | **98.6 %** faster than full replay (65.153 s → 0.927 s p50; 100 k history / 1 k tail; 5 runs) |
+| Durable-ACK ingest, 25-op batch | p50 31.45 → **2.72 ms** (−91.4 %) after replacing per-op INSERT round trips with one multi-row `unnest` INSERT; ingest 771 → **8 685 ops/s** (11.3×, final-release rerun) — profiler-driven, replay digests identical |
+| Multi-gateway scale-out (1→4 gateways, 200 ops/s open-loop) | final release: ack p95 13.19 → 15.23 ms, zero loss, 0.000 % errors — gateway addition costs ~2 ms |
+| Snapshot+tail recovery | **98.4 %** faster than full replay (65.2 → 0.96 s p50 final-release rerun; 100 k history / 1 k tail; 5 runs; 4th consecutive reproduction) |
 | Correctness campaigns | **181/181 scenarios**, 0 divergent replicas, 0 lost durable-ACKed ops; 5 M fuzz executions, 0 crashes |
 | Browser WASM path | typing 0.003 ms/op; 5 k-op fanout batch 227 ms; bundle 180 KB |
 

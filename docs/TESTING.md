@@ -73,9 +73,11 @@ cmake --build build/sanitize
 ./build/sanitize/crdt/tests/concord_crdt_tests
 ```
 
-ThreadSanitizer becomes applicable when the core gains threads (the Phase 2
-concurrency boundary); it is configured via `CONCORD_SANITIZE_THREAD=ON` and
-will be part of the gate once worker execution exists natively.
+ThreadSanitizer is part of the shipped gate (the Phase 6 release-gate
+matrix runs the full 64+51 suites under TSan via
+`CONCORD_SANITIZE_THREAD=ON`); the native worker's single-threaded contract
+is documented and asserted there. Phase 6 campaigns (30/30 seeds) also ran
+under TSan clean.
 
 ## 5. Fuzzing (native)
 

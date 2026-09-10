@@ -279,3 +279,53 @@ and run discipline. Gaps and anomalies are recorded, never silently
 dropped (the one full-campaign anomaly — a load-generator client-exit
 at gw1-c10-d1 — shipped zero unacked ops and is root-caused in the
 campaign notes).
+
+## Phase 7 — final-release reruns (MEASURED, 2026-09-10, commit eee94b9)
+
+The Phase 7 master prompt requires final benchmark numbers re-measured on
+the exact shipped release build (not reused from earlier commits). All
+three campaigns below ran on the clean `eee94b9` tree — the release that
+is deployed to production — with the same environments, run counts, and
+discipline as Phase 6. Raw artifacts under the private benchmark runs
+directory (`SA-PERF7-*` reports).
+
+### Throughput / scaling (P7-M037, headline cells, 8 cells × 3 runs)
+
+| Cell (gateway/clients/docs) | ops/s | ack p50 | ack p95 | P6 p95 | Verdict |
+|---|---|---|---|---|---|
+| 1 gw / 10 c / 20 d | 200.0 | 6.62 ms | 13.19 ms | 15.42 ms | improved |
+| 4 gw / 10 c / 20 d | 200.0 | — | 15.23 ms | 16.49 ms | improved |
+
+- Zero loss: 142,600 sent == 142,600 durable acks aggregate; sent==acked
+  true in all 24/24 runs; error rate 0.000%.
+- The 1→4 gateway p95 penalty reads **+15.5%** on this build vs Phase 6's
+  +6.9% — because the M040 ingest optimization shrank the 1-gateway base
+  (~13.2 ms vs ~15.4 ms); the absolute penalty (~2.0 ms) is in the same
+  band. The honest claim pair for the final release: **"4 gateways at
+  ack-p95 15.2 ms, ~+15% vs 1 gateway, zero loss"** (or keep the Phase-6
+  +6.9% claim pinned to its measured commit 28b983b — do not mix).
+
+### Recovery / compaction (P7-M038, 5 runs, digest-verified every run)
+
+| Measurement | Final release | Phase 6 |
+|---|---|---|
+| Full replay, 100k history, p50 | 61.36 s | 65.15 s |
+| Snapshot+tail (1k, boundary @99%), p50 | **0.964 s** | 0.927 s |
+| **Improvement** | **98.4%** (4th consecutive reproduction: 98.6 / 98.5 / 98.6 / 98.4) | 98.6% |
+| Compaction, 50k history | 50,000 rows / 2,632,096 B → 0 rows / 0 B; snapshot 2,646,504 B kept = **50.1%** | identical |
+
+Deterministic digests and payload byte counts are byte-identical to
+Phase 6 (empirical proof the recovery path is unchanged; `cpp/` has zero
+commits since 28b983b). Zero digest-verification failures.
+
+### Ingest optimization (P7-M040, 25-op durable-ack microbench, medians)
+
+| Measurement | Final release | M040 AFTER | M040 BEFORE |
+|---|---|---|---|
+| Durable-ack p50 | **2.72 ms** | 2.72 ms | 31.45 ms |
+| Durable-ack p95 | 3.54 ms | 3.63 ms | 37.23 ms |
+| Ingest throughput | **8,685 ops/s** | 8,558 ops/s | 771 ops/s |
+| vs BEFORE | **−91.4%, 11.3×** | −91.4%, 11.1× | — |
+
+The settled suite lands on the identical 2.72 ms p50 — the optimization
+reproduces exactly on the shipped build.

@@ -202,19 +202,19 @@ flowchart TD
 - Graceful drain: SIGTERM → stop writes → notify connections → bounded
   grace → exit 0.
 
-### 1.3 Known transitional limitations (honest state)
+### 1.3 Known limitations at the time of Phase 3 (historical)
 
-- Single gateway process (Phase 4 distributes via NATS; the room registry
-  is an explicit seam, no hidden multi-node code).
-- Rate limiting is a protocol vocabulary placeholder (`rate_limited`
-  reserved; enforcement is Phase 4 edge work).
-- The Phase 1 whole-document content mirror still runs alongside the op
-  log (the product UI migrates to the sync session in later phases; the
-  sync layer ships and is proven by the E2E suites in this phase).
-- Presence/comments/threads remain `unavailable` (DEC-016) — Phase 3
-  delivers the durable operation plane, not the social features.
+- Single gateway process (RESOLVED — Phase 4 distributes via NATS).
+- Rate limiting was a protocol vocabulary placeholder (RESOLVED —
+  enforced since Phase 4: connect/fetch scopes, SECURITY.md §6.4).
+- The Phase 1 whole-document content mirror still ran alongside the op
+  log (RESOLVED in Phase 7 — the product UI wires the real sync session,
+  D16; the mirror remains only as the honest fallback for content outside
+  the collaborative subset).
+- Presence/comments/threads remain `unavailable` (DEC-016) — unchanged
+  in v1 (§25a.B of the PRD).
 
-## 2. CURRENT (Phase 2 state — superseded by §1, kept for context)
+## 2. PRIOR STATE (Phase 2 — superseded by §1, kept for context)
 
 Local-first CRDT client on the PostgreSQL control plane.
 

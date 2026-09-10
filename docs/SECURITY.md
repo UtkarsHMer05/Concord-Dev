@@ -605,11 +605,12 @@ NEXT_PUBLIC_SYNC_GATEWAY_URL=ws://<ALB-DNS-NAME>:8890/api/v1/sync
                                                 # wss://<host>:8443/... with TLS
 ```
 
-**`GATEWAY_ALLOWED_ORIGINS` is currently CONFIG-ONLY (see finding
-F-P7-SEC-01 in the sign-off report):** the gateway parses and normalizes
-it but does NOT yet reject upgrades by `Origin` header — enforcement is
-a `rust/` change (lead-owned, P8). Until then the value MUST still be
-set (it documents intent and is validated on upgrade-day).
+**`GATEWAY_ALLOWED_ORIGINS` is ENFORCED at the upgrade (closed in
+P7-M046, commit `3dbd5d9` — finding F-P7-SEC-01):** the gateway rejects
+a present-but-disallowed `Origin` header with 403 before any protocol
+work (CSWSH defense); an absent Origin (non-browser clients) is allowed
+— the verified JWT remains the authentication boundary. Regression:
+`ws_integration::upgrade_rejects_disallowed_origin_before_protocol_work`.
 
 ### 10.3 Network exposure (verified against provision.sh + compose)
 
@@ -648,19 +649,24 @@ exposure therefore needs:
 
 ### 10.5 CSP, cookies, verbose errors, source maps (honest posture)
 
-- **CSP: none in v1 (documented).** The app emits no
-  `Content-Security-Policy` (no `next.config.ts` headers, no
-  middleware). A strict CSP is non-trivial here: Clerk requires
-  `script-src/connect-src/frame-src` entries for its FAPI host +
-  `*.protect.clerk.com` (with `:*` on connect-src!), TipTap uses inline
-  styling, and the CRDT WASM worker needs `worker-src 'self' blob:` +
-  `script-src` wasm paths (`WebAssembly.instantiate` from a first-party
-  `/wasm/concord-crdt.wasm` fetch inside a worker). Recommendation for
-  v2: start with `@clerk/nextjs`'s built-in `contentSecurityPolicy`
-  middleware option (`default` mode; available in the installed
-  `@clerk/nextjs 7.9.1`), then tighten `worker-src`/`script-src` for
-  the WASM worker. v1 ships without CSP — an accepted, documented gap
-  (no third-party script hosts beyond Clerk's own CDN-hosted clerk-js).
+- **CSP: shipped since P7-M027 (b0d233f), hardened in P7-M033
+  (e367827).** All responses carry a baseline CSP via `next.config.ts`
+  `headers()`: `default-src 'self'`; `script-src 'self'
+  'wasm-unsafe-eval' 'unsafe-inline' https://*.clerk.accounts.dev`;
+  `worker-src 'self' blob:`; `child-src 'self' blob:`; `connect-src
+  'self' https://*.clerk.accounts.dev ws: wss:`; `img-src 'self' data:
+  blob: …`; `object-src 'none'`; `base-uri 'self'`; `form-action
+  'self'`; `frame-ancestors 'none'`; plus nosniff, X-Frame-Options
+  DENY, Referrer-Policy, and Permissions-Policy on every response.
+  **Live production E2E (P7-M033) found the cost of the initial
+  omission of `'wasm-unsafe-eval'`: WebKit gates
+  `WebAssembly.instantiate` on script-src, so the CRDT worker's engine
+  init died inside the Emscripten glue with ZERO error signal (a
+  swallowed promise rejection) and every session silently degraded to
+  the fallback save path.** The fix added the narrow wasm directive and
+  a fail-fast rejection path in the worker's `instantiateWasm` hook;
+  both are regression-pinned. A nonce-based CSP (removing
+  `'unsafe-inline'`) remains the documented follow-up.
 - **Cookies/session: Clerk defaults, not overridden.** Concord code
   never touches `document.cookie` or Clerk cookie options (verified by
   grep) — Clerk's httpOnly/secure/sameSite defaults apply unmodified.

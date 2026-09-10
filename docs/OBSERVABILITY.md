@@ -135,7 +135,7 @@ bucket axis. No metric is labeled by document/user/connection id.
 | `concord_recovery_duration_seconds{op=select}` (histogram) | How fast is recovery snapshot selection? |
 | `concord_compaction_duration_seconds{op=prune}` (histogram) | How long does op-log pruning take? |
 | `concord_compaction_rows_total` / `concord_compaction_bytes_total` | How much history is being pruned? (bytes TODO: needs RETURNING payload sizes) |
-| `concord_worker_queue_depth` (gauge) | Maintenance jobs in flight (currently 0 — scheduler not yet spawned in main; see known gaps) |
+| `concord_worker_queue_depth` (gauge) | Maintenance jobs in flight (registered; not yet wired to scheduler state — still emits 0; see known gaps) |
 | `concord_catchup_duration_seconds{op=replay}` + `concord_catchup_size{op=replay}` | How slow/big are reconnect catch-ups? |
 
 ### Ephemeral tier (Redis)
@@ -156,18 +156,21 @@ aspirational numbers we aim to MEASURE, not service-level agreements:
 
 | Target | Value | Status |
 |---|---|---|
-| Durable ack p95 (central workload) | < 25 ms | TARGET — not measured |
-| Cross-gateway propagation p95 (ingress → peer client) | < 100 ms | TARGET — not measured |
-| Catch-up replay p95 @ 10k ops backlog | < 1 s | TARGET — not measured |
+| Durable ack p95 (central workload) | < 25 ms | **MEASURED (Phase 6 campaign + P7 final-release rerun)**: 15.42 ms full-campaign / 13.19 ms final-release central cell — [BENCHMARKS.md](BENCHMARKS.md) §Phase 6 + §Phase 7 |
+| 1→4 gateway p95 degradation | ≤ 30% | **MEASURED**: +6.9% (Phase 6 full campaign) / +15.5% absolute-~2ms band (final-release rerun, smaller base) — BENCHMARKS.md |
+| Cross-gateway propagation p95 (ingress → peer client) | < 100 ms | TARGET — not measured (fanout p50 ≈ 2 ms was measured in Phase 4 as a baseline, not against this target) |
+| Catch-up replay p95 @ 10k ops backlog | < 1 s | TARGET — not measured against the backlog shape (recovery-bench measured snapshot+tail 0.93 s @100k, a different shape — BENCHMARKS.md) |
 | Queue depth steady-state (per connection channel) | < 50% of capacity | TARGET — not measured |
-| DB write latency p95 | < 10 ms | TARGET — not measured |
+| DB write latency p95 | < 10 ms | TARGET — not measured (ingest microbench p50 2.72 ms is batch-level, not raw DB-write) |
 | Broker lag steady-state | 0 (all acks immediate) | TARGET — not measured |
 
 ## Known gaps (deliberate, tracked)
 
-- `concord_worker_queue_depth` emits 0: the maintenance scheduler is
-  not spawned in `main.rs` yet (it is exercised via tests). TODO: wire
-  when the scheduler is spawned in main (P6 CI/release milestone).
+- `concord_worker_queue_depth` emits 0: the maintenance scheduler IS
+  spawned in `main.rs` when `GATEWAY_WORKER_BINARY` is set (DEC-045,
+  live-proven), but the gauge is not wired to scheduler state — the
+  registration exists without a writer. TODO: wire the gauge to the
+  runner's in-flight count (follow-up).
 - `concord_queue_depth{queue}` only has the `conn_send` class: the
   protocol uses one bounded mpsc per connection; no separate
   ingress/fanout/catchup queues exist to measure.

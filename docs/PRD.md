@@ -74,6 +74,11 @@ the engineering depth is for technical evaluators.
 
 ## 5. User stories
 
+> **v1 boundary note (Phase 7):** this section states the full-program
+> aspiration. The SHIPPED v1 scope is frozen in §25a; anything §25a.B
+> lists (presence, comments, share UI, history UI, …) is NOT in v1 no
+> matter what appears below.
+
 1. As a user, I can sign in and see my documents and my organization's shared
    documents.
 2. As a user, I can create a document from a template or blank, rename it,
@@ -92,6 +97,11 @@ the engineering depth is for technical evaluators.
     latency and failure behavior from its telemetry.
 
 ## 6. Functional requirements
+
+> **v1 boundary note (Phase 7):** FRs below are the full-program set.
+> The SHIPPED v1 scope is frozen in §25a; anything §25a.B lists (presence,
+> comments, share UI, history UI, …) is NOT in v1 no matter what appears
+> below.
 
 - FR-1 Identity: email-based sign-in/sign-out via an external identity
   provider; organizations supported.
@@ -338,19 +348,25 @@ be implied by product UI, docs, or demo scripts.
 | Rich-text editing (TipTap 3) | Headings, bold/italic/underline/strikethrough, font family/size, line height, alignment, lists, tasks, tables, images (URL/blob), links, colors/highlight, undo/redo, print/export (JSON/HTML/TXT/print-to-PDF), ruler margins | `tests/templates.test.ts`, `tests/content.test.ts`, manual product QA |
 | Local-first durable editing | CRDT replica in a Web Worker; snapshot + op-log durability in IndexedDB; editing works offline and survives reload | `tests/crdt/worker.test.ts`, `tests/crdt/harness.test.ts`, `tests/crdt/parity.test.ts`, `tests/crdt/bridge.test.ts` |
 | Transitional server content mirror | Debounced whole-document save with optimistic concurrency (409 conflict path, not silent overwrite) | `tests/db/content-save.test.ts` |
-| CRDT sync engine + realtime gateway | SyncSession/SyncTransport against the self-hosted Rust gateway: two-client collaboration, offline/reconnect reconciliation, duplicate-safe resends, gateway restart recovery, graceful drain, snapshot resync — **verified at library/protocol level in the test harness** (see B.1 for the v1 product boundary) | `tests/realtime/e2e.test.ts`, `tests/realtime/reliability.test.ts`, `tests/sync/*.test.ts` |
+| CRDT sync engine + realtime gateway | **Shipped v1 (Phase 7, D16):** the document page wires the real SyncSession to the Rust gateway — two-client collaboration, offline/reconnect reconciliation, duplicate-safe resends, gateway restart recovery, graceful drain, snapshot resync; verified in the test harness AND live on the production deployment | `tests/realtime/e2e.test.ts`, `tests/realtime/reliability.test.ts`, `tests/sync/*.test.ts`, Phase-7 production smoke checkpoints |
 | Permission model | OWNER/EDITOR/COMMENTER/VIEWER enforced server-side on every request; revoked access surfaces honestly ("no longer have permission") | `tests/db/acl.test.ts`, `tests/db/idor-matrix.test.ts`, realtime role tests |
 | Status truthfulness | Save/duability status UI states local-saved vs mirror-saved truthfully; never claims server/cloud save before the durable-ack point | Phase 7 product audit (SA-PRODUCT7) + unit tests for status mapping |
 
 ### B. Intentionally unsupported in v1 (do not demo, do not imply)
 
-1. **Live multi-user collaboration in the shipped web UI.** The sync stack
-   (SyncSession + Rust gateway) is implemented and verified against real
-   WebSockets in the test harness, but the shipped document page does not
-   open a gateway session. The v1 product surface runs the local CRDT replica
-   plus the transitional content mirror. Realtime multi-user editing ships
-   when the editor→gateway wiring lands in a later release; the collaboration
-   seam (`src/lib/collaboration/`) and SyncSession API exist for exactly that.
+1. ~~**Live multi-user collaboration in the shipped web UI.**~~
+   **SUPERSEDED (Phase 7, D16 wiring — now SHIPPED):** the document page
+   wires the real SyncSession to the Rust gateway
+   (`src/lib/sync/use-sync-session.ts` via `editor.tsx`); live
+   multi-user collaboration IS part of v1 (verified on the production
+   deployment: two sessions, same document, durable fanout; see
+   `tests/realtime/` and the Phase-7 checkpoints). The original v1
+   boundary text is retained below for history: the sync stack
+   (SyncSession + Rust gateway) was implemented and verified against
+   real WebSockets in the test harness BEFORE the editor→gateway wiring
+   landed (commit `bd63b04`, Phase 7); the collaboration seam
+   (`src/lib/collaboration/`) and SyncSession API were built for exactly
+   that wiring.
 2. **Real-time cursors and presence UI.** No presence components exist;
    presence is honestly reported as "unavailable" by the session provider.
 3. **Comments/threads and notifications.** No components; reported as
@@ -404,6 +420,10 @@ be implied by product UI, docs, or demo scripts.
 - Multi-gateway/region deployment with broker fanout (Phase 4 architecture).
 
 ## 26. Final acceptance criteria
+
+> **Scope note (Phase 7):** this section is the EIGHT-PHASE PROGRAM bar,
+> not the v1 release bar. The shipped v1 boundary is §25a; v1 does not
+> claim the presence/history axes below.
 
 - PRODUCT: polished editor, real collaboration, offline editing, reconnect,
   sharing with server-enforced roles, history, deployable UI.
