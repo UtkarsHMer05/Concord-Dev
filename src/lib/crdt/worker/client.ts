@@ -48,7 +48,11 @@ export class CrdtClient {
             // fetch URLs for the WASM glue — remains the real origin.
             // The fetch is a normal same-origin GET (CSP connect-src
             // 'self'); construction failures surface as rejections.
-            const response = await fetch("/crdt-worker.js", { cache: "force-cache" });
+            // cache: 'reload' — the worker bundle changes per release; a cached old
+            // bundle against a new page would pin stale engine code
+            // (observed live: a force-cache choice served the pre-fix
+            // worker across three production rolls).
+            const response = await fetch("/crdt-worker.js", { cache: "reload" });
             if (!response.ok) {
                 throw { code: "Unknown", message: `worker source fetch failed: ${response.status}` } as CrdtWorkerError;
             }
