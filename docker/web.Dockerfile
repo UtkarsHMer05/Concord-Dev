@@ -33,8 +33,11 @@ COPY . .
 # Dummy vars: the build must not require real secrets (build-time env only).
 ENV NEXT_TELEMETRY_DISABLED=1
 # public/wasm is produced by `npm run wasm:build` (git-ignored); the image
-# build expects it present. Build the wasm layer first when needed:
-#   npm run wasm:build && docker build ...
+# build expects it present. public/crdt-worker.js is produced by
+# `npm run worker:bundle` (P7-M032 — the pre-bundled static worker the
+# client constructs from /crdt-worker.js; byte-stable per source commit).
+# Build both layers first when needed:
+#   npm run wasm:build && npm run worker:bundle && docker build ...
 # P7-M021: per-environment NEXT_PUBLIC_* values (see header — these are
 # the ONLY two NEXT_PUBLIC vars the app reads: Clerk publishable key and
 # the browser-facing sync WS URL).

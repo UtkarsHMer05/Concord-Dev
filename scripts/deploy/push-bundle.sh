@@ -99,14 +99,20 @@ trap 'rm -rf "$WORK"' EXIT
 git archive "${COMMIT}" | tar -x -C "$WORK"
 echo "  clean tree: $(git rev-parse --short "${COMMIT}") ($(git ls-tree -r "${COMMIT}" --name-only | wc -l | tr -d ' ') files)"
 
-# 3. Stage the wasm build products into the export (git-ignored; the
-#    web image build expects public/wasm present — docker/web.Dockerfile).
+# 3. Stage the build products into the export (git-ignored; the web image
+#    build expects public/wasm AND public/crdt-worker.js present —
+#    docker/web.Dockerfile).
 if [ ! -f public/wasm/concord-crdt.wasm ]; then
   echo "  public/wasm missing locally — building (npm run wasm:build)…"
   npm run wasm:build
 fi
+if [ ! -f public/crdt-worker.js ]; then
+  echo "  public/crdt-worker.js missing locally — building (npm run worker:bundle)…"
+  npm run worker:bundle
+fi
 mkdir -p "${WORK}/public/wasm"
 cp public/wasm/concord-crdt.js public/wasm/concord-crdt.wasm "${WORK}/public/wasm/"
+cp public/crdt-worker.js "${WORK}/public/crdt-worker.js"
 
 # ---------------------------------------------------------------------------
 # 4. Build + push ARM64 images (from the clean tree, NOT the worktree).

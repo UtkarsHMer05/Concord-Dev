@@ -24,6 +24,7 @@
     "db:test:prepare": "node scripts/db/prepare-test-db.mjs",
     "db:studio": "drizzle-kit studio",
     "wasm:build": "node scripts/wasm-build.mjs",
+    "worker:bundle": "node scripts/worker-bundle.mjs",
     "wasm:smoke": "node wasm/smoke.mjs"
   },
   "dependencies": {

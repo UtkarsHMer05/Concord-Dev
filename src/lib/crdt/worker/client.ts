@@ -35,17 +35,15 @@ export class CrdtClient {
             throw { code: "InvalidArgument", message: "client terminated" } as CrdtWorkerError;
         }
         if (this.worker === null) {
-            // Turbopack REQUIRES this exact canonical shape to compile the
-            // worker into a real JS chunk (new Worker(new URL('./x.ts',
-            // import.meta.url)) — any intermediate variable defeats its
-            // detection and the worker falls through to a RAW .ts media
-            // asset the browser cannot execute; observed live on production
-            // across three intermediate attempts). The compiled worker URL
-            // is root-absolute in this form.
-            this.worker = new Worker(
-                new URL("./crdt-worker.ts", import.meta.url),
-                { type: "module" },
-            );
+            // P7-M032: the worker is a PRE-BUNDLED static ES module
+            // (public/crdt-worker.js, built by `npm run worker:bundle`
+            // from src/lib/crdt/worker/crdt-worker.ts) served at the origin
+            // root. An absolute URL is bundler-runtime-free: no Turbopack
+            // worker chunking (whose otherChunks resolution 404s inside the
+            // worker context on nested routes — the production failure),
+            // no page-relative base, correct on every route. The bundled
+            // file is byte-stable per commit (pinned by the image build).
+            this.worker = new Worker("/crdt-worker.js", { type: "module" });
             this.worker.onmessage = (event: MessageEvent<WorkerResponse | WorkerNotification>) => {
                 const response = event.data;
                 // Push notification (no correlation id): fan out to the
