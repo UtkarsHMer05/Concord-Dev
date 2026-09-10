@@ -11,6 +11,7 @@ interface WorkerGlobal {
     onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
     postMessage(message: WorkerResponse | WorkerNotification): void;
     importScripts(url: string): void;
+    location: { origin: string };
     /** Set by the Emscripten glue's UMD global when loaded via importScripts. */
     loadConcordCrdt?: (options?: Record<string, unknown>) => Promise<ConcordModule>;
 }
@@ -30,8 +31,12 @@ async function loadFactory(): Promise<ConcordModule> {
     //      undefined; adding the ESM tail worked only where module workers
     //      themselves worked.
     //   3. importScripts — CSP-clean (script-src 'self'), classic-worker
-    //      native, sets the UMD global `loadConcordCrdt`.
-    self.importScripts("/wasm/concord-crdt.js");
+    //      native, sets the UMD global `loadConcordCrdt`. The URL is
+    //      resolved to a FULL absolute URL first: importScripts resolves
+    //      root-relative paths against the worker script's base, which
+    //      broke in blob-context debugging and varies by embedding — the
+    //      absolute form is correct from every base.
+    self.importScripts(new URL("/wasm/concord-crdt.js", self.location.origin).href);
     const factory = self.loadConcordCrdt;
     if (typeof factory !== "function") {
         throw new Error("wasm glue did not define loadConcordCrdt after importScripts");
