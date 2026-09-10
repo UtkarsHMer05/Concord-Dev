@@ -41,7 +41,12 @@ async function loadFactory(): Promise<ConcordModule> {
     if (typeof factory !== "function") {
         throw new Error("wasm glue did not define loadConcordCrdt after importScripts");
     }
-    const binaryResponse = await fetch("/wasm/concord-crdt.wasm");
+    // Absolute URL (same reason as importScripts above): the worker may be
+    // constructed from a blob: source, whose base URL cannot resolve
+    // root-relative paths (observed live on production).
+    const binaryResponse = await fetch(
+        new URL("/wasm/concord-crdt.wasm", self.location.origin).href,
+    );
     if (!binaryResponse.ok) {
         throw new Error(`wasm binary fetch failed: ${binaryResponse.status}`);
     }
