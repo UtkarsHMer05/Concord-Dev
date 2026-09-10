@@ -30,21 +30,33 @@ export class CrdtClient {
 
     constructor(private readonly options: CrdtClientOptions = {}) {}
 
-    private ensureWorker(): Worker {
+    private async ensureWorker(): Promise<Worker> {
         if (this.terminated) {
             throw { code: "InvalidArgument", message: "client terminated" } as CrdtWorkerError;
         }
         if (this.worker === null) {
-            // P7-M032: the worker is a PRE-BUNDLED static CLASSIC worker
-            // (public/crdt-worker.js — `npm run worker:bundle`, IIFE)
-            // served at the origin root. Absolute URL: no bundler worker
-            // chunking (whose otherChunks resolution 404s inside the
-            // worker on nested routes), no page-relative base. CLASSIC
-            // (not module) type: module workers proved unreliable in the
-            // embedded-WebView browser used for E2E (silently dropping
-            // all messages; identical code as classic responds —
-            // control-verified locally AND on production).
-            this.worker = new Worker("/crdt-worker.js");
+            // P7-M032 (final): the worker is a PRE-BUNDLED static CLASSIC
+            // worker (public/crdt-worker.js — `npm run worker:bundle`,
+            // IIFE). Constructed from a BLOB of the fetched source:
+            // URL-construction of workers proved silently unreliable in
+            // the embedded-WebView browsers used for staging/production
+            // E2E (both module and classic types intermittently deliver
+            // no messages and fire no errors), while BLOB workers
+            // responded in 100% of the same probes. The blob: URL carries
+            // the creating origin, so the worker's self.location.origin —
+            // used by loadFactory to build the absolute importScripts/
+            // fetch URLs for the WASM glue — remains the real origin.
+            // The fetch is a normal same-origin GET (CSP connect-src
+            // 'self'); construction failures surface as rejections.
+            const response = await fetch("/crdt-worker.js", { cache: "force-cache" });
+            if (!response.ok) {
+                throw { code: "Unknown", message: `worker source fetch failed: ${response.status}` } as CrdtWorkerError;
+            }
+            const source = await response.text();
+            const blobUrl = URL.createObjectURL(
+                new Blob([source], { type: "application/javascript" }),
+            );
+            this.worker = new Worker(blobUrl);
             this.worker.onmessage = (event: MessageEvent<WorkerResponse | WorkerNotification>) => {
                 const response = event.data;
                 // Push notification (no correlation id): fan out to the
@@ -85,14 +97,14 @@ export class CrdtClient {
         this.pending.clear();
     }
 
-    private call(request: DistributiveOmit<WorkerRequest, "id">): Promise<WorkerResultPayload> {
+    private async call(request: DistributiveOmit<WorkerRequest, "id">): Promise<WorkerResultPayload> {
         if (this.pending.size >= MAX_PENDING) {
             return Promise.reject({
                 code: "PendingLimitExceeded",
                 message: "too many in-flight worker requests",
             } as CrdtWorkerError);
         }
-        const worker = this.ensureWorker();
+        const worker = await this.ensureWorker();
         const id = this.nextId++;
         return new Promise<WorkerResultPayload>((resolve, reject) => {
             this.pending.set(id, { resolve, reject });
