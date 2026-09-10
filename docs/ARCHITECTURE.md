@@ -1,17 +1,20 @@
 # Concord — Architecture
 
-Status: Authoritative (Phase 4 completion version)
-Version: 1.5
-Last updated: 2026-09-07
+Status: Authoritative (Concord v1 — final release; see README)
+Version: 2.0
+Last updated: 2026-09-10
 
-This document distinguishes three architecture states at all times:
+This document distinguishes architecture states at all times:
 
-- **CURRENT** — what exists and runs today.
-- **TRANSITIONAL** — the explicitly temporary states created while moving
-  between CURRENT and TARGET (each is scheduled, bounded, and documented).
-- **TARGET** — the planned end state. Nothing here is claimed as implemented.
+- **CURRENT** — what exists and runs today (Sections 0–4: the shipped v1
+  plane, deployed to production in Phase 7).
+- **PRIOR / HISTORICAL** — the superseded states kept for context
+  (Sections 1–3), each labeled with the phase that superseded it.
 
-Nothing in the TARGET section should be read as an implemented capability.
+The former TARGET section (§4) described the planned end state; as of the
+Phase 7 final release it is implemented and shipped — its "planned"
+labeling is retired, and any future direction beyond v1 lives in
+[ROADMAP.md](ROADMAP.md), never presented as existing.
 
 ---
 
@@ -346,7 +349,11 @@ JSON content envelope, debounced Convex saves. Superseded by Phase 1.
 
 ---
 
-## 4. TARGET — Concord architecture (planned; NOTHING here is implemented)
+## 4. CURRENT — Concord v1 shipped architecture (implemented, deployed)
+
+The former TARGET view below is now the shipped and deployed v1
+architecture (Phase 7 final release; production deployment documented in
+[DEPLOYMENT.md](DEPLOYMENT.md)). It superseded Sections 1–2.
 
 ```mermaid
 flowchart TD
@@ -421,7 +428,7 @@ backpressure model).
   decisions, membership/ACL changes, maintenance (snapshot/compaction
   scheduling), health/telemetry aggregation.
 
-### 3.6 Trust boundaries (target)
+### 3.6 Trust boundaries (v1 — as shipped)
 
 1. Browser ↔ Gateway: authenticated session (Clerk identity), per-document
    authorization enforced inside the gateway against durable ACL data.
@@ -430,7 +437,7 @@ backpressure model).
    Redis; NATS carries events, never authorization decisions.
 4. Client authorization state is advisory UI only.
 
-### 3.7 Failure assumptions (target direction)
+### 3.7 Failure assumptions (v1 — tested fault model)
 
 - Any single gateway may crash or be drained at any time; clients reconnect.
 - PostgreSQL may restart; acknowledged durable updates survive.
@@ -439,16 +446,18 @@ backpressure model).
 - Redis data may vanish; presence/metrics degrade; documents are unaffected.
 - Clients may be offline for arbitrary periods; convergence on reconnect.
 
-### 3.8 Deployment direction
+### 3.8 Deployment (v1 — shipped)
 
-Local development is Docker Compose (PostgreSQL, Redis, NATS, observability
-stack as phases introduce them). Production deployment — hosting, TLS,
-secrets, staging, rollout/draining, rollback — is designed and executed in
-Phase 7 based on the final architecture (DEC-010).
+Local development is Docker Compose (PostgreSQL, Redis, NATS, and the
+observability stack). Production runs on AWS EC2 (Graviton) behind an ALB
+with per-environment compose stacks, ECR immutable images, SSM secret
+injection, staging-first migrations, and measured graceful drain —
+designed and executed in Phase 7 (DEC-050; [DEPLOYMENT.md](DEPLOYMENT.md),
+[OPERATIONS.md](OPERATIONS.md)).
 
 ---
 
-## 5. Document lifecycle (target view)
+## 5. Document lifecycle (v1 — as shipped)
 
 1. **Create** — metadata row + ACL (PostgreSQL); document opens locally.
 2. **Edit offline** — updates applied to local CRDT replica (WASM), persisted
@@ -461,7 +470,9 @@ Phase 7 based on the final architecture (DEC-010).
 
 ## 6. Reading guide
 
-- Implemented behavior: Sections 1–2 (CURRENT).
-- Temporary, scheduled states: Section 2 (each is gated by a phase).
-- Planned behavior: Section 3 — never presented as existing.
+- Shipped v1 behavior: Sections 0, 0b, and 4 (CURRENT — the deployed
+  architecture and its language/trust/delivery/deployment contracts).
+- Superseded states kept for context: Sections 1–3 (each is labeled with
+  the phase that superseded it).
+- Document lifecycle: Section 5.
 - Decisions behind this structure: [DECISIONS.md](DECISIONS.md).
