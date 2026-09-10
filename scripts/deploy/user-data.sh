@@ -95,6 +95,16 @@ echo "drizzle family applied (registry: drizzle.__drizzle_migrations)"
 # --- Stack up (gateway run_migrations apply family v1..v3 at boot) ---
 docker compose -f docker-compose.cloud.yml -p "concord-${ENV}" up -d
 
+# nginx (lb) resolves its static upstream hostnames (gw1..gw3) to IPs
+# ONCE at startup. `up -d` recreates only services whose image/config
+# changed — on a gateway image roll the gateways get NEW container IPs
+# while the untouched lb keeps serving the stale ones → "no live
+# upstreams" 502s (observed on production 2026-09-10: gw IPs shifted on
+# the e754122 roll and every :8890 request 502'd for 20+ minutes).
+# A one-container restart re-resolves; it costs <2s and is idempotent
+# on first boot.
+docker compose -f docker-compose.cloud.yml -p "concord-${ENV}" restart lb
+
 # --- Nightly backup cron (docs/OPERATIONS.md § Scheduled backups) ---
 # The minimal AL2023 image has NO /etc/cron.d — create it (and the
 # backup dir) before writing the cron file.
