@@ -56,10 +56,19 @@ async function loadFactory(): Promise<ConcordModule> {
             info: WebAssembly.Imports,
             receiveInstance: (instance: WebAssembly.Instance) => void,
         ) {
-            void WebAssembly.instantiate(wasmBinary, info).then((result) =>
-                receiveInstance(result.instance),
-            );
-            return {} as WebAssembly.WebAssemblyInstantiatedSource;
+            // P7-M033: the rejection MUST propagate into the factory's
+            // createWasm promise chain. The pre-fix form (void …then) let a
+            // CompileError — e.g. the CSP 'wasm-unsafe-eval' violation that
+            // shipped in b0d233f — die inside this hook: receiveInstance was
+            // never called, the glue's createWasm promise never settled, and
+            // the init RPC hung forever with zero error signal (the bridge
+            // silently stayed idle on the Phase-1 mirror). Emscripten's
+            // instantiateWasm contract also accepts a returned promise;
+            // rejecting it makes the failure observable end-to-end.
+            return WebAssembly.instantiate(wasmBinary, info).then((result) => {
+                receiveInstance(result.instance);
+                return {} as WebAssembly.WebAssemblyInstantiatedSource;
+            });
         },
     });
 }

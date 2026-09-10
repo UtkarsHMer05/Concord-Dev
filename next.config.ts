@@ -17,6 +17,12 @@ const nextConfig: NextConfig = {
   // pinned (frame-ancestors none, object-src 'none', base-uri 'self').
   // connect-src allows ws:/wss: for the sync gateway (ALB DNS now; a
   // custom domain later). A nonce-based CSP is a documented follow-up.
+  // P7-M033: 'wasm-unsafe-eval' added to script-src — WebAssembly compile/
+  // instantiate is a script-src-gated capability in WebKit (and enforced in
+  // newer Chromium); without it the CRDT worker's engine init rejects
+  // (CompileError) and every session silently degrades to the Phase-1
+  // REST mirror. This is the narrow, standard directive for wasm (it does
+  // NOT open general eval), not a weakening of the policy.
   async headers() {
     return [
       {
@@ -30,7 +36,7 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev",
+              "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' https://*.clerk.accounts.dev",
               "frame-src https://*.clerk.accounts.dev",
               "style-src 'self' 'unsafe-inline'",
               "connect-src 'self' https://*.clerk.accounts.dev ws: wss:",
