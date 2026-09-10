@@ -276,7 +276,12 @@ async fn forged_broker_cannot_fabricate_durable_state() {
         .expect("hostile publish (bytes are env-valid)");
 
     // The durable log for that document remains EMPTY — broker delivery
-    // never persists; only the authenticated ingest path does.
+    // never persists; only the authenticated ingest path does. The
+    // gateway-family schema is applied here because this suite queries
+    // crdt_operations directly WITHOUT booting a server (unlike
+    // ws_integration); the vitest global-setup recreates concord_test
+    // with ONLY the drizzle family, so a fresh DB must not fail this
+    // suite (run_migrations is idempotent — applied versions skip).
     let (client, conn) = tokio_postgres::connect(
         "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test",
         tokio_postgres::NoTls,
@@ -286,6 +291,40 @@ async fn forged_broker_cannot_fabricate_durable_state() {
     tokio::spawn(async move {
         let _ = conn.await;
     });
+    {
+        // Apply the gateway schema family before querying: the vitest
+        // global-setup recreates concord_test with ONLY the drizzle
+        // family, and this suite never boots a server (unlike
+        // ws_integration). run_migrations is idempotent (registry-skips).
+        use sync_gateway::config::Config;
+        let config = Config {
+            bind_host: "127.0.0.1".into(),
+            bind_port: 0,
+            database_url: "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test".into(),
+            clerk_issuer: "https://test.clerk.accounts.dev".into(),
+            allowed_origins: vec![],
+            max_frame_size: 8 * 1024 * 1024,
+            per_connection_queue_capacity: 8,
+            heartbeat_interval: std::time::Duration::from_secs(10),
+            idle_timeout: std::time::Duration::from_secs(600),
+            db_pool_size: 1,
+            jwks_file: None,
+            nats_url: None,
+            nats_subject_prefix: "concord.test".to_string(),
+            gateway_id: 1,
+            redis_url: None,
+            otel_enabled: false,
+            otel_endpoint: "http://127.0.0.1:4317".into(),
+            otel_sample_ratio: 1.0,
+            otel_exporter: "otlp".into(),
+            debug_op_ids: false,
+            worker_binary: None,
+        };
+        let db = sync_gateway::db::Db::connect(&config).await.expect("pool");
+        sync_gateway::db::migrations::run_migrations(&db)
+            .await
+            .expect("gateway migrations");
+    }
     let n: i64 = client
         .query_one(
             "SELECT COUNT(*)::bigint AS n FROM crdt_operations WHERE document_id = $1",
