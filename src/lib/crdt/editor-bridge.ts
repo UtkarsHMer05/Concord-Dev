@@ -23,6 +23,14 @@ import { blocksToPmDoc, pmDocToBlocks, type CanonicalBlock, type PmNode } from "
 import { reconcile, type ReconcileOp, type StreamEntryJson } from "./adapter";
 import type { CrdtClient } from "./worker/client";
 
+/**
+ * P7-M033: per-render-pass RPC budget (ms). A visibleJson on a converged
+ * replica is sub-millisecond native work; 5s covers pathological-but-alive
+ * workers (GC pause, cold JIT) while still recovering the pipeline within
+ * one fanout burst instead of freezing it for the whole session.
+ */
+const RENDER_RPC_TIMEOUT_MS = 5_000;
+
 export type BridgeState =
     | { mode: "idle" }
     | { mode: "crdt"; lastBlocks: CanonicalBlock[] }
@@ -80,6 +88,34 @@ export class CrdtEditorBridge {
     private renderRequested = false;
 
     constructor(private readonly init: BridgeInit) {}
+
+    /**
+     * P7-M033 render watchdog: bounds ONE render-pass RPC. On timeout the
+     * pass aborts (renderRemote's catch logs it; finally releases
+     * renderInFlight) so a never-settling worker RPC cannot wedge the
+     * coalescer for the rest of the session. The underlying RPC is NOT
+     * cancelled — its eventual resolution is simply ignored (the client
+     * resolves the pending map entry either way; a stale result is
+     * harmless because every render re-reads the worker's then-current
+     * state).
+     */
+    private withRenderTimeout<T>(rpc: Promise<T>): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                reject(new Error("render RPC timed out (watchdog)"));
+            }, RENDER_RPC_TIMEOUT_MS);
+            void rpc.then(
+                (value) => {
+                    clearTimeout(timer);
+                    resolve(value);
+                },
+                (error: unknown) => {
+                    clearTimeout(timer);
+                    reject(error instanceof Error ? error : new Error(String(error)));
+                },
+            );
+        });
+    }
 
     getState(): BridgeState {
         return this.state;
@@ -288,6 +324,19 @@ export class CrdtEditorBridge {
      *   - a render error is caught + logged; the NEXT batch (or a
      *     reconnect's catch-up) re-renders from the worker's then-current
      *     state. The render pipeline can no longer wedge.
+     *
+     * P7-M033 render WATCHDOG: the coalescer's blind spot was a visibleJson
+     * RPC that never SETTLES (neither resolves nor rejects — observed live
+     * on production: the first render of a burst succeeded, every later
+     * one was absorbed as renderRequested into a render whose in-flight
+     * RPC never returned; the worker replica kept converging but the
+     * editor DOM froze for the rest of the session; local typing still
+     * worked because onLocalTransaction runs on its own path). A watchdog
+     * bounds each render pass: if the RPC exceeds RENDER_RPC_TIMEOUT_MS,
+     * the pass is abandoned, renderInFlight is released, and the NEXT
+     * onRemoteApplied (or the trailing renderRequested flag) re-renders
+     * from the worker's then-current state. A slow render is retried, a
+     * dead one cannot wedge the pipeline.
      */
     async renderRemote(): Promise<void> {
         if (this.state.mode !== "crdt") {
@@ -303,7 +352,7 @@ export class CrdtEditorBridge {
             do {
                 this.renderRequested = false;
                 const blocks = CrdtEditorBridge.toCanonicalBlocks(
-                    await this.init.client.visibleJson(),
+                    await this.withRenderTimeout(this.init.client.visibleJson()),
                 );
                 if (this.state.mode !== "crdt") {
                     return; // degraded mid-render: stop rendering

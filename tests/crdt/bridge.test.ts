@@ -290,3 +290,59 @@ describe("renderRemote coalescing (P7-M024 staging regression)", () => {
         expect(editor.current).not.toBeNull();
     });
 });
+
+// ---------------------------------------------------------------------------
+// P7-M033: render watchdog (production fanout-render freeze regression).
+// ---------------------------------------------------------------------------
+
+describe("renderRemote watchdog (P7-M033 production regression)", () => {
+    it("a never-settling visibleJson cannot wedge the pipeline (watchdog recovers)", async () => {
+        const core = new CrdtWorkerCore({ documentId: "watchdog-doc", replicaId: 11n, loadFactory, persistence: new MemoryPersistence() });
+        await core.handle({ id: 1, kind: "init", documentId: "watchdog-doc", replicaId: "11" });
+        const delegate = new CoreBackedClient(core, "watchdog-doc");
+        // A client whose visibleJson HANGS on demand — models the
+        // never-settling worker RPC observed live on production (the
+        // coalescer absorbed every later render into one that never
+        // returned; the editor froze for the rest of the session).
+        let hangNext = false;
+        const hanging = {
+            init: (documentId: string, replicaId: bigint) => delegate.init(replicaId),
+            exportStream: () => delegate.exportStream(),
+            exportOps: () => delegate.exportOps(),
+            visibleJson: () => {
+                if (hangNext) {
+                    hangNext = false;
+                    return new Promise<string>(() => {
+                        // Never settles — the wedge.
+                    });
+                }
+                return delegate.visibleJson();
+            },
+        };
+        const editor = fakeEditor();
+        const bridge = new CrdtEditorBridge({
+            editor,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            client: hanging as any,
+            documentId: "watchdog-doc",
+            seedPmDoc: null,
+        });
+        const state = await bridge.start();
+        expect(state.mode).toBe("crdt");
+
+        // Arm the hang, then render: the watchdog must abort the pass and
+        // release the pipeline instead of absorbing later renders forever.
+        hangNext = true;
+        const wedgedRender = bridge.renderRemote();
+        // A second render arriving mid-wedge — under the old code this
+        // resolved only when the hung RPC did (i.e., never).
+        const trailingRender = bridge.renderRemote();
+        // Both must resolve (the watchdog aborts the hung pass; the
+        // trailing flag re-renders with a healthy RPC).
+        await expect(wedgedRender).resolves.toBeUndefined();
+        await expect(trailingRender).resolves.toBeUndefined();
+        // The pipeline is alive: a fresh render succeeds and converges.
+        await expect(bridge.renderRemote()).resolves.toBeUndefined();
+        expect(editor.current).not.toBeNull();
+    }, 30_000);
+});
