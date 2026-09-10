@@ -35,10 +35,16 @@ export class CrdtClient {
             throw { code: "InvalidArgument", message: "client terminated" } as CrdtWorkerError;
         }
         if (this.worker === null) {
-            this.worker = new Worker(
-                new URL("./crdt-worker.ts", import.meta.url),
-                { type: "module" },
-            );
+            // P7-M032: the bundler compiles the worker specifier to a
+            // RELATIVE "static/chunks/…" string. Resolved against the PAGE
+            // URL it breaks on nested routes (/documents/<id> — the worker
+            // 404s as …/documents/static/chunks/…, observed live on the
+            // production doc route; the root-route staging checks masked
+            // it). Rebase the bundler-resolved URL to the ORIGIN ROOT:
+            // same asset, always absolute regardless of route depth.
+            const resolved = new URL("./crdt-worker.ts", import.meta.url);
+            const workerUrl = new URL(resolved.pathname + resolved.search, window.location.origin);
+            this.worker = new Worker(workerUrl, { type: "module" });
             this.worker.onmessage = (event: MessageEvent<WorkerResponse | WorkerNotification>) => {
                 const response = event.data;
                 // Push notification (no correlation id): fan out to the
