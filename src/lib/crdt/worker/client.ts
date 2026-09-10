@@ -35,15 +35,16 @@ export class CrdtClient {
             throw { code: "InvalidArgument", message: "client terminated" } as CrdtWorkerError;
         }
         if (this.worker === null) {
-            // P7-M032: the worker is a PRE-BUNDLED static ES module
-            // (public/crdt-worker.js, built by `npm run worker:bundle`
-            // from src/lib/crdt/worker/crdt-worker.ts) served at the origin
-            // root. An absolute URL is bundler-runtime-free: no Turbopack
-            // worker chunking (whose otherChunks resolution 404s inside the
-            // worker context on nested routes — the production failure),
-            // no page-relative base, correct on every route. The bundled
-            // file is byte-stable per commit (pinned by the image build).
-            this.worker = new Worker("/crdt-worker.js", { type: "module" });
+            // P7-M032: the worker is a PRE-BUNDLED static CLASSIC worker
+            // (public/crdt-worker.js — `npm run worker:bundle`, IIFE)
+            // served at the origin root. Absolute URL: no bundler worker
+            // chunking (whose otherChunks resolution 404s inside the
+            // worker on nested routes), no page-relative base. CLASSIC
+            // (not module) type: module workers proved unreliable in the
+            // embedded-WebView browser used for E2E (silently dropping
+            // all messages; identical code as classic responds —
+            // control-verified locally AND on production).
+            this.worker = new Worker("/crdt-worker.js");
             this.worker.onmessage = (event: MessageEvent<WorkerResponse | WorkerNotification>) => {
                 const response = event.data;
                 // Push notification (no correlation id): fan out to the

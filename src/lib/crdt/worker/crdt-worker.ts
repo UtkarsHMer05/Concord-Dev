@@ -10,32 +10,32 @@ import type { WorkerRequest, WorkerResponse, WorkerNotification } from "./protoc
 interface WorkerGlobal {
     onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
     postMessage(message: WorkerResponse | WorkerNotification): void;
+    importScripts(url: string): void;
+    /** Set by the Emscripten glue's UMD global when loaded via importScripts. */
+    loadConcordCrdt?: (options?: Record<string, unknown>) => Promise<ConcordModule>;
 }
 declare const self: WorkerGlobal;
 
 async function loadFactory(): Promise<ConcordModule> {
-    // The generated glue is a static public asset (staged by wasm:build),
-    // loaded via DYNAMIC IMPORT: the glue is a UMD module whose default
-    // export is the loadConcordCrdt factory. P7-M032: the previous form
-    // fetched the source as text and evaluated it with `new Function(...)`
-    // — blocked by the production CSP (script-src without 'unsafe-eval';
-    // observed live on the production origin: "Evaluating a string as
-    // JavaScript violates … 'unsafe-eval' is not an allowed source").
-    // Dynamic import of a same-origin script is CSP-clean (script-src
-    // 'self') and removes the worker's 'unsafe-eval' dependency in every
-    // browser. The absolute URL also keeps the bundler from following the
-    // generated file into the app bundle.
-    // Dynamic import of the staged asset. The specifier is a RUNTIME
-    // VARIABLE and carries turbopackIgnore (Next 16's supported escape —
-    // next/dist itself uses the same comment): the bundler must NOT
-    // statically resolve, rewrite, or bundle-follow the runtime URL.
-    // (Turbopack rewrote a literal-URL import into a broken call —
-    // "e is not a function", observed live on the production build.)
-    const glueUrl = "/wasm/concord-crdt.js";
-    const imported = (await import(/* turbopackIgnore: true */ glueUrl)) as {
-        default: (options?: Record<string, unknown>) => Promise<ConcordModule>;
-    };
-    const factory = imported.default;
+    // The generated glue is a static public asset (staged by wasm:build).
+    // Loaded via importScripts() — the CLASSIC worker loader. This worker
+    // is shipped pre-bundled as a CLASSIC worker (public/crdt-worker.js,
+    // `npm run worker:bundle`, IIFE format) because module workers proved
+    // unreliable in the embedded-WebView browser used for E2E (silently
+    // dropping every message; the identical code as a classic worker
+    // responds — control-verified), while importScripts is the classic
+    // standard. Loading history (all observed live on production):
+    //   1. new Function(source) — CSP-blocked (no 'unsafe-eval').
+    //   2. dynamic import() — UMD glue has no ESM export → .default
+    //      undefined; adding the ESM tail worked only where module workers
+    //      themselves worked.
+    //   3. importScripts — CSP-clean (script-src 'self'), classic-worker
+    //      native, sets the UMD global `loadConcordCrdt`.
+    self.importScripts("/wasm/concord-crdt.js");
+    const factory = self.loadConcordCrdt;
+    if (typeof factory !== "function") {
+        throw new Error("wasm glue did not define loadConcordCrdt after importScripts");
+    }
     const binaryResponse = await fetch("/wasm/concord-crdt.wasm");
     if (!binaryResponse.ok) {
         throw new Error(`wasm binary fetch failed: ${binaryResponse.status}`);

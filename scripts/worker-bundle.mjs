@@ -11,8 +11,12 @@
 // every route in every deployment.
 //
 // esbuild resolves the relative ./idb / ./core / ./protocol imports and
-// inlines them; the worker itself loads the WASM glue + binary from /wasm/
-// at RUNTIME (absolute URLs, CSP-clean dynamic import — see crdt-worker.ts).
+// inlines them; the worker itself loads the WASM glue via importScripts()
+// and the binary via fetch() from /wasm/ at RUNTIME (absolute same-origin
+// URLs, CSP-clean). CLASSIC worker format: module workers proved
+// unreliable in the embedded-WebView browser used for E2E (silently
+// dropping all messages; classic workers verified working), and
+// importScripts is the classic-worker standard loader.
 // The zod schema in protocol.ts must NOT be bundled (it is server-side
 // validation of the SAME wire shapes) — protocol.ts imports nothing
 // zod-side for the worker surface; verify with the type import.
@@ -25,7 +29,7 @@ const root = process.cwd();
 const result = await build({
   entryPoints: [path.join(root, "src/lib/crdt/worker/crdt-worker.ts")],
   bundle: true,
-  format: "esm",
+  format: "iife",
   target: "es2022",
   outfile: path.join(root, "public/crdt-worker.js"),
   minify: true,
