@@ -25,14 +25,14 @@ async function loadFactory(): Promise<ConcordModule> {
     // 'self') and removes the worker's 'unsafe-eval' dependency in every
     // browser. The absolute URL also keeps the bundler from following the
     // generated file into the app bundle.
-    // Dynamic import of the staged asset; the absolute URL is
-    // runtime-resolved (not a bundler-resolved module path), so typecheck
-    // cannot see a declaration for it.
-    const imported = (await import(
-        /* webpackIgnore: true */
-        // @ts-expect-error runtime URL import of a static public asset
-        "/wasm/concord-crdt.js"
-    )) as {
+    // Dynamic import of the staged asset. The specifier is a RUNTIME
+    // VARIABLE and carries turbopackIgnore (Next 16's supported escape —
+    // next/dist itself uses the same comment): the bundler must NOT
+    // statically resolve, rewrite, or bundle-follow the runtime URL.
+    // (Turbopack rewrote a literal-URL import into a broken call —
+    // "e is not a function", observed live on the production build.)
+    const glueUrl = "/wasm/concord-crdt.js";
+    const imported = (await import(/* turbopackIgnore: true */ glueUrl)) as {
         default: (options?: Record<string, unknown>) => Promise<ConcordModule>;
     };
     const factory = imported.default;
