@@ -60,11 +60,13 @@ chmod 600 "${WORK}/concord.env"
 cd "${WORK}"
 
 # ECR login through the instance profile (the bundle's images are
-# private-repo refs; docker needs registry credentials to pull). The
-# account id is resolved from the instance identity document — never
-# rendered into user-data.
-ACCOUNT_ID=$(curl -s http://169.254.169.254/latest/meta-data/identity/document \
-  | grep -o '"accountId"[^,]*' | cut -d'"' -f4)
+# private-repo refs; docker needs registry credentials to pull). Account
+# id via STS — the instance-identity JSON parse previously used here was
+# quoting-fragile and silently produced an empty host ("no such host",
+# observed on staging AND production first boot; the completed staging
+# deployment was finished manually via SSM before the root cause was
+# isolated). STS caller-identity via the instance profile is robust.
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR_HOST="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "https://${ECR_HOST}"
