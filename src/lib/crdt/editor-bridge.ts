@@ -183,14 +183,21 @@ export class CrdtEditorBridge {
             this.init.onStatusChange?.(this.state);
         } catch (error) {
             // Surface worker/persistence failures honestly (fallback). The
-            // reason is logged for diagnosis; it never contains secrets.
-            console.error(
-                "[concord-crdt] bridge start failed:",
-                error instanceof Error ? error.message : error,
-            );
+            // worker RPC rejects with STRUCTURED errors ({code, message} —
+            // CrdtWorkerError), not Error instances; stringify both shapes
+            // (P7-M032: an [object Object] log hid a CSP failure for hours).
+            // The reason never contains secrets.
+            const describe = (e: unknown): string => {
+                if (e instanceof Error) return e.message;
+                if (typeof e === "object" && e !== null && "message" in e) {
+                    return String((e as { message: unknown }).message);
+                }
+                return String(e);
+            };
+            console.error("[concord-crdt] bridge start failed:", describe(error));
             this.state = {
                 mode: "fallback",
-                reason: error instanceof Error ? error.message : "worker init failed",
+                reason: describe(error) || "worker init failed",
             };
             this.init.onStatusChange?.(this.state);
         }

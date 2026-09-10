@@ -15,21 +15,27 @@ declare const self: WorkerGlobal;
 
 async function loadFactory(): Promise<ConcordModule> {
     // The generated glue is a static public asset (staged by wasm:build),
-    // fetched as text and evaluated inside the worker: dynamic import of an
-    // absolute URL is disallowed inside module workers in some engines, and
-    // the bundler must not follow the generated file. The factory's
-    // instantiateWasm hook instantiates the binary fetched from /wasm/.
-    const response = await fetch("/wasm/concord-crdt.js");
-    if (!response.ok) {
-        throw new Error(`wasm glue fetch failed: ${response.status}`);
-    }
-    const source = await response.text();
-    const evaluate = new Function(
-        `${source}\n; return loadConcordCrdt;`,
-    ) as () => (
-        options?: Record<string, unknown>,
-    ) => Promise<ConcordModule>;
-    const factory = evaluate();
+    // loaded via DYNAMIC IMPORT: the glue is a UMD module whose default
+    // export is the loadConcordCrdt factory. P7-M032: the previous form
+    // fetched the source as text and evaluated it with `new Function(...)`
+    // — blocked by the production CSP (script-src without 'unsafe-eval';
+    // observed live on the production origin: "Evaluating a string as
+    // JavaScript violates … 'unsafe-eval' is not an allowed source").
+    // Dynamic import of a same-origin script is CSP-clean (script-src
+    // 'self') and removes the worker's 'unsafe-eval' dependency in every
+    // browser. The absolute URL also keeps the bundler from following the
+    // generated file into the app bundle.
+    // Dynamic import of the staged asset; the absolute URL is
+    // runtime-resolved (not a bundler-resolved module path), so typecheck
+    // cannot see a declaration for it.
+    const imported = (await import(
+        /* webpackIgnore: true */
+        // @ts-expect-error runtime URL import of a static public asset
+        "/wasm/concord-crdt.js"
+    )) as {
+        default: (options?: Record<string, unknown>) => Promise<ConcordModule>;
+    };
+    const factory = imported.default;
     const binaryResponse = await fetch("/wasm/concord-crdt.wasm");
     if (!binaryResponse.ok) {
         throw new Error(`wasm binary fetch failed: ${binaryResponse.status}`);
