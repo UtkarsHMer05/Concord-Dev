@@ -48,14 +48,21 @@ jobs:
       - name: Start NATS JetStream
         run: |
           docker run -d --name nats-js -p 4222:4222 -p 8222:8222 nats:2.11.6-alpine -js -sd /data -m 8222
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -sf http://127.0.0.1:8222/healthz >/dev/null; then echo "nats healthy"; exit 0; fi
             sleep 2
           done
           echo "nats did not become healthy"; exit 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - name: Create test database
         run: |
-          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test" || true
+          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test"
+      - name: Apply application migrations before gateway migrations
+        run: node scripts/db/migrate.mjs "$GATEWAY_DATABASE_URL"
       - name: fmt + clippy + unit
         run: |
           cargo fmt --all --check
@@ -72,6 +79,8 @@ jobs:
           cargo test --test broker_integration -- --test-threads=1
           cargo test --test redis_integration -- --test-threads=1
         working-directory: rust
+      - name: Generate disposable E2E keys
+        run: node scripts/ci/generate-e2e-keys.mjs
       - name: Multi-gateway E2E (cross-gateway, faults, drain)
         run: |
           cargo build --release
@@ -87,6 +96,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - uses: ./.github/actions/build-wasm
       - name: Typecheck + lint + unit (protocol parity + sync layer)
         run: |
           npm run typecheck

@@ -105,17 +105,13 @@ fn take_matching(pred: impl Fn(&str) -> bool) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 fn encoding_key(der: &[u8]) -> EncodingKey {
-    use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey};
-    let key: rsa::RsaPrivateKey = DecodePrivateKey::from_pkcs8_der(der).expect("key parses");
-    let pem = key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).expect("pem");
-    EncodingKey::from_rsa_pem(pem.as_str().as_bytes()).expect("encoding key")
+    let key = pkcs8::PrivateKeyInfo::try_from(der).expect("PKCS8 test key");
+    EncodingKey::from_rsa_der(key.private_key)
 }
 
 fn test_jwks() -> JwkSet {
-    use rsa::pkcs8::DecodePrivateKey;
-    use rsa::traits::PublicKeyParts;
-    let key: rsa::RsaPrivateKey = DecodePrivateKey::from_pkcs8_der(KEY).expect("key1");
-    let public = key.to_public_key();
+    let key = pkcs8::PrivateKeyInfo::try_from(KEY).expect("PKCS8 test key");
+    let public = pkcs1::RsaPrivateKey::try_from(key.private_key).expect("RSA test key");
     fn b64u(bytes: &[u8]) -> String {
         const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         let mut s = String::new();
@@ -140,8 +136,8 @@ fn test_jwks() -> JwkSet {
         }
         s.trim_end_matches('=').to_owned()
     }
-    let n = public.n().to_bytes_be();
-    let e = public.e().to_bytes_be();
+    let n = public.modulus.as_bytes();
+    let e = public.public_exponent.as_bytes();
     JwkSet {
         keys: vec![Jwk {
             common: CommonParameters {
@@ -151,8 +147,8 @@ fn test_jwks() -> JwkSet {
             },
             algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
                 key_type: RSAKeyType::RSA,
-                n: b64u(&n),
-                e: b64u(&e),
+                n: b64u(n),
+                e: b64u(e),
             }),
         }],
     }

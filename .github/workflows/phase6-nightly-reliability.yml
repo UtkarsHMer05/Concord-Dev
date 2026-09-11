@@ -148,8 +148,9 @@ jobs:
               fuzz_recovery_stream) CORPUS_DIR=cpp/crdt/fuzz/corpus/recovery ;;
               *) CORPUS_DIR=cpp/crdt/fuzz/corpus/ops ;;
             esac
-            echo "== $target: $RUNS runs over $(ls "$CORPUS_DIR" | wc -l | tr -d ' ') corpus seed(s) =="
-            "./build/fuzz/crdt/$target" "$CORPUS_DIR"/* "$RUNS"
+            CORPUS_FILES=("$CORPUS_DIR"/*)
+            echo "== $target: $RUNS runs over ${#CORPUS_FILES[@]} corpus seed(s) =="
+            "./build/fuzz/crdt/fuzz/$target" "$CORPUS_DIR"/* "$RUNS"
           done
       - name: Randomized convergence campaign, extended tier (Release tree)
         run: scripts/native/campaign.sh extended
@@ -198,6 +199,11 @@ jobs:
         with:
           workspaces: rust
       - uses: lukka/get-cmake@latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       # concord-worker binary at build/native/worker/concord-worker is
       # required by the chaos_worker suite (it probes both candidate paths).
       - name: Build native worker (Release) for chaos_worker
@@ -208,33 +214,18 @@ jobs:
       # workflow): throwaway RSA pair, kid e2e-key-1, at the git-ignored
       # scratch path the chaos suites read.
       - name: Generate CI E2E JWKS + key material
-        run: |
-          node - <<'EOF'
-          const { generateKeyPairSync, createPrivateKey } = require("crypto");
-          const { writeFileSync, mkdirSync } = require("fs");
-          const dir = ".agent/scratch/phase-3";
-          mkdirSync(dir, { recursive: true });
-          const pair = generateKeyPairSync("rsa", {
-            modulusLength: 2048,
-            publicKeyEncoding: { type: "spki", format: "jwk" },
-            privateKeyEncoding: { type: "pkcs8", format: "jwk" },
-          });
-          writeFileSync(`${dir}/e2e-jwks.json`, JSON.stringify({
-            keys: [{ kty: "RSA", kid: "e2e-key-1", alg: "RS256", use: "sig",
-                     n: pair.publicKey.n, e: pair.publicKey.e }],
-          }, null, 2));
-          const pem = createPrivateKey({ key: pair.privateKey, format: "jwk" })
-            .export({ format: "pem", type: "pkcs8" });
-          writeFileSync(`${dir}/e2e-key.der`,
-            Buffer.from(pem.replace(/-----(BEGIN|END) PRIVATE KEY-----|\s+/g, ""), "base64"));
-          console.log("CI E2E key material written (throwaway pair)");
-          EOF
+        run: node scripts/ci/generate-e2e-keys.mjs
       # Always-run teardown FIRST as a registered step so a dirty state
       # from an aborted prior attempt on this runner can't leak in.
       - name: Pre-clean any stray compose project
         run: |
           docker compose down -v --remove-orphans 2>/dev/null || true
           pkill -9 -f 'target/release/sync-gateway' 2>/dev/null || true
+      - name: Prepare a fresh database for the chaos suites
+        run: |
+          docker compose up -d --wait db nats redis
+          # scripts/db/init creates concord_test on the fresh compose volume.
+          node scripts/db/migrate.mjs "$GATEWAY_DATABASE_URL"
       - name: Run chaos suite (all scenarios, serialized internally)
         run: scripts/chaos/run-suite.sh all
       # Scenario records land under .agent/bench/runs/<runId>-chaos/ —

@@ -1050,10 +1050,11 @@ async function installSnapshot(
   const stdinBuf: number[] = [];
   putU32(stdinBuf, frame.length);
   stdinBuf.push(...frame);
-  const result = await new Promise<{ stdout: Buffer[]; code: number }>((resolve) => {
+  const result = await new Promise<{ stdout: Buffer[]; code: number }>((resolve, reject) => {
     const child = spawnProc(workerBin, []);
     const chunks: Buffer[] = [];
     child.stdout.on("data", (d) => chunks.push(d));
+    child.on("error", reject);
     child.on("close", (code) => resolve({ stdout: chunks, code: code ?? -1 }));
     child.stdin.end(Buffer.from(stdinBuf));
   });

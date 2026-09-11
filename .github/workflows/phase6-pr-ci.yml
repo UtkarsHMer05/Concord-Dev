@@ -67,6 +67,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - uses: ./.github/actions/build-wasm
       - name: Typecheck + lint + unit tests (incl. TS protocol golden parity)
         run: |
           npm run typecheck
@@ -77,8 +78,7 @@ jobs:
         # provider (same convention as docker/web.Dockerfile's dummy vars).
         run: npm run build
         env:
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_dummy_ci_placeholder
-          CLERK_SECRET_KEY: sk_test_dummy_ci_placeholder
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2ktcGxhY2Vob2xkZXIuY2xlcmsuYWNjb3VudHMuZGV2JA
 
   rust:
     runs-on: ubuntu-latest
@@ -115,7 +115,7 @@ jobs:
       - run: npm ci
       - name: Create the test database
         run: |
-          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test" || true
+          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test"
       # TWO independent migration systems (documented in
       # rust/.../db/migrations.rs): drizzle owns the Phase 1 app tables
       # (users/documents/organizations/ACLs); the Rust gateway owns
@@ -171,14 +171,7 @@ jobs:
       - run: npm ci
       # Emscripten via emsdk directly on the runner — same pattern as
       # phase2-core.yml (proven; no container needed).
-      - name: WASM build (emscripten)
-        run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git /tmp/emsdk
-          /tmp/emsdk/emsdk install latest
-          /tmp/emsdk/emsdk activate latest
-          source /tmp/emsdk/emsdk_env.sh
-          npm run wasm:build
-          node wasm/smoke.mjs
+      - uses: ./.github/actions/build-wasm
       - name: CRDT parity/runtime tests against the built module
         run: npx vitest run tests/crdt
 

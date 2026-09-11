@@ -847,10 +847,11 @@ describe("stale-client snapshot resync through the real gateway (P5-M031)", () =
       putU32(stdinBuf, frame.length);
       stdinBuf.push(...frame);
       const stdin = Buffer.from(stdinBuf);
-      const result = await new Promise<{ stdout: Buffer[]; code: number }>((resolve) => {
+      const result = await new Promise<{ stdout: Buffer[]; code: number }>((resolve, reject) => {
         const child = spawn(workerBin, []);
         const chunks: Buffer[] = [];
         child.stdout.on("data", (d) => chunks.push(d));
+        child.on("error", reject);
         child.on("close", (code) => resolve({ stdout: chunks, code: code ?? -1 }));
         child.stdin.end(stdin);
       });

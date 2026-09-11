@@ -318,18 +318,12 @@ mod tests {
         azp: String,
     }
 
-    /// Generate an RSA keypair via the `rsa` crate is heavy; instead use a
-    /// fixed 2048-bit test key encoded as DER PKCS8, used only in tests.
-    /// Load a test signing key from its PKCS#8 DER file as a jsonwebtoken
-    /// EncodingKey (PKCS8 PEM form is what jsonwebtoken expects for RSA).
+    /// Parse the fixed test fixture as PKCS#8 and pass its inner PKCS#1
+    /// bytes to jsonwebtoken. Signing uses the same AWS-LC backend as the
+    /// gateway; no separate RSA implementation is needed for test keys.
     fn test_encoding_key_from(der: &[u8]) -> EncodingKey {
-        use rsa::pkcs8::EncodePrivateKey;
-        let key: rsa::RsaPrivateKey =
-            rsa::pkcs8::DecodePrivateKey::from_pkcs8_der(der).expect("test key parses");
-        let pem = key
-            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-            .expect("pem encode");
-        EncodingKey::from_rsa_pem(pem.as_str().as_bytes()).expect("test key is valid")
+        let key = pkcs8::PrivateKeyInfo::try_from(der).expect("PKCS8 test key");
+        EncodingKey::from_rsa_der(key.private_key)
     }
 
     fn test_encoding_key() -> EncodingKey {
@@ -337,9 +331,8 @@ mod tests {
     }
 
     fn jwks_with_kid(kid: &str, der: &[u8]) -> JwkSet {
-        let key: rsa::RsaPrivateKey =
-            rsa::pkcs8::DecodePrivateKey::from_pkcs8_der(der).expect("test key parses");
-        let public = key.to_public_key();
+        let key = pkcs8::PrivateKeyInfo::try_from(der).expect("PKCS8 test key");
+        let public = pkcs1::RsaPrivateKey::try_from(key.private_key).expect("RSA test key");
         // JWK needs base64url-encoded modulus/exponent without padding.
         fn b64u(bytes: &[u8]) -> String {
             const CHARS: &[u8] =
@@ -366,9 +359,8 @@ mod tests {
             }
             s.trim_end_matches('=').to_owned()
         }
-        use rsa::traits::PublicKeyParts;
-        let n = public.n().to_bytes_be();
-        let e = public.e().to_bytes_be();
+        let n = public.modulus.as_bytes();
+        let e = public.public_exponent.as_bytes();
         let jwk = Jwk {
             common: CommonParameters {
                 key_id: Some(kid.to_owned()),
@@ -377,8 +369,8 @@ mod tests {
             },
             algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
                 key_type: jsonwebtoken::jwk::RSAKeyType::RSA,
-                n: b64u(&n),
-                e: b64u(&e),
+                n: b64u(n),
+                e: b64u(e),
             }),
         };
         JwkSet { keys: vec![jwk] }

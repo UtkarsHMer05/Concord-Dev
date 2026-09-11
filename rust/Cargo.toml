@@ -24,7 +24,8 @@ hex = "0.4"
 thiserror = "2"
 futures-util = "0.3"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake"] }
-rsa = "0.9"
+pkcs1 = "0.7"
+pkcs8 = "0.10"
 async-nats = "0.50"
 redis = { version = "1.7", default-features = false, features = ["tokio-comp", "connection-manager"] }
 # Phase 6 observability (P6-M009): OpenTelemetry + OTLP exporter +

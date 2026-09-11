@@ -41,9 +41,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - name: Create the test database
         run: |
-          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test" || true
+          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test"
+      - name: Apply application migrations before gateway migrations
+        run: node scripts/db/migrate.mjs "$GATEWAY_DATABASE_URL"
       - name: Native worker build + core/worker suites (P5 gate layer 1)
         run: |
           cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -115,6 +122,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - uses: ./.github/actions/build-wasm
       - name: Typecheck + unit (incl. client snapshot-resync suite)
         run: |
           npm run typecheck

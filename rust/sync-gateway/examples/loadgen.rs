@@ -38,20 +38,17 @@ const KID: &str = "e2e-key-1";
 const KEY_DER: &[u8] = include_bytes!("../src/auth/test_rsa_key.der");
 
 fn encoding_key() -> EncodingKey {
-    use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey};
-    let key: rsa::RsaPrivateKey = DecodePrivateKey::from_pkcs8_der(KEY_DER).expect("key");
-    let pem = key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).expect("pem");
-    EncodingKey::from_rsa_pem(pem.as_str().as_bytes()).expect("enc")
+    let der = KEY_DER;
+    let key = pkcs8::PrivateKeyInfo::try_from(der).expect("PKCS8 test key");
+    EncodingKey::from_rsa_der(key.private_key)
 }
 
 fn jwks() -> jsonwebtoken::jwk::JwkSet {
     use jsonwebtoken::jwk::{
         AlgorithmParameters, CommonParameters, Jwk, KeyAlgorithm, RSAKeyParameters, RSAKeyType,
     };
-    use rsa::pkcs8::DecodePrivateKey;
-    use rsa::traits::PublicKeyParts;
-    let key: rsa::RsaPrivateKey = DecodePrivateKey::from_pkcs8_der(KEY_DER).expect("key");
-    let public = key.to_public_key();
+    let key = pkcs8::PrivateKeyInfo::try_from(KEY_DER).expect("PKCS8 test key");
+    let public = pkcs1::RsaPrivateKey::try_from(key.private_key).expect("RSA test key");
     fn b64u(bytes: &[u8]) -> String {
         const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         let mut s = String::new();
@@ -76,8 +73,8 @@ fn jwks() -> jsonwebtoken::jwk::JwkSet {
         }
         s.trim_end_matches('=').to_owned()
     }
-    let n = public.n().to_bytes_be();
-    let e = public.e().to_bytes_be();
+    let n = public.modulus.as_bytes();
+    let e = public.public_exponent.as_bytes();
     jsonwebtoken::jwk::JwkSet {
         keys: vec![Jwk {
             common: CommonParameters {
@@ -87,8 +84,8 @@ fn jwks() -> jsonwebtoken::jwk::JwkSet {
             },
             algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
                 key_type: RSAKeyType::RSA,
-                n: b64u(&n),
-                e: b64u(&e),
+                n: b64u(n),
+                e: b64u(e),
             }),
         }],
     }

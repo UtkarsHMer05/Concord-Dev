@@ -1,0 +1,16 @@
+name: Build CRDT WASM
+description: Build the generated module before any web or realtime suite imports it.
+runs:
+  using: composite
+  steps:
+    - uses: lukka/get-cmake@latest
+    - name: Install Emscripten and build WASM
+      shell: bash
+      run: |
+        git clone --depth 1 --branch 6.0.9 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+        "$RUNNER_TEMP/emsdk/emsdk" install 6.0.9
+        "$RUNNER_TEMP/emsdk/emsdk" activate 6.0.9
+        source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+        npm run wasm:build
+        npm run worker:bundle
+        npm run wasm:smoke

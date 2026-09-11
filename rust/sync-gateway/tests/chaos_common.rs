@@ -363,13 +363,9 @@ pub fn kill_stray_gateways() {
 
 pub fn sign_token(sub: &str) -> String {
     use jsonwebtoken::{encode, EncodingKey, Header};
-    use rsa::pkcs8::EncodePrivateKey;
-    let key: rsa::RsaPrivateKey = rsa::pkcs8::DecodePrivateKey::from_pkcs8_der(
-        &std::fs::read(repo_path(KEY_DER_REL)).expect("key file"),
-    )
-    .expect("key");
-    let pem = key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).expect("pem");
-    let enc = EncodingKey::from_rsa_pem(pem.as_str().as_bytes()).expect("enc");
+    let der = &std::fs::read(repo_path(KEY_DER_REL)).expect("key file");
+    let key = pkcs8::PrivateKeyInfo::try_from(der.as_slice()).expect("PKCS8 test key");
+    let enc = EncodingKey::from_rsa_der(key.private_key);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

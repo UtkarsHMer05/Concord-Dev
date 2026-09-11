@@ -54,17 +54,14 @@ const KEY: &[u8] = include_bytes!("../src/auth/test_rsa_key.der");
 // ---------------------------------------------------------------------------
 
 fn encoding_key() -> EncodingKey {
-    use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey};
-    let key: rsa::RsaPrivateKey = DecodePrivateKey::from_pkcs8_der(KEY).expect("key");
-    let pem = key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).expect("pem");
-    EncodingKey::from_rsa_pem(pem.as_str().as_bytes()).expect("enc")
+    let der = KEY;
+    let key = pkcs8::PrivateKeyInfo::try_from(der).expect("PKCS8 test key");
+    EncodingKey::from_rsa_der(key.private_key)
 }
 
 fn test_jwks() -> JwkSet {
-    use rsa::pkcs8::DecodePrivateKey;
-    use rsa::traits::PublicKeyParts;
-    let key: rsa::RsaPrivateKey = DecodePrivateKey::from_pkcs8_der(KEY).expect("key1");
-    let public = key.to_public_key();
+    let key = pkcs8::PrivateKeyInfo::try_from(KEY).expect("PKCS8 test key");
+    let public = pkcs1::RsaPrivateKey::try_from(key.private_key).expect("RSA test key");
     // URL-safe base64 WITHOUT padding (JWK n/e encoding) — the same
     // encoder as ws_integration's harness.
     fn b64u(bytes: &[u8]) -> String {
@@ -91,8 +88,8 @@ fn test_jwks() -> JwkSet {
         }
         s.trim_end_matches('=').to_owned()
     }
-    let n = public.n().to_bytes_be();
-    let e = public.e().to_bytes_be();
+    let n = public.modulus.as_bytes();
+    let e = public.public_exponent.as_bytes();
     JwkSet {
         keys: vec![Jwk {
             common: CommonParameters {
@@ -102,8 +99,8 @@ fn test_jwks() -> JwkSet {
             },
             algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
                 key_type: RSAKeyType::RSA,
-                n: b64u(&n),
-                e: b64u(&e),
+                n: b64u(n),
+                e: b64u(e),
             }),
         }],
     }

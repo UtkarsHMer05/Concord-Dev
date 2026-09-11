@@ -110,8 +110,13 @@ jobs:
           echo "nats did not become healthy"; exit 1
       - name: Create the test database
         run: |
-          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test" || true
+          docker exec ${{ job.services.postgres.id }} psql -U concord -d concord -c "CREATE DATABASE concord_test"
       - run: npm ci
+      - uses: ./.github/actions/build-wasm
+      - name: Build native worker for snapshot/resync E2E
+        run: |
+          cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native --target concord-worker
       # TWO migration families (rust/.../db/migrations.rs doc): drizzle
       # owns Phase 1 app tables (users/documents/ACLs — the Rust suites
       # seed these via SQL, the gateway binary's run_migrations does NOT
@@ -136,29 +141,9 @@ jobs:
       # scanner's placeholder guard sees no key material in the repo) and
       # writes both files at the exact paths the suites expect. Node's
       # crypto exports PKCS8 DER, matching what createPrivateKey and the
-      # Rust rsa::pkcs8 DecodePrivateKey::from_pkcs8_der consume.
+      # Rust PKCS#8 fixture parser consume.
       - name: Generate CI E2E JWKS + key material
-        run: |
-          node - <<'EOF'
-          const { generateKeyPairSync, createPrivateKey } = require("crypto");
-          const { writeFileSync, mkdirSync } = require("fs");
-          const dir = ".agent/scratch/phase-3";
-          mkdirSync(dir, { recursive: true });
-          const pair = generateKeyPairSync("rsa", {
-            modulusLength: 2048,
-            publicKeyEncoding: { type: "spki", format: "jwk" },
-            privateKeyEncoding: { type: "pkcs8", format: "jwk" },
-          });
-          writeFileSync(`${dir}/e2e-jwks.json`, JSON.stringify({
-            keys: [{ kty: "RSA", kid: "e2e-key-1", alg: "RS256", use: "sig",
-                     n: pair.publicKey.n, e: pair.publicKey.e }],
-          }, null, 2));
-          const pem = createPrivateKey({ key: pair.privateKey, format: "jwk" })
-            .export({ format: "pem", type: "pkcs8" });
-          writeFileSync(`${dir}/e2e-key.der`,
-            Buffer.from(pem.replace(/-----(BEGIN|END) PRIVATE KEY-----|\s+/g, ""), "base64"));
-          console.log("CI E2E key material written (throwaway pair, kid e2e-key-1)");
-          EOF
+        run: node scripts/ci/generate-e2e-keys.mjs
       # --- SEQUENTIAL Rust DB suites (--test-threads=1; shared concord_test) ---
       - name: DB integration tests (migrations run inside the suite)
         run: cargo test --test db_integration -- --test-threads=1

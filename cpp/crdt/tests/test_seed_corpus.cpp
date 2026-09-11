@@ -487,7 +487,7 @@ bool scenario_mixed_fault_storm(std::uint32_t seed, std::size_t replicas) {
     for (int round = 0; round < 8; ++round) {
         for (std::size_t r = 0; r < docs.size(); ++r) {
             Doc& doc = docs[r];
-            const std::uint32_t choice = rng() % 10;
+            const auto choice = rng() % 10;
             Operation op = [&]() -> Operation {
                 // An empty stream admits only inserts (deletes/marks would
                 // throw out-of-range — round 0 on unseeded replicas).
