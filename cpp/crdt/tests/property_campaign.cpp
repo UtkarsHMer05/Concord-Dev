@@ -198,11 +198,11 @@ CampaignResult run_campaign(const CampaignConfig& config) {
                 ++generated;
                 continue;
             }
-            const std::uint32_t choice = rng() % 10;
+            const auto choice = rng() % 10;
             if (choice < 6) {
                 // Insert: hot position with probability conflict_prob.
                 std::size_t position;
-                if ((rng() % 1000) / 1000.0 < config.conflict_prob) {
+                if (static_cast<double>(rng() % 1000) / 1000.0 < config.conflict_prob) {
                     position = hot[author] + (rng() % 3);
                 } else {
                     position = rng() % (doc.stream_size() + 1);
@@ -212,7 +212,7 @@ CampaignResult run_campaign(const CampaignConfig& config) {
                 enqueue(author, doc.local_insert_text(position, U'a' + static_cast<char32_t>(rng() % 26)), 'I');
             } else if (choice < 8) {
                 std::size_t position;
-                if ((rng() % 1000) / 1000.0 < config.conflict_prob) {
+                if (static_cast<double>(rng() % 1000) / 1000.0 < config.conflict_prob) {
                     position = hot[author];
                 } else {
                     position = rng() % doc.stream_size();
@@ -246,7 +246,7 @@ CampaignResult run_campaign(const CampaignConfig& config) {
         // Partition toggling: start a partition with probability
         // fault_prob/3 per burst; heal after 2 bursts.
         if (partition_ticks == 0) {
-            if ((rng() % 1000) / 1000.0 < config.fault_prob / 3.0) {
+            if (static_cast<double>(rng() % 1000) / 1000.0 < config.fault_prob / 3.0) {
                 const std::size_t pivot = 1 + rng() % (docs.size() - 1);
                 for (std::size_t i = 0; i < docs.size(); ++i) {
                     group[i] = i < pivot ? 0u : 1u;
@@ -269,7 +269,7 @@ CampaignResult run_campaign(const CampaignConfig& config) {
         //          explicit shuffled pass below.
         for (std::size_t m = 0; m < in_flight.size(); ++m) {
             Message& message = in_flight[m];
-            const double roll = (rng() % 1000) / 1000.0;
+            const double roll = static_cast<double>(rng() % 1000) / 1000.0;
             if (roll < config.fault_prob / 3.0 && partition_ticks > 0) {
                 ++result.delayed;
                 continue;  // delayed by the active partition
