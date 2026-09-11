@@ -20,6 +20,20 @@ const globalForDb = globalThis as unknown as {
   __concordPgPool?: Pool;
 };
 
+/**
+ * Hosted Postgres providers (Neon etc.) require TLS; the local Docker
+ * Postgres does not. Sslmode in the URL is the source of truth when
+ * present; a hostname heuristic covers the rest.
+ */
+function isRemoteDatabase(connectionString: string): boolean {
+  try {
+    const host = new URL(connectionString).hostname;
+    return host !== "localhost" && host !== "127.0.0.1" && host !== "::1";
+  } catch {
+    return false;
+  }
+}
+
 export function getDbPool(): Pool {
   if (globalForDb.__concordPgPool) {
     return globalForDb.__concordPgPool;
@@ -27,6 +41,11 @@ export function getDbPool(): Pool {
   const env = getServerEnv();
   const pool = new Pool({
     connectionString: env.DATABASE_URL,
+    // TLS for hosted Postgres (Neon etc.); local Docker Postgres stays
+    // plain — pg defaults to sslmode=prefer in the connection string, and
+    // forcing ssl:true against localhost would break local dev. Neon URLs
+    // carry ?sslmode=require; this covers string-less configs too.
+    ssl: isRemoteDatabase(env.DATABASE_URL),
     max: 10,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,

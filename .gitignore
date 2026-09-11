@@ -51,14 +51,18 @@ next-env.d.ts
 .claude/
 skills-lock.json
 
-# Phase 2 native/WASM build output (never commit build artifacts)
+# Phase 2 native/WASM build output (never commit build artifacts).
+# Exception: the staged runtime under public/wasm IS committed — the
+# deploy/vercel path serves it as a static asset without requiring an
+# Emscripten toolchain at deploy time; local `npm run wasm:build`
+# still refreshes these exact files from the same C++ source.
 build/
 wasm/dist/
-public/wasm/
-*.wasm
 *.wasm.map
 .emcache/
 compile_commands.json
+!public/wasm/concord-crdt.wasm
+!public/wasm/concord-crdt.js
 
 # Phase 3 Rust build output (never commit build artifacts)
 rust/**/target/

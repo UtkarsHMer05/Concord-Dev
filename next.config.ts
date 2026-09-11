@@ -5,8 +5,9 @@ const nextConfig: NextConfig = {
   // Standalone output: the P6-M027 release image runs `node server.js`
   // from the minimal standalone tree (no node_modules copy of build
   // toolchains). Dev/test flows (`next dev`, `next build && next start`)
-  // are unaffected.
-  output: "standalone",
+  // are unaffected. Vercel builds set VERCEL=1 and manage their own
+  // output format — standalone there only slows the build.
+  ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
   turbopack: {
     root: path.join(__dirname),
   },

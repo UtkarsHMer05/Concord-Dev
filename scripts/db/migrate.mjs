@@ -37,7 +37,20 @@ if (args[0] === "--test") {
   }
 }
 
-const pool = new pg.Pool({ connectionString: url });
+// TLS for hosted Postgres (Neon etc.); local Docker Postgres stays plain.
+function sslFor(url) {
+  try {
+    const host = new URL(url).hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return { sslmode: "require" };
+}
+
+const pool = new pg.Pool({ connectionString: url, ssl: sslFor(url) });
 try {
   const db = drizzle(pool);
   await migrate(db, { migrationsFolder: "./drizzle" });
