@@ -205,12 +205,24 @@ const MIGRATIONS: &[Migration] = &[
     },
 ];
 
-/// Applies all pending migrations idempotently. Safe to run on an empty
-/// database, on a Phase 1 database, and repeatedly (verified by tests).
+/// Applies all pending migrations idempotently, including concurrent starts
+/// against an application database with no gateway-owned tables yet.
 pub async fn run_migrations(db: &super::Db) -> Result<(), MigrationError> {
     let mut client = db.get().await?;
     let tx = client
         .transaction()
+        .await
+        .map_err(|e| MigrationError::Failed {
+            version: 0,
+            message: e.to_string(),
+        })?;
+    // CREATE TABLE IF NOT EXISTS alone is not safe against concurrent first
+    // starts: PostgreSQL can race on catalog uniqueness before the registry
+    // exists. Serialize the entire migration transaction, starting before any
+    // DDL or version reads. The database releases this lock on commit/rollback
+    // (including connection loss), so a crashed gateway cannot strand it.
+    const MIGRATION_LOCK_KEY: i64 = 0x434f_4e43_4f52_4401; // "CONCORD" + migration namespace
+    tx.query_one("SELECT pg_advisory_xact_lock($1)", &[&MIGRATION_LOCK_KEY])
         .await
         .map_err(|e| MigrationError::Failed {
             version: 0,

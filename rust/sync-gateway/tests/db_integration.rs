@@ -23,10 +23,14 @@ use sync_gateway::protocol::envelope::{validate_op, OpEnvelope};
 const TEST_URL: &str = "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test";
 
 async fn test_db() -> Option<Db> {
+    test_db_at(TEST_URL).await
+}
+
+async fn test_db_at(database_url: &str) -> Option<Db> {
     let config = Config {
         bind_host: "127.0.0.1".into(),
         bind_port: 0,
-        database_url: TEST_URL.into(),
+        database_url: database_url.into(),
         clerk_issuer: "https://fun-blowfish-5798.clerk.accounts.dev".into(),
         allowed_origins: vec![],
         max_frame_size: 8 * 1024 * 1024,
@@ -47,6 +51,71 @@ async fn test_db() -> Option<Db> {
         worker_binary: None,
     };
     Db::connect(&config).await.ok() // DB not running: skip (documented gate precondition)
+}
+
+/// Simultaneous first starts must serialize the registry DDL and migrations,
+/// including when no gateway-owned table exists yet.
+#[tokio::test]
+async fn concurrent_first_start_migrations_are_idempotent() {
+    let Some(admin) = test_db().await else {
+        return;
+    };
+    let client = admin.get().await.expect("admin connection");
+    let schema = format!("migration_race_{}", Uuid::new_v4().simple());
+    // A separate schema keeps this cold-start regression independent of all
+    // other tests. Only the application FK targets are needed by this runner.
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema};
+             CREATE TABLE {schema}.users (id UUID PRIMARY KEY);
+             CREATE TABLE {schema}.documents (id UUID PRIMARY KEY);"
+        ))
+        .await
+        .expect("isolated application schema");
+    let url = format!("{TEST_URL}?options=-csearch_path%3D{schema}");
+    let db = test_db_at(&url).await.expect("isolated pool");
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(4));
+    let mut starts = Vec::new();
+    for _ in 0..4 {
+        let db = db.clone();
+        let barrier = barrier.clone();
+        starts.push(tokio::spawn(async move {
+            barrier.wait().await;
+            run_migrations(&db).await
+        }));
+    }
+    let mut errors = Vec::new();
+    for start in starts {
+        match start.await {
+            Ok(Ok(())) => {}
+            result => errors.push(format!("{result:?}")),
+        }
+    }
+    let version = current_version(&db).await;
+    let rows = db
+        .get()
+        .await
+        .expect("isolated connection")
+        .query(
+            "SELECT version FROM gateway_schema_migrations ORDER BY version",
+            &[],
+        )
+        .await;
+    client
+        .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+        .await
+        .expect("clean up isolated schema");
+    assert!(
+        errors.is_empty(),
+        "concurrent migration failures: {errors:?}"
+    );
+    assert_eq!(version.expect("current version"), 3);
+    let versions: Vec<i32> = rows
+        .expect("registry rows")
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    assert_eq!(versions, vec![1, 2, 3], "each migration is recorded once");
 }
 
 /// Canonical minimal insert op bytes (matches protocol::envelope tests).
