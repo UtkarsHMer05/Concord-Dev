@@ -1,0 +1,63 @@
+# cargo-deny policy (hardening F6) — sync-gateway workspace.
+#
+# Reconciled with the repository licensing posture (G4): the root
+# LICENSE governs the Concord source tree; third-party crates must be
+# permissively licensed for private/commercial use with notice
+# retention. Anything copyleft (GPL/AGPL/SSPL) is denied because the
+# gateway is distributed as a container image without source
+# offer obligations.
+
+[graph]
+# The workspace at rust/ (targets resolve from Cargo.lock).
+targets = []
+
+[advisories]
+# Security advisories: fail on any vulnerability with a known fix that
+# is not ignored below. Ignores MUST carry reason + expiry (review
+# date); the audit script (dep-scan.sh) re-reports them each run so a
+# forgotten ignore is loud.
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Permissive set. Entries are single SPDX requirements; a dual-licensed
+# crate (e.g. "MIT OR Apache-2.0") passes when every alternative in its
+# expression is allowed. Copyleft (GPL/AGPL/SSPL) is NOT allowed: the
+# gateway ships as a container image without source-offer obligations.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception", # aws-lc-rs (JWT signing backend)
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "CC0-1.0",
+  "MPL-2.0", # file-level copyleft, acceptable for isolated files
+  "Unicode-3.0",
+  "Unicode-DFS-2016", # unicode-ident legacy form
+  "CDLA-Permissive-2.0", # webpki-roots: permissive license over the packaged CA root data
+  "BSL-1.0", # Boost Software License (xxhash-rust): OSI-approved permissive
+]
+# Crates with no machine-readable license: verified manually against
+# the crate source and pinned here with reasons — cargo-deny fails on
+# unclarified licenses otherwise. Keep this list SHORT; each entry needs
+# a comment justifying the manual verification.
+exceptions = []
+
+[bans]
+# Duplicate crate versions are allowed (cargo resolves semver majors);
+# hard-duplications that signal a vendoring problem are surfaced via
+# `multiple-versions` warnings, not failures, to avoid noise-driven
+# skips.
+multiple-versions = "warn"
+deny = []
+
+[sources]
+# Only crates.io (https) — no git deps, no local path patches in the
+# release build, no registries over plain http.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

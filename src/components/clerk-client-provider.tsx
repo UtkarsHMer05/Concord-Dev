@@ -3,7 +3,7 @@
 import { ClerkProvider, SignIn, useAuth } from "@clerk/nextjs";
 import { ReactNode } from "react";
 
-import { FullscreenLoader } from "./fullscreen-loader";
+import { DocumentLoadingIndicator } from "./loading-indicator";
 
 /**
  * Identity provider boundary: Clerk owns authentication. Data access is
@@ -22,7 +22,7 @@ export function SignInGate() {
 function AuthGate({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn } = useAuth();
   if (!isLoaded) {
-    return <FullscreenLoader label="Auth loading..." />;
+    return <DocumentLoadingIndicator label="Restoring session…" />;
   }
   if (!isSignedIn) {
     return <SignInGate />;
