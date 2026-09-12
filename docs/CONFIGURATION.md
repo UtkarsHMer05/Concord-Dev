@@ -70,6 +70,13 @@ time (`--env-file`/orchestrator env). Never bake real values into an image.
 | `GATEWAY_CLERK_AUDIENCE` | public | Optional in local development for existing test tokens. When set, the signed session token must contain this exact `aud` (a string or a member of an array); missing/wrong claims are rejected. New cloud bundles require a verified Concord-specific audience before publishing. |
 | `GATEWAY_CLERK_AUTHORIZED_PARTY` | public | Optional in local development. When set, the signed token's `azp` must match this exact app origin; missing/wrong claims are rejected. The cloud bundle sets it to its ALB app origin. |
 
+The web middleware accepts `CONCORD_APP_ORIGIN` as an exact origin (scheme,
+host, optional port; no path or trailing slash). When configured, Clerk
+checks the session token's authorized party against that origin. Cloud
+bundles set it to the same ALB app URL as the gateway's `azp` policy. Set
+it explicitly for other hosted web deployments; local development leaves
+it unset until its app origin is known.
+
 ### Required in staging/prod deployments
 
 | Variable | Why |

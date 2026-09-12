@@ -623,7 +623,8 @@ without logging or sharing the complete token. Set the exact audience as
 `GATEWAY_CLERK_AUDIENCE` in the private `.env.local` used by
 `push-bundle.sh`; it refuses a missing or literal `convex` value before
 publishing. The bundle sets `GATEWAY_CLERK_AUTHORIZED_PARTY` from the ALB
-app URL. Dev/test leaves these options unset until its own token claims
+app URL and `CONCORD_APP_ORIGIN` for Clerk's web middleware
+`authorizedParties`. Dev/test leaves these options unset until its own token claims
 are migrated; a configured audience/party is enforced strictly by the
 gateway. This code path has unit tests, but the Clerk dashboard and a
 live cloud authentication round trip still require verification.
@@ -776,6 +777,7 @@ dashboard:
       `pk_live_`/`sk_live_` keys, and restrict Frontend API access via
       the subdomain allowlist (Clerk strongly recommends; rejects
       non-allowlisted subdomains).
-- [ ] Set `authorizedParties` (via `clerkMiddleware`) to the exact
-      origin(s) once TLS lands — protects against subdomain cookie
-      leaking; omitted today because there is no domain (documented).
+- [ ] Verify `CONCORD_APP_ORIGIN` equals the browser's exact origin on
+      each hosted web environment. The cloud bundle sets this from the
+      ALB URL and `clerkMiddleware` passes it as `authorizedParties`;
+      Vercel or any other hosting must set its own value explicitly.
