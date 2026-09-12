@@ -19,15 +19,15 @@ import StarterKit from '@tiptap/starter-kit'
 import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table'
-import Image from '@tiptap/extension-image'
-import TextAlign from '@tiptap/extension-text-align'
-import Link from '@tiptap/extension-link'
-import { Color } from '@tiptap/extension-color'
-import Highlight from "@tiptap/extension-highlight"
-import FontFamily from '@tiptap/extension-font-family'
-import { TextStyle } from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
+import FontFamily from '@tiptap/extension-font-family'
+import Highlight from "@tiptap/extension-highlight"
+import { Color } from '@tiptap/extension-color'
+import Link from '@tiptap/extension-link'
+import TextAlign from '@tiptap/extension-text-align'
+import Image from '@tiptap/extension-image'
 import { useEditor, EditorContent, type Editor as TipTapEditor } from '@tiptap/react'
+import { TextStyle } from '@tiptap/extension-text-style'
 import { useEffect, useMemo, useRef } from 'react'
 
 import { useEditorStore } from '@/store/use-editor-store';
@@ -122,37 +122,29 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
       },
     },
     extensions: [
-      StarterKit.configure({
-        // Link/underline ship with richer dedicated configs below.
-        link: false,
-        underline: false,
-      }),
-      LineHeightExtension,
+      // Node/mark core. StarterKit's link/underline are disabled because
+      // dedicated configs below carry richer behavior.
+      StarterKit.configure({ link: false, underline: false }),
+      // Per-span text attributes (all CRDT-registry marks, DEC-025).
+      TextStyle,
+      FontFamily,
       FontSizeExtension,
-      TextAlign.configure({
-        types: ["heading", "paragraph"]
-      }),
+      Color,
+      Highlight.configure({ multicolor: true }),
+      Underline,
+      // Block-level attributes.
+      LineHeightExtension,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      // Interactive content.
       Link.configure({
         // In-app navigation must win over external link clicks.
         openOnClick: false,
         autolink: true,
         defaultProtocol: 'https'
       }),
-      Color,
-      Highlight.configure({
-        // Per-selection highlight colors (registry-supported mark).
-        multicolor: true,
-      }),
-      FontFamily,
-      TextStyle,
-      Underline,
-      Image.configure({
-        resize: { enabled: true },
-      }),
+      Image.configure({ resize: { enabled: true } }),
       ...TABLE_EXTENSIONS,
-      TaskItem.configure({
-        nested: true,
-      }),
+      TaskItem.configure({ nested: true }),
       TaskList,
     ],
   })

@@ -56,30 +56,43 @@ export const RemoveDialog = ({ documentId, onRemoved, children }: RemoveDialogPr
   };
 
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        {children}
-      </AlertDialogTrigger>
-      <AlertDialogContent onClick={(event) => event.stopPropagation()}>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete this document?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The document and its entire revision history are removed
-            permanently. There is no undo for this step.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={(event) => event.stopPropagation()}>
-            Cancel
-          </AlertDialogCancel>
-          <AlertDialogAction
-            disabled={isDeleting}
-            onClick={confirmDelete}
-          >
-            Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <DeleteConfirmation trigger={children} busy={isDeleting} onConfirm={confirmDelete} />
   );
 };
+
+/**
+ * Visual layer of the delete flow, separated from the mutation logic so the
+ * irrevocability copy sits next to the elements that carry it. Clicks are
+ * stopped at the content wrapper because this dialog is often mounted inside
+ * click-through hosts (menu items, table rows).
+ */
+const DeleteConfirmation = ({
+  trigger,
+  busy,
+  onConfirm,
+}: {
+  trigger: React.ReactNode;
+  busy: boolean;
+  onConfirm: (event: React.MouseEvent) => void;
+}) => (
+  <AlertDialog>
+    <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+    <AlertDialogContent onClick={(event) => event.stopPropagation()}>
+      <AlertDialogHeader>
+        <AlertDialogTitle>Delete this document?</AlertDialogTitle>
+        <AlertDialogDescription>
+          The document and its entire revision history are removed
+          permanently. There is no undo for this step.
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel onClick={(event) => event.stopPropagation()}>
+          Cancel
+        </AlertDialogCancel>
+        <AlertDialogAction disabled={busy} onClick={onConfirm}>
+          Delete
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+);

@@ -54,16 +54,7 @@ const ErrorPage = ({
       </div>
 
       {/* Recovery actions: re-run the failed segment or leave the route. */}
-      <div className="flex items-center gap-x-3">
-        <Button onClick={reset} className="font-medium px-6">
-          Try again
-        </Button>
-        <Button asChild variant="ghost" className="font-medium">
-          <Link href="/">
-            Go back
-          </Link>
-        </Button>
-      </div>
+      <RecoveryActions onRetry={reset} />
 
       {/* Developer-only disclosure for the underlying error. */}
       <div className="text-xs text-muted-foreground">
@@ -92,3 +83,15 @@ const ErrorPage = ({
 };
 
 export default ErrorPage;
+
+/** Retry re-renders the failed segment; "Go back" is a hard navigation. */
+const RecoveryActions = ({ onRetry }: { onRetry: () => void }) => (
+  <div className="flex items-center gap-x-3">
+    <Button onClick={onRetry} className="font-medium px-6">
+      Try again
+    </Button>
+    <Button asChild variant="ghost" className="font-medium">
+      <Link href="/">Go back</Link>
+    </Button>
+  </div>
+);

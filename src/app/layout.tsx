@@ -41,20 +41,22 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout(props: Readonly<{ children: React.ReactNode }>) {
+  const { children } = props;
+
+  // The provider stack is fixed (see the header comment); toast mounting
+  // inside the auth gate keeps it available to all gated UI.
+  const appTree = (
+    <ClerkClientProvider>
+      <Toaster />
+      {children}
+    </ClerkClientProvider>
+  );
+
   return (
     <html lang="en">
       <body className={inter.className}>
-        <NuqsAdapter>
-          <ClerkClientProvider>
-            <Toaster />
-            {children}
-          </ClerkClientProvider>
-        </NuqsAdapter>
+        <NuqsAdapter>{appTree}</NuqsAdapter>
       </body>
     </html>
   );
