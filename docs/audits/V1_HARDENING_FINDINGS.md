@@ -19,3 +19,15 @@ against this branch. A status of open is not a release approval.
 
 Further findings will be added with exact code and test evidence as each
 phase is audited. Critical/High rows cannot be silently marked complete.
+
+## Hardening-pass additions (2026-09-12, lead session 2)
+
+| ID | Severity | Domain | Finding | Evidence | Fix | Regression test | Status |
+|---|---|---|---|---|---|---|---|
+| HARD-WEB-002 | High | web CSP | Script-src carried 'unsafe-inline'; nonce follow-up only documented | Old next.config.ts CSP; docs/SECURITY.md follow-up note | Per-request nonce in middleware (Clerk + Next 16 stamped), strict-dynamic, minimal connect-src decoded from the publishable key | tests/proxy-claim-policy.test.ts — 9 effective-header assertions + live dev-server verification | Closed |
+| HARD-CI-001 | High | supply chain | Workflows used floating action tags, no permission blocks, no dependency automation | Baseline audit §1.8 | SHA-pinned actions + least-privilege permissions + Dependabot (npm/cargo/actions/docker) + CodeQL + cargo-deny in PR CI | Workflow lints + grep for floating refs (0 remaining); cargo-deny 4/4 checks ok | Closed |
+| HARD-CI-002 | High | release gate | Trivy scans passed unconditionally (blanket continue-on-error) | Release workflow steps | scan-gate.sh: new critical/high fails unless allowlisted with reason/owner/review date; JSON kept as evidence | Synthetic-report tests: empty report passes, unallowlisted finding fails | Closed |
+| HARD-IMG-001 | Medium | containers | Base images tag-pinned; reproducibility claim overstated; apk upgrade undocumented tradeoff | Dockerfiles + compose §1.9 | Digest-pinned every FROM + compose image (docker.io digests resolved 2026-09-12); apk upgrade documented as deliberate mutable-security tradeoff; Dependabot docker ecosystem refresh | Registry digest resolution recorded; refresh path documented | Closed |
+| HARD-NET-002 | High | infra auth | Cloud NATS anonymous, Redis unauthenticated, Grafana anonymous Admin | Old docker-compose.cloud.yml | NATS user/pass; Redis ACL user restricted to the code-derived command set (INCR/EXPIRE/DEL/SCAN/HSET/PING, concord:* keys); Grafana real admin; segmented internal networks; no-new-privileges/cap-drop/pids/stop-grace | LIVE fail-closed proofs: NATS anonymous+wrong-pass rejected, Redis NOPERM on GET/SET/FLUSHALL/out-of-namespace, allowlist works end-to-end | Closed |
+| HARD-LICENSE-002 | Critical | licensing | No root license; crate metadata contradiction | Root audit §1.5/§1.7 | Resolved: MIT root LICENSE after per-path provenance resolution; crate license=MIT restored; NOTICE/SBOM pointers corrected | provenance-check.sh CI gate (0 unallowlisted identical files, 0 banned assets); cargo-deny licenses ok | Closed |
+| HARD-LICENSE-003 | High | provenance | Six source files byte-identical to tutorial baseline; components.json identical | provenance-paths.tsv (pre-pass) | All rewritten as original implementations preserving public APIs (commit d228526); components.json regenerated | provenance-check.sh; 174/174 unit tests; typecheck clean | Closed |

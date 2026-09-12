@@ -237,3 +237,19 @@ jobs:
             echo "::error::dep-scan exited $rc (usage/tool error) — failing the PR."
             exit "$rc"
           fi
+      # Provenance gate (hardening G2/G6): no shipped file may be
+      # byte-identical to the antonio-original-baseline tutorial tree
+      # unless allowlisted with a verified permissive upstream license
+      # (the shadcn/ui primitives). Also bans known baseline assets.
+      - name: Provenance check (baseline identity gate)
+        run: bash scripts/security/provenance-check.sh
+      # cargo-deny (hardening F6): advisories + license policy + source
+      # restrictions over the Cargo tree. Installed if absent — a missing
+      # binary must NOT silently pass.
+      - name: cargo deny (install if missing)
+        run: |
+          if ! command -v cargo-deny >/dev/null 2>&1 && [ ! -x "$HOME/.cargo/bin/cargo-deny" ]; then
+            echo "cargo-deny not found — installing (cargo install cargo-deny --locked)"
+            cargo install cargo-deny --locked
+          fi
+          (cd rust && cargo deny --workspace check)
