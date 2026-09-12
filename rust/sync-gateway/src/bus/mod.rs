@@ -118,10 +118,10 @@ impl NatsSubscriber {
                 }
             };
             for message in messages {
-                // P6-M011 adjacent gauge: refresh lag/redelivery from
-                // consumer info when cheap (errors just keep last value).
-                // TODO(P6-M011): move to a periodic poll in main if the
-                // per-message call proves expensive.
+                // P6-M011 adjacent gauge: lag/redelivery refresh. B11:
+                // consumer_info is TTL-cached (CONSUMER_INFO_TTL) inside
+                // the broker, so this per-message call reads memory —
+                // at most one JetStream metadata request per window.
                 if let Ok((ack_pending, redelivered)) = self.broker.consumer_info().await {
                     crate::observability::metrics::set_gauge(
                         "concord_broker_lag",

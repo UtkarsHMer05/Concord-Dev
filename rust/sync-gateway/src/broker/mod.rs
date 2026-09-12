@@ -26,6 +26,13 @@ pub const CONSUMER_ACK_WAIT: Duration = Duration::from_secs(30);
 pub const CONSUMER_MAX_DELIVER: i64 = 5;
 pub const CONSUMER_MAX_ACK_PENDING: i64 = 256;
 
+/// Consumer-info refresh interval (B11 hardening): the subscriber loop
+/// refreshes lag/redelivery at most this often instead of issuing a
+/// per-message JetStream metadata request. 30s keeps the lag gauge
+/// responsive enough to alert on while removing a network round trip
+/// from the per-event hot path.
+pub const CONSUMER_INFO_TTL: Duration = Duration::from_secs(30);
+
 /// Errors for the broker layer (structured; no payload content).
 #[derive(Debug, thiserror::Error)]
 pub enum BrokerError {
@@ -51,6 +58,10 @@ pub struct Broker {
     consumer_name: String,
     subject: String,
     pub gateway_id: u64,
+    /// B11: cached (ack_pending, redelivered) refreshed at most once per
+    /// [`CONSUMER_INFO_TTL`] — the per-message path reads the cache, it
+    /// never issues a JetStream metadata request per event.
+    consumer_info_cache: tokio::sync::Mutex<Option<((u64, u64), std::time::Instant)>>,
 }
 
 impl Broker {
@@ -106,6 +117,7 @@ impl Broker {
             consumer_name,
             subject,
             gateway_id,
+            consumer_info_cache: tokio::sync::Mutex::new(None),
         })
     }
 
@@ -160,19 +172,58 @@ impl Broker {
         Ok(out)
     }
 
-    /// Consumer info: ack-pending (lag proxy) and redelivery stats (M036/M040).
+    /// Consumer info: ack-pending (lag proxy) and redelivery stats
+    /// (M036/M040). B11: TTL-cached — the per-message subscriber path
+    /// reads the cached value; a refresh is issued at most once per
+    /// [`CONSUMER_INFO_TTL`] so event processing never pays a JetStream
+    /// metadata round trip per message. Callers that need live data
+    /// (monitoring, tests) use [`Self::consumer_info_fresh`].
     pub async fn consumer_info(&self) -> Result<(u64, u64), BrokerError> {
+        {
+            let cache = self.consumer_info_cache.lock().await;
+            if let Some((stats, at)) = *cache {
+                if at.elapsed() < CONSUMER_INFO_TTL {
+                    return Ok(stats);
+                }
+            }
+        }
+        self.refresh_consumer_info().await
+    }
+
+    /// Uncached consumer-info read (live JetStream request): for probes,
+    /// dashboards, and tests that must observe the broker's current
+    /// state rather than the hot-path sample.
+    pub async fn consumer_info_fresh(&self) -> Result<(u64, u64), BrokerError> {
         let info = self
             .stream
             .consumer_info(&self.consumer_name)
             .await
             .map_err(|_| BrokerError::Consume)?;
-        Ok((info.num_ack_pending as u64, info.num_redelivered as u64))
+        let stats = (info.num_ack_pending as u64, info.num_redelivered as u64);
+        *self.consumer_info_cache.lock().await = Some((stats, std::time::Instant::now()));
+        Ok(stats)
     }
 
-    /// Connectivity probe (degraded-state observability, M011).
+    /// Cache-refresh path for the TTL expiry: last known value is kept
+    /// when the broker request fails (errors surface via `healthy()`).
+    async fn refresh_consumer_info(&self) -> Result<(u64, u64), BrokerError> {
+        match self.consumer_info_fresh().await {
+            Ok(stats) => Ok(stats),
+            Err(e) => {
+                let cache = self.consumer_info_cache.lock().await;
+                if let Some((stats, _)) = *cache {
+                    return Ok(stats);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Connectivity probe (degraded-state observability, M011). Bypasses
+    /// the B11 consumer-info cache: a probe must reflect the live broker,
+    /// not a stale healthy sample.
     pub async fn healthy(&self) -> bool {
-        self.consumer_info().await.is_ok()
+        self.stream.consumer_info(&self.consumer_name).await.is_ok()
     }
 }
 

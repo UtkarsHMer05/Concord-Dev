@@ -134,8 +134,8 @@ bucket axis. No metric is labeled by document/user/connection id.
 | `concord_snapshot_duration_seconds{op=job}` (histogram) | How slow is the snapshot pipeline? |
 | `concord_recovery_duration_seconds{op=select}` (histogram) | How fast is recovery snapshot selection? |
 | `concord_compaction_duration_seconds{op=prune}` (histogram) | How long does op-log pruning take? |
-| `concord_compaction_rows_total` / `concord_compaction_bytes_total` | How much history is being pruned? (bytes TODO: needs RETURNING payload sizes) |
-| `concord_worker_queue_depth` (gauge) | Maintenance jobs in flight (registered; not yet wired to scheduler state — still emits 0; see known gaps) |
+| `concord_compaction_rows_total` / `concord_compaction_bytes_total` | How much history is being pruned? (both live: the batch CTE sums `octet_length(payload)` of exactly the rows each prune deletes) |
+| `concord_worker_queue_depth` (gauge) | Maintenance jobs in flight (wired to scheduler claim execution — 1 while a job runs, 0 between) |
 | `concord_catchup_duration_seconds{op=replay}` + `concord_catchup_size{op=replay}` | How slow/big are reconnect catch-ups? |
 
 ### Ephemeral tier (Redis)
@@ -168,17 +168,18 @@ aspirational numbers we aim to MEASURE, not service-level agreements:
 
 - `concord_worker_queue_depth` emits 0: the maintenance scheduler IS
   spawned in `main.rs` when `GATEWAY_WORKER_BINARY` is set (DEC-045,
-  live-proven), but the gauge is not wired to scheduler state — the
-  registration exists without a writer. TODO: wire the gauge to the
-  runner's in-flight count (follow-up).
+  live-proven), and the gauge is wired to scheduler claim execution
+  (set to 1 while a claimed job runs, 0 between claims).
 - `concord_queue_depth{queue}` only has the `conn_send` class: the
   protocol uses one bounded mpsc per connection; no separate
   ingress/fanout/catchup queues exist to measure.
-- `concord_compaction_bytes_total` counts 0 until the prune SQL returns
-  payload sizes (`DELETE ... RETURNING`) — rows are the load-bearing
-  signal today.
-- `concord_broker_lag` refreshes per-consumed-message (cheap consumer
-  info) rather than on a periodic poll.
+- `concord_compaction_bytes_total` is live: each prune batch sums
+  `octet_length(payload)` for exactly the rows it deletes (one round
+  trip, in-transaction), so the counter reflects real reclaimed bytes.
+- `concord_broker_lag` refreshes at most once per
+  `CONSUMER_INFO_TTL` (30 s) — the per-message subscriber path reads
+  the cached sample instead of issuing a JetStream metadata request
+  per event; `consumer_info_fresh()` serves live probes.
 - Redis latency is instrumented on the rate-limit path only (presence
   ops are fire-and-forget by design).
 

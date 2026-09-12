@@ -275,18 +275,25 @@ pub async fn prune_to_boundary(
     let started = std::time::Instant::now();
     let _compaction_span = tracing::info_span!("maintenance.compaction").entered();
     let result = prune_to_boundary_inner(db, snapshots, document, boundary, batch_rows).await;
-    if let Ok(rows) = &result {
+    if let Ok(PruneOutcome { rows, bytes }) = &result {
         crate::observability::metrics::incr_by("concord_compaction_rows_total", *rows as u64);
-        // TODO(P6-M010): bytes pruned needs RETURNING payload sizes —
-        // tracked as a follow-up; rows is the load-bearing signal today.
-        crate::observability::metrics::incr_by("concord_compaction_bytes_total", 0);
+        // Bytes pruned is measured transactionally per batch (the batch
+        // CTE sums octet_length(payload) of exactly the rows it
+        // deletes), so the counter reflects real reclaimed bytes.
+        crate::observability::metrics::incr_by("concord_compaction_bytes_total", *bytes as u64);
     }
     crate::observability::metrics::observe(
         "concord_compaction_duration_seconds",
         &["prune"],
         started.elapsed().as_secs_f64(),
     );
-    result
+    result.map(|o| o.rows)
+}
+
+/// Rows deleted + payload bytes reclaimed by one prune run.
+struct PruneOutcome {
+    rows: i64,
+    bytes: i64,
 }
 
 async fn prune_to_boundary_inner(
@@ -295,12 +302,13 @@ async fn prune_to_boundary_inner(
     document: Uuid,
     boundary: i64,
     batch_rows: i64,
-) -> Result<i64, CompactionError> {
+) -> Result<PruneOutcome, CompactionError> {
     let snapshot_id = eligibility(db, snapshots, document, boundary).await?;
     let batch_rows = batch_rows.clamp(1, 10_000);
     let mut client = db.get().await?;
 
     let mut total_deleted: i64 = 0;
+    let mut total_bytes: i64 = 0;
     loop {
         // One batch: re-verify + delete + floor advance commit
         // atomically.
@@ -320,24 +328,39 @@ async fn prune_to_boundary_inner(
             return Err(e);
         }
         let deleted = tx
-            .execute(
+            .query_one(
                 // PostgreSQL DELETE has no LIMIT: bound the batch with a
                 // CTE selecting the ids to delete, ordered for
-                // deterministic batch boundaries.
+                // deterministic batch boundaries. The same batch CTE sums
+                // the payload bytes of exactly those rows, so the bytes
+                // counter reflects real reclaimed bytes (P6-M010 close:
+                // RETURNING-free aggregate — one round trip, no per-row
+                // traffic to the client).
                 "WITH batch AS (
-                     SELECT id FROM crdt_operations
+                     SELECT id, octet_length(payload) AS bytes
+                     FROM crdt_operations
                      WHERE document_id = $1 AND id <= $2
                      ORDER BY id ASC
                      LIMIT $3::bigint
+                 ),
+                 deleted AS (
+                     DELETE FROM crdt_operations o
+                     USING batch
+                     WHERE o.document_id = $1 AND o.id = batch.id
+                     RETURNING 1
                  )
-                 DELETE FROM crdt_operations o
-                 USING batch
-                 WHERE o.document_id = $1 AND o.id = batch.id",
+                 SELECT count(*)::bigint AS rows,
+                        coalesce((SELECT sum(bytes) FROM batch), 0)::bigint AS bytes
+                 FROM deleted",
                 &[&document, &boundary, &batch_rows],
             )
             .await;
-        let deleted = match deleted {
-            Ok(n) => n as i64,
+        let (deleted, batch_bytes): (i64, i64) = match deleted {
+            Ok(row) => {
+                let n: i64 = row.get("rows");
+                let b: i64 = row.get("bytes");
+                (n, b)
+            }
             Err(e) => return Err(e.into()),
         };
         if deleted == 0 && total_deleted > 0 {
@@ -358,7 +381,10 @@ async fn prune_to_boundary_inner(
             if rows == 0 {
                 return Err(CompactionError::AlreadyCompacted);
             }
-            return Ok(total_deleted);
+            return Ok(PruneOutcome {
+                rows: total_deleted,
+                bytes: total_bytes,
+            });
         }
         if deleted == 0 && total_deleted == 0 {
             // Nothing was ever eligible (floor already ≥ boundary) —
@@ -370,7 +396,7 @@ async fn prune_to_boundary_inner(
                     return Err(CompactionError::AlreadyCompacted);
                 }
             }
-            return Ok(0);
+            return Ok(PruneOutcome { rows: 0, bytes: 0 });
         }
         // Advance the floor WITH this batch's commit. Monotonic guard:
         // only moves forward, and only while coverage holds.
@@ -385,8 +411,12 @@ async fn prune_to_boundary_inner(
         .await?;
         tx.commit().await?;
         total_deleted += deleted;
+        total_bytes += batch_bytes;
         if deleted < batch_rows {
-            return Ok(total_deleted);
+            return Ok(PruneOutcome {
+                rows: total_deleted,
+                bytes: total_bytes,
+            });
         }
     }
 }

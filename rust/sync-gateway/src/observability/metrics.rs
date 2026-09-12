@@ -144,7 +144,7 @@ const GAUGES: &[CounterSpec] = &[
     ),
     (
         "concord_worker_queue_depth",
-        "Maintenance worker in-flight jobs (scheduler not yet spawned in main; TODO: wire when scheduler is spawned in main (P6 CI/release milestone)).",
+        "Maintenance worker in-flight jobs (live values: the scheduler is spawned in main behind GATEWAY_WORKER_BINARY — P6 F-1).",
     ),
 ];
 

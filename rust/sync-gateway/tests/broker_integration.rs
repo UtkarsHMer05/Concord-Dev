@@ -172,17 +172,52 @@ async fn unacked_message_is_redelivered() {
         .await
         .expect("fetch");
     assert!(!messages.is_empty());
-    // NOT acking: consumer_info shows ack_pending ≥ 1.
-    let (pending, _) = gw2.consumer_info().await.expect("info");
+    // NOT acking: consumer_info shows ack_pending ≥ 1. Fresh read: this
+    // asserts live broker state, not the B11 hot-path cache sample.
+    let (pending, _) = gw2.consumer_info_fresh().await.expect("info");
     assert!(
         pending >= 1,
         "unacked message remains pending (redelivery will occur)"
     );
-    // Now ack: pending drains.
+    // Now ack: pending drains (again a fresh read).
     messages[0].ack().await.expect("ack");
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let (pending_after, _) = gw2.consumer_info().await.expect("info");
+    let (pending_after, _) = gw2.consumer_info_fresh().await.expect("info");
     assert_eq!(pending_after, 0, "ack clears pending");
+}
+
+#[tokio::test]
+async fn consumer_info_is_ttl_cached_for_the_hot_path() {
+    let ns = format!("it{}", Uuid::new_v4().simple());
+    let Some(gw1) = broker(&ns, 1).await else {
+        eprintln!("SKIP: nats down");
+        return;
+    };
+    let gw2 = broker(&ns, 2).await.expect("gw2");
+
+    // Prime the cache with a live read (empty consumer: pending 0).
+    let (pending, _) = gw2.consumer_info_fresh().await.expect("prime");
+    assert_eq!(pending, 0);
+
+    // Publish + fetch WITHOUT acking: the live pending count is now ≥ 1.
+    let event = sample_event(1, 400);
+    gw1.publish(&event).await.expect("publish");
+    let messages = gw2
+        .fetch(2, std::time::Duration::from_secs(2))
+        .await
+        .expect("fetch");
+    assert!(!messages.is_empty());
+
+    // Within the TTL the cached consumer_info keeps serving the primed
+    // sample (0) even though the broker's live count changed — this is
+    // the B11 guarantee that the per-message path issues no metadata
+    // request.
+    let (cached_pending, _) = gw2.consumer_info().await.expect("cached read");
+    assert_eq!(cached_pending, 0, "hot path serves the TTL cache");
+
+    // The fresh read observes reality.
+    let (live_pending, _) = gw2.consumer_info_fresh().await.expect("fresh read");
+    assert!(live_pending >= 1, "fresh read bypasses the cache");
 }
 
 #[tokio::test]

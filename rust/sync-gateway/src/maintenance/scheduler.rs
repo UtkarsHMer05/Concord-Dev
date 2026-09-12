@@ -58,6 +58,13 @@ impl Scheduler {
             .await
             .ok()??;
 
+        // Maintenance in-flight gauge (P6-M010 close): the worker is
+        // executing while this claim runs. The runner loop is
+        // sequential per gateway process, so the value is 0 or 1 here;
+        // the registration now has a writer and the /metrics scrape
+        // reflects live scheduler state.
+        crate::observability::metrics::set_gauge("concord_worker_queue_depth", 1);
+
         // Heartbeat while the work runs: the lease is refreshed at
         // lease/3 so a slow-but-alive worker never loses ownership to
         // the sweep.
@@ -91,6 +98,7 @@ impl Scheduler {
             _ => Ok(()), // unknown kinds idle-complete (never enqueued)
         };
         heartbeat.abort(); // work done or failed: stop the lease pump
+        crate::observability::metrics::set_gauge("concord_worker_queue_depth", 0);
 
         match outcome {
             Ok(()) => {

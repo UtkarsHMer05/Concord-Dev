@@ -808,19 +808,17 @@ impl RevisionService {
     ///      restore_source_revision = source, target_seq = S_t,
     ///      snapshot_id = anchor, created_by = actor.
     ///
-    /// HONEST LIMITATION (recorded for the DEC-039 follow-up): this
-    /// does NOT emit HISTORY.md §5 step 2's surgical forward-op batch
-    /// (delete-ops for items visible now but not at B; re-insert ops
-    /// for items visible at B but tombstoned now). That batch requires
-    /// the ITEM-LEVEL visible-set diff between two CRDT states; the
-    /// worker protocol exposes only digests and snapshots, and
-    /// computing the diff in Rust would duplicate C++ CRDT semantics
-    /// (forbidden — DEC-038). Revisit condition: a worker
-    /// CMD_RESTORE_DIFF (or an items-export command) in a later phase;
-    /// until then Phase 5 restore records + anchors + protects the
-    /// target state and exposes it as the document's authoritative
-    /// recovery point — the restore_event revision is auditable (H8
-    /// spirit) and the log is untouched (H6).
+    /// Restore-as-forward-ops (DEC-039, P5-M036): the surgical
+    /// forward-op batch — delete-ops for items visible now but not at
+    /// B, re-insert ops for items visible at B but tombstoned now — is
+    /// computed by the C++ worker via CMD_RESTORE_DIFF (worker command
+    /// 7; WorkerPool::restore_diff) over exported snapshot pairs, so
+    /// the item-level visible-set diff stays in the semantic authority
+    /// and is never duplicated in Rust (DEC-038). The batch is ingested
+    /// below through the normal durable path and the worker proves
+    /// convergence (fold A+batch == B) before anything is committed.
+    /// The restore_event revision is auditable (H8 spirit) and the log
+    /// is untouched (H6).
     pub async fn restore_revision(
         &self,
         document: Uuid,
