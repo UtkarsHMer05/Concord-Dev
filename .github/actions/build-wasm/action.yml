@@ -3,7 +3,7 @@ description: Build the generated module before any web or realtime suite imports
 runs:
   using: composite
   steps:
-    - uses: lukka/get-cmake@latest
+    - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # latest snapshot
     - name: Install Emscripten and build WASM
       shell: bash
       run: |

@@ -27,8 +27,9 @@
 
 # --- Stage 1: builder --------------------------------------------------------
 # gcc in alpine builds the C++20 core with no external dependencies.
-# (Tag matches the platform BuildKit is building for.)
-FROM alpine:3.22 AS builder
+# (Tag matches the platform BuildKit is building for.) Digest-pinned
+# (hardening E6); Dependabot (docker ecosystem) opens refresh PRs.
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS builder
 RUN apk add --no-cache cmake ninja gcc g++ musl-dev
 WORKDIR /build
 # The worker + the CRDT core it wraps. .dockerignore excludes rust/target
@@ -46,12 +47,12 @@ RUN cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
 # --- Stage 2: runtime --------------------------------------------------------
 # Static-friendly minimal runtime: alpine + nothing but the binary. musl
 # already matches the builder's libc; libstdc++ is linked in statically.
-FROM alpine:3.22 AS runtime
-# Security-fixed package versions from the pinned base release repo
-# (2026-09-09: base libcrypto3/libssl3 3.5.7-r0 → 3.5.8-r0; the CVE
-# fixes flagged by ECR scan-on-push — same round as the gateway/web
-# images). The worker itself links libstdc++/libgcc statically; the
-# upgrade covers the base's own libcrypto3.
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
+# apk upgrade is a DELIBERATE, documented tradeoff (hardening E6): it
+# keeps the base's libcrypto3 at security-fixed versions from the
+# pinned release repo, so this layer is NOT byte-reproducible (the
+# statically linked worker binary is). The trivy scan gate enforces
+# the CVE posture; refresh PRs re-run it.
 RUN apk upgrade
 # Non-root, fixed uid (mirrors the gateway image's concord user so a shared
 # deployment can mount/copy the binary with one ownership story).

@@ -80,9 +80,20 @@ if [ -z "${PG_PASSWORD:-}" ]; then
     --query Parameter.Value --output text 2>/dev/null || true)
   if [ -n "$EXISTING_ENV" ] && [ "$EXISTING_ENV" != "None" ]; then
     PG_PASSWORD=$(printf '%s\n' "$EXISTING_ENV" | grep -E '^PG_PASSWORD=' | cut -d= -f2-)
+    NATS_PASSWORD=$(printf '%s\n' "$EXISTING_ENV" | grep -E '^NATS_PASSWORD=' | cut -d= -f2-)
+    REDIS_PASSWORD=$(printf '%s\n' "$EXISTING_ENV" | grep -E '^REDIS_PASSWORD=' | cut -d= -f2-)
+    GRAFANA_ADMIN_PASSWORD=$(printf '%s\n' "$EXISTING_ENV" | grep -E '^GRAFANA_ADMIN_PASSWORD=' | cut -d= -f2-)
   fi
 fi
 PG_PASSWORD="${PG_PASSWORD:-$(openssl rand -hex 24)}"
+# Hardening E1–E3: per-environment internal-service credentials with the
+# SAME reuse-on-re-publish rule as PG_PASSWORD (the Redis ACL file and
+# Grafana admin account already exist on a running environment; a fresh
+# value would lock out the services exactly like the PG_PASSWORD
+# incident did).
+NATS_PASSWORD="${NATS_PASSWORD:-$(openssl rand -hex 24)}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-$(openssl rand -hex 24)}"
+GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-$(openssl rand -hex 24)}"
 PG_USER=concord
 PG_DB=concord
 
@@ -192,6 +203,9 @@ ENV=${ENV}
 PG_USER=${PG_USER}
 PG_PASSWORD=${PG_PASSWORD}
 PG_DB=${PG_DB}
+NATS_PASSWORD=${NATS_PASSWORD}
+REDIS_PASSWORD=${REDIS_PASSWORD}
+GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
 CONCORD_WEB_IMAGE=${WEB_IMAGE}
 CONCORD_GATEWAY_IMAGE=${GW_IMAGE}
 
@@ -208,8 +222,8 @@ GATEWAY_CLERK_ISSUER=${CLERK_JWT_ISSUER_DOMAIN}
 GATEWAY_CLERK_AUDIENCE=${GATEWAY_CLERK_AUDIENCE}
 GATEWAY_CLERK_AUTHORIZED_PARTY=${APP_URL}
 GATEWAY_ALLOWED_ORIGINS=${GATEWAY_ALLOWED_ORIGINS}
-GATEWAY_NATS_URL=nats://nats:4222
-GATEWAY_REDIS_URL=redis://redis:6379
+GATEWAY_NATS_URL=nats://concord:${NATS_PASSWORD}@nats:4222
+GATEWAY_REDIS_URL=redis://concord:${REDIS_PASSWORD}@redis:6379
 GATEWAY_NATS_SUBJECT_PREFIX=concord.${ENV}
 GATEWAY_WORKER_BINARY=/app/concord-worker
 GATEWAY_RATE_CONNECT_PER_MIN=60
@@ -250,6 +264,14 @@ for d in scripts/observability/grafana/dashboards/*.json; do
 done
 mkdir -p "${STAGE}/initdb"
 cp scripts/deploy/initdb/01-extensions.sql "${STAGE}/initdb/"
+# Hardening E2: render the Redis ACL with the environment's credential
+# (template placeholder __REDIS_PASSWORD__; the rendered file ships in
+# the bundle at redis/users.acl — the path docker-compose.cloud.yml
+# mounts). Mode 600: the file contains the ACL password.
+mkdir -p "${STAGE}/redis"
+sed "s/__REDIS_PASSWORD__/${REDIS_PASSWORD}/" docker/redis/users.acl \
+  > "${STAGE}/redis/users.acl"
+chmod 600 "${STAGE}/redis/users.acl"
 # Rendered user-data (ENV/BUCKET baked; secrets stay in SSM).
 sed -e "s/__ENV__/${ENV}/g" -e "s/__BUCKET__/${BUCKET}/g" \
   scripts/deploy/user-data.sh > "${STAGE}/user-data.sh"

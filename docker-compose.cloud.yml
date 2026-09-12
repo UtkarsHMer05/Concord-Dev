@@ -12,11 +12,35 @@
 #   - secrets come from the environment file written at launch from
 #     AWS SSM/env injection (never baked into images; file mode 600).
 #
+# Hardening E1–E6 (v1 hardening pass):
+#   - NATS requires credentials (`-a`/`--pass` from concord.env) — an
+#     anonymous or wrong-credential client cannot connect;
+#   - Redis requires an ACL user (concord) with ONLY the commands the
+#     gateway actually issues: INCR, EXPIRE, DEL, SCAN, HSET
+#     (derived from rust/sync-gateway/src/ephemeral — verified, not
+#     guessed); wrong credentials degrade to the documented local
+#     limiter/no-presence path (Phase 6 chaos semantics);
+#   - Grafana cloud mode requires a real admin login (anonymous auth
+#     is a local-dev-only affordance; here it is disabled);
+#   - explicit segmented networks: edge (web+lb), gateway (lb↔gw),
+#     durable (db), event (nats+redis), observability — gateways span
+#     gateway/durable/event/observability because they must reach all
+#     three plus JWKS egress over the default outbound network;
+#   - digest-pinned third-party images (E6): every `image:` resolves
+#     the exact audited content of the tag; Dependabot (docker
+#     ecosystem) opens refresh PRs when a tag moves — each refresh is
+#     rebuilt, SBOM-regenerated, and trivy-gated;
+#   - runtime hardening (E5): no-new-privileges, cap-drop ALL, bounded
+#     pids/memory where the service supports it, explicit stop grace
+#     periods (drain was measured at ~2.2 s in P7-M016 — 15 s is a
+#     safe multiple), read-only rootfs where the service tolerates it.
+#
 # Env files required next to this compose file (git-ignored, written to
 # SSM by scripts/deploy/push-bundle.sh; user-data fetches them to the
 # instance at launch):
 #   concord.env      — ALL runtime env: secrets (DATABASE_URL, Clerk
-#                      secret, PG_PASSWORD) + image refs + shared
+#                      secret, PG_PASSWORD, NATS_PASSWORD, REDIS_PASSWORD,
+#                      GRAFANA_ADMIN_PASSWORD) + image refs + shared
 #                      gateway config. Sourced by user-data before
 #                      `compose up` so ${...} interpolation resolves;
 #                      every service also injects it via env_file.
@@ -24,15 +48,35 @@
 # Usage:  docker compose -f docker-compose.cloud.yml -p concord-${ENV} up -d
 #          (on the instance; see scripts/deploy/user-data.sh)
 
+networks:
+  # Edge: the only services with host-published app ports.
+  edge: {}
+  # lb ↔ gateways (WS traffic after ALB termination).
+  gateway_net: {}
+  # web + gateways ↔ Postgres. Internal: no egress needed.
+  durable:
+    internal: true
+  # gateways ↔ NATS/Redis. Internal: no egress needed.
+  event:
+    internal: true
+  # Prometheus scrape + Grafana front. Internal: the loopback-bound
+  # host port on grafana/prometheus still works (ports publish through
+  # the host namespace, not the docker network).
+  observability:
+    internal: true
+
 services:
   db:
-    image: postgres:18.6-alpine
+    # Digest-pinned (E6). postgres:18.6-alpine
+    image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     container_name: concord-${ENV:-staging}-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PG_USER:-concord}
       POSTGRES_PASSWORD: ${PG_PASSWORD:?set in concord.env}
       POSTGRES_DB: ${PG_DB:-concord}
+    networks:
+      - durable
     # 127.0.0.1 publication ONLY: the on-instance backup cron and
     # remote SSH debugging reach it; nothing public.
     ports:
@@ -59,6 +103,8 @@ services:
     entrypoint: ["node", "scripts/db/migrate.mjs"]
     command: []
     working_dir: /app
+    networks:
+      - durable
     depends_on:
       db:
         condition: service_healthy
@@ -66,14 +112,21 @@ services:
     profiles: ["migrate"]
 
   nats:
-    image: nats:2.11.6-alpine
+    # Digest-pinned (E6). nats:2.11.6-alpine
+    image: nats:2.11.6-alpine@sha256:7dec3f8f1ff181975dbdfc0d903d2a9724659648294dbc2ebb2fa3a294d573a6
     container_name: concord-${ENV:-staging}-nats
     restart: unless-stopped
-    command: ["-js", "-sd", "/data", "-m", "8222"]
-    # No ports published — only the compose network + the host-side
-    # gateways reach it via the docker bridge gateway IP. JetStream
-    # data is a named volume (reprovisioning is automatic; PG is the
-    # durable truth — chaos-proven in Phase 6).
+    # E1: require username/password auth. Credentials arrive via env
+    # (from concord.env/SSM — never committed); the gateway connects
+    # with GATEWAY_NATS_URL=nats://concord:${NATS_PASSWORD}@nats:4222.
+    command:
+      ["-js", "-sd", "/data", "-m", "8222",
+       "--user", "concord", "--pass", "${NATS_PASSWORD:?set in concord.env}"]
+    networks:
+      - event
+    # No ports published — only the event network reaches it.
+    # JetStream data is a named volume (reprovisioning is automatic; PG
+    # is the durable truth — chaos-proven in Phase 6).
     volumes:
       - concord_nats_cloud:/data
     healthcheck:
@@ -83,13 +136,29 @@ services:
       retries: 12
 
   redis:
-    image: redis:8.8.2-alpine
+    # Digest-pinned (E6). redis:8.8.2-alpine
+    image: redis:8.8.2-alpine@sha256:96cb544fa0af5aa898d160cffb7dae70c3df117190fc123831c64712cda425ff
     container_name: concord-${ENV:-staging}-redis
     restart: unless-stopped
+    networks:
+      - event
     # No persistence by design (Phase 6 chaos proved wipe-safety); no
     # ports published.
+    # E2: ACL-authenticated, least-commands. The command set is DERIVED
+    # FROM CODE (rust/sync-gateway/src/ephemeral/{mod,ratelimit,presence}.rs):
+    # INCR/EXPIRE (rate-limit windows), DEL (presence cleanup),
+    # SCAN (presence cursor batches), HSET (presence pipe). The ACL file
+    # ships in the bundle with the password rendered at deploy time by
+    # scripts/deploy/push-bundle.sh (never committed). The gateway
+    # connects as the ACL user via
+    # GATEWAY_REDIS_URL=redis://concord:${REDIS_PASSWORD}@redis:6379;
+    # wrong credentials degrade to the documented local-limiter path.
+    command:
+      ["redis-server", "--aclfile", "/etc/redis/users.acl"]
+    volumes:
+      - ./redis/users.acl:/etc/redis/users.acl:ro
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "--user", "concord", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -102,6 +171,9 @@ services:
     environment:
       HOSTNAME: 0.0.0.0
       PORT: 3000
+    networks:
+      - edge
+      - durable
     # Host publication for the ALB web target group (port 3000). The
     # instance SG opens 3000 to the ALB SG ONLY (provision.sh, P7-M020)
     # — never 0.0.0.0/0.
@@ -116,6 +188,11 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+    # E5: runtime hardening.
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 200
+    stop_grace_period: 15s
 
   gw1:
     image: ${CONCORD_GATEWAY_IMAGE:?set in concord.env}
@@ -128,6 +205,15 @@ services:
       GATEWAY_BIND_HOST: 0.0.0.0
       GATEWAY_BIND_PORT: 8791
       GATEWAY_WORKER_BINARY: /app/concord-worker
+      # E1/E2: authenticated broker + ephemeral URLs (password via
+      # concord.env interpolation; values never committed).
+      GATEWAY_NATS_URL: nats://concord:${NATS_PASSWORD}@nats:4222
+      GATEWAY_REDIS_URL: redis://concord:${REDIS_PASSWORD}@redis:6379
+    networks:
+      - gateway_net
+      - durable
+      - event
+      - observability
     depends_on:
       db:
         condition: service_healthy
@@ -141,6 +227,13 @@ services:
       timeout: 5s
       retries: 12
       start_period: 5s
+    # E5: runtime hardening. Drain measured ~2.2 s (P7-M016); 15 s is a
+    # safe multiple. cap_drop ALL works because the Rust binary spawns
+    # the C++ worker as an unprivileged child process (no caps needed).
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 200
+    stop_grace_period: 15s
 
   gw2:
     image: ${CONCORD_GATEWAY_IMAGE:?}
@@ -153,6 +246,13 @@ services:
       GATEWAY_BIND_HOST: 0.0.0.0
       GATEWAY_BIND_PORT: 8792
       GATEWAY_WORKER_BINARY: /app/concord-worker
+      GATEWAY_NATS_URL: nats://concord:${NATS_PASSWORD}@nats:4222
+      GATEWAY_REDIS_URL: redis://concord:${REDIS_PASSWORD}@redis:6379
+    networks:
+      - gateway_net
+      - durable
+      - event
+      - observability
     depends_on:
       db:
         condition: service_healthy
@@ -166,6 +266,10 @@ services:
       timeout: 5s
       retries: 12
       start_period: 5s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 200
+    stop_grace_period: 15s
 
   gw3:
     image: ${CONCORD_GATEWAY_IMAGE:?}
@@ -178,6 +282,13 @@ services:
       GATEWAY_BIND_HOST: 0.0.0.0
       GATEWAY_BIND_PORT: 8793
       GATEWAY_WORKER_BINARY: /app/concord-worker
+      GATEWAY_NATS_URL: nats://concord:${NATS_PASSWORD}@nats:4222
+      GATEWAY_REDIS_URL: redis://concord:${REDIS_PASSWORD}@redis:6379
+    networks:
+      - gateway_net
+      - durable
+      - event
+      - observability
     depends_on:
       db:
         condition: service_healthy
@@ -191,11 +302,19 @@ services:
       timeout: 5s
       retries: 12
       start_period: 5s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 200
+    stop_grace_period: 15s
 
   lb:
-    image: nginx:1.29-alpine
+    # Digest-pinned (E6). nginx:1.29-alpine
+    image: nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
     container_name: concord-${ENV:-staging}-lb
     restart: unless-stopped
+    networks:
+      - edge
+      - gateway_net
     # Publishes the WS entrypoint ON THE HOST so the ALB target group
     # points at host :8890. Config file is rendered at deploy time
     # (scripts/deploy/render-nginx.sh) and mounted read-only.
@@ -210,11 +329,18 @@ services:
         condition: service_healthy
       gw3:
         condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 100
+    stop_grace_period: 15s
 
   prometheus:
-    image: prom/prometheus:v3.5.0
+    # Digest-pinned (E6). prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
     container_name: concord-${ENV:-staging}-prometheus
     restart: unless-stopped
+    networks:
+      - observability
     # 127.0.0.1 only — inspect via SSH tunnel. NEVER public.
     ports:
       - "127.0.0.1:9090:9090"
@@ -223,17 +349,28 @@ services:
       # scripts/deploy/prometheus.cloud.yml.in (targets gw1..gw3).
       - ./prometheus.cloud.yml:/etc/prometheus/prometheus.yml:ro
       - concord_prometheus:/prometheus
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 100
 
   grafana:
-    image: grafana/grafana:12.2.0
+    # Digest-pinned (E6). grafana/grafana:12.2.0
+    image: grafana/grafana:12.2.0@sha256:74144189b38447facf737dfd0f3906e42e0776212bf575dc3334c3609183adf7
     container_name: concord-${ENV:-staging}-grafana
     restart: unless-stopped
     environment:
-      # LOCAL-ONLY anonymous admin (loopback-bound; documented). If
-      # ever exposed beyond loopback, this MUST become auth-required.
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
-      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      # E3: NO anonymous admin in cloud mode. A real admin login is
+      # required; the password comes from concord.env (SSM-injected,
+      # generated at deploy time — never committed). Anonymous access
+      # stays a LOCAL-DEV affordance only (root docker-compose.yml).
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in concord.env}
+      GF_SECURITY_ALLOW_EMBEDDING: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    networks:
+      - observability
     ports:
       - "127.0.0.1:3001:3000"
     volumes:
@@ -244,6 +381,9 @@ services:
       - ./grafana.cloud:/etc/grafana/provisioning:ro
       - ./grafana.cloud-dashboards:/var/lib/grafana/dashboards:ro
       - concord_grafana:/var/lib/grafana
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 100
 
 volumes:
   concord_pgdata_cloud:

@@ -13,7 +13,10 @@
 # Smoke: scripts/release/smoke-images.sh
 
 # --- Stage 1: builder --------------------------------------------------------
-FROM rust:1.98-alpine AS builder
+# Digest-pinned (hardening E6): resolves to the exact audited content of
+# the tag; Dependabot (docker ecosystem) opens refresh PRs when the tag
+# moves — each refresh is rebuilt, SBOM-regenerated, and trivy-gated.
+FROM rust:1.98-alpine@sha256:1716b3aa042d735f4566d14dc54e8037de9d69556e2d5dd58131d93a613d173d AS builder
 # Pin the exact toolchain the repo pins (rust-toolchain.toml, 1.98.1).
 RUN rustup toolchain install 1.98.1 --profile minimal \
     && rustup default 1.98.1
@@ -32,7 +35,7 @@ RUN cargo build --release --manifest-path rust/sync-gateway/Cargo.toml
 # (same flow as docker/worker.Dockerfile: Release, tests/benchmarks off,
 # libstdc++/libgcc linked STATICALLY so the minimal runtime needs no
 # extra packages).
-FROM alpine:3.22 AS worker-builder
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS worker-builder
 RUN apk add --no-cache cmake ninja gcc g++ musl-dev
 WORKDIR /build
 COPY cpp ./cpp
@@ -42,14 +45,16 @@ RUN cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build/native
 
 # --- Stage 2: runtime --------------------------------------------------------
-FROM alpine:3.22 AS runtime
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
 # CA certs for Clerk HTTPS verification. Nothing else: no shell tools
 # beyond busybox defaults, no package manager, no build toolchain.
-# apk upgrade: pull security-fixed package versions from the pinned
-# base release repo (observed 2026-09-09: base ships openssl 3.5.7-r0
-# with 2 CRITICAL CVEs; 3.5.8-r0 is in the v3.22 repo). Pinned-minor +
-# upgrade keeps the SBOM honest: the resolved digests land in the image
-# manifest, and ECR scan-on-push re-verifies.
+# apk upgrade is a DELIBERATE, documented tradeoff (hardening E6): it
+# keeps OS packages at security-fixed versions from the pinned base
+# release repo, so image digests intentionally track the distro repo
+# state at build time (the runtime layer is NOT byte-reproducible;
+# the embedded binaries are). The trivy scan gate
+# (scripts/security/scan-gate.sh) enforces the CVE posture of the
+# result; refresh PRs re-run it.
 RUN apk add --no-cache ca-certificates && apk upgrade
 WORKDIR /app
 # Workspace target dir lives at the workspace root (rust/target), not the

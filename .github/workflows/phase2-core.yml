@@ -6,12 +6,17 @@ on:
     branches: [main, "phase/**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   native:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: lukka/get-cmake@latest
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # latest snapshot
       - name: Configure + build + test (native)
         run: |
           cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -21,8 +26,10 @@ jobs:
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm

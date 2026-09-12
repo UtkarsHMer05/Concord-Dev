@@ -1,0 +1,25 @@
+# Concord Redis ACL (hardening E2) — cloud/staging compose profile.
+#
+# The `concord` gateway user may issue ONLY the commands the gateway
+# actually uses, derived from code (rust/sync-gateway/src/ephemeral/):
+#   INCR, EXPIRE  — rate-limit fixed windows (ratelimit.rs)
+#   DEL           — presence cleanup (presence.rs)
+#   SCAN          — presence cursor batches (presence.rs)
+#   HSET          — presence hash writes via redis::pipe (presence.rs)
+#   PING          — container healthcheck only (no data access)
+#
+# Key patterns are namespaced under concord:* (the gateway namespaces
+# every key through RedisHandle::namespaced). The `default` user is
+# disabled except for PING (connection-level diagnostics).
+#
+# The password is NOT stored here: scripts/deploy/push-bundle.sh
+# renders `__REDIS_PASSWORD__` into this template at deploy time from
+# the per-environment secret (SSM SecureString) and ships the rendered
+# file in the bundle. See docker-compose.cloud.yml (E2 block).
+
+# default user: off except ping (connection diagnostics only).
+user default off -@all +ping
+
+# concord gateway user: exact command set, concord:* keys only. PING is
+# granted for the container healthcheck (it reads no data).
+user concord on -@all +ping +incr +expire +del +scan +hset ~concord:* >__REDIS_PASSWORD__

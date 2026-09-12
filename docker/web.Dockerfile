@@ -14,9 +14,10 @@
 # Run:    docker run --rm -p 3000:3000 --env-file .env.local concord-web:release
 
 # --- Stage 1: deps -----------------------------------------------------------
-# node:24-alpine is the LTS line matching .nvmrc (24.x) — pinned minor via
-# digest-independent tag; the SBOM records the resolved digest.
-FROM node:24.20-alpine AS deps
+# node:24-alpine is the LTS line matching .nvmrc (24.x). Digest-pinned
+# (hardening E6): the digest resolves the exact audited tag content;
+# Dependabot (docker ecosystem) opens refresh PRs when the tag moves.
+FROM node:24.20-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS deps
 WORKDIR /app
 # libc6-compat: native modules (esbuild via drizzle-kit chain) may need it.
 RUN apk add --no-cache libc6-compat
@@ -25,7 +26,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # --- Stage 2: build ----------------------------------------------------------
-FROM node:24.20-alpine AS build
+FROM node:24.20-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -48,10 +49,13 @@ ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY} \
 RUN npm run build
 
 # --- Stage 3: runtime --------------------------------------------------------
-FROM node:24.20-alpine AS runtime
-# Security-fixed package versions from the pinned base release repo
-# (2026-09-09: base openssl 3.5.7-r0 → 3.5.8-r0 with 2 CRITICAL CVE
-# fixes; ECR scan-on-push re-verifies after build).
+FROM node:24.20-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS runtime
+# apk upgrade is a DELIBERATE, documented tradeoff (hardening E6): it
+# keeps OS packages at security-fixed versions from the pinned base
+# release repo, so the runtime layer is NOT byte-reproducible (the
+# embedded standalone app is). The trivy scan gate
+# (scripts/security/scan-gate.sh) enforces the CVE posture; refresh PRs
+# re-run it.
 RUN apk upgrade
 WORKDIR /app
 ENV NODE_ENV=production \
