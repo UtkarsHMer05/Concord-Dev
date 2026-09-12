@@ -197,19 +197,6 @@ impl RateLimiter {
     }
 }
 
-/// Overrides the connect budget from GATEWAY_RATE_CONNECT_PER_MIN;
-/// absent or invalid keeps the default.
-pub fn policies_with_env_connect(mut policies: Policies) -> Policies {
-    if let Ok(raw) = std::env::var("GATEWAY_RATE_CONNECT_PER_MIN") {
-        if let Ok(max) = raw.parse::<u64>() {
-            if let Some(policy) = policies.get_mut(SCOPE_CONNECT) {
-                policy.max_events = max;
-            }
-        }
-    }
-    policies
-}
-
 /// P6-M010 cardinality guard: the `{scope}` label value on
 /// `concord_rate_limit_hits_total` comes from this fixed table ONLY — any
 /// unknown scope degrades to "other" (never a caller-controlled string).

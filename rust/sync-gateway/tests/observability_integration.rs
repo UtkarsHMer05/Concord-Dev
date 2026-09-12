@@ -187,6 +187,8 @@ fn base_config() -> Config {
         database_url: TEST_DB_URL.into(),
         clerk_issuer: ISSUER.into(),
         allowed_origins: vec![],
+        trusted_proxy_cidrs: vec![],
+        connect_rate_per_min: 240,
         max_frame_size: 8 * 1024 * 1024,
         per_connection_queue_capacity: 8,
         heartbeat_interval: Duration::from_secs(10),

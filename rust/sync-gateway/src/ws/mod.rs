@@ -8,7 +8,7 @@
 //! structured error mapped to a safe protocol error frame (no SQL
 //! details, no stack traces, no token material).
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -21,6 +21,47 @@ use axum::response::IntoResponse;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use uuid::Uuid;
+
+/// Resolve a connect-limit identity only through explicitly trusted peers.
+/// Each trusted hop appends its observed peer to XFF. Walk right to left and
+/// use the first untrusted address; a client-supplied leftmost spoof cannot
+/// replace the actual address appended by the LB. Invalid/ambiguous chains
+/// conservatively use the TCP peer's shared bucket.
+fn client_ip(
+    peer: SocketAddr,
+    headers: &axum::http::HeaderMap,
+    trusted: &[ipnet::IpNet],
+) -> IpAddr {
+    if !trusted.iter().any(|range| range.contains(&peer.ip())) {
+        return peer.ip();
+    }
+    let mut values = headers.get_all("x-forwarded-for").iter();
+    let Some(value) = values.next() else {
+        return peer.ip();
+    };
+    if values.next().is_some() {
+        return peer.ip();
+    }
+    let Ok(raw) = value.to_str() else {
+        return peer.ip();
+    };
+    let parts: Vec<_> = raw.split(',').collect();
+    if parts.is_empty() || parts.len() > 8 {
+        return peer.ip();
+    }
+    let mut chain = Vec::with_capacity(parts.len());
+    for part in parts {
+        let Ok(ip) = part.trim().parse::<IpAddr>() else {
+            return peer.ip();
+        };
+        chain.push(ip);
+    }
+    chain
+        .into_iter()
+        .rev()
+        .find(|ip| !trusted.iter().any(|range| range.contains(ip)))
+        .unwrap_or(peer.ip())
+}
 
 use crate::auth::TokenVerifier;
 use crate::config::Config;
@@ -112,13 +153,14 @@ pub async fn upgrade(
             return axum::http::StatusCode::FORBIDDEN.into_response();
         }
     }
-    // Admission control (P4-M031/M023): bounded new-connection rate per
-    // peer; distributed when Redis is up, local fallback otherwise.
+    // Admission control: normalized client IP only when every trusted hop
+    // is configured; distributed with Redis, local fallback otherwise.
+    let rate_client = client_ip(peer, &headers, &app.config.trusted_proxy_cidrs);
     if app
         .rate_limiter
         .check(
             crate::ephemeral::ratelimit::SCOPE_CONNECT,
-            &peer.ip().to_string(),
+            &rate_client.to_string(),
         )
         .await
         == RateLimitOutcome::Limited
@@ -131,7 +173,7 @@ pub async fn upgrade(
             "concord_ops_rejected_total",
             &[crate::telemetry::reject_reason::RATE_LIMITED],
         );
-        tracing::info!(peer = %peer, "connection rejected: rate limited");
+        tracing::info!(peer = %peer, client_ip = %rate_client, "connection rejected: rate limited");
         return axum::http::StatusCode::TOO_MANY_REQUESTS.into_response();
     }
     let registry = app.registry.clone();
@@ -1311,4 +1353,63 @@ pub async fn begin_drain(registry: &Arc<SessionRegistry>, grace_ms: u32) {
         let _ = sender.try_send(OutboundFrame::Text(frame.clone()));
     }
     tracing::info!(connections = count, "drain notice queued");
+}
+
+#[cfg(test)]
+mod client_ip_tests {
+    use super::*;
+
+    fn headers(value: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("x-forwarded-for", value.parse().expect("test header"));
+        headers
+    }
+
+    #[test]
+    fn direct_peer_cannot_spoof_a_forwarded_client() {
+        let proxy = ["10.0.0.0/8".parse().expect("CIDR")];
+        let direct = "198.51.100.9:1234".parse().expect("peer");
+        assert_eq!(
+            client_ip(direct, &headers("203.0.113.1"), &proxy),
+            direct.ip()
+        );
+        assert_eq!(client_ip(direct, &headers("203.0.113.1"), &[]), direct.ip());
+    }
+
+    #[test]
+    fn trusted_multihop_uses_rightmost_untrusted_ipv4_or_ipv6() {
+        let proxies = [
+            "10.0.0.0/8".parse().expect("CIDR"),
+            "fd00::/8".parse().expect("CIDR"),
+        ];
+        let gateway_peer = "10.2.0.3:8890".parse().expect("peer");
+        // Attacker-controlled leftmost value is ignored; ALB/nginx append
+        // the observed client and intermediary addresses to its right.
+        let chain = headers("192.0.2.99, 198.51.100.5, 10.1.0.4");
+        assert_eq!(
+            client_ip(gateway_peer, &chain, &proxies),
+            "198.51.100.5".parse::<IpAddr>().unwrap()
+        );
+        let ipv6_peer = "[fd00::3]:8890".parse().expect("peer");
+        assert_eq!(
+            client_ip(ipv6_peer, &headers("2001:db8::5, fd00::4"), &proxies),
+            "2001:db8::5".parse::<IpAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn missing_malformed_or_ambiguous_chain_falls_back_to_peer() {
+        let proxies = ["10.0.0.0/8".parse().expect("CIDR")];
+        let peer = "10.2.0.3:8890".parse().expect("peer");
+        for header in ["garbage", "198.51.100.1,", "198.51.100.1:1234", "10.1.2.3"] {
+            assert_eq!(client_ip(peer, &headers(header), &proxies), peer.ip());
+        }
+        assert_eq!(
+            client_ip(peer, &axum::http::HeaderMap::new(), &proxies),
+            peer.ip()
+        );
+        let mut duplicate = headers("198.51.100.1");
+        duplicate.append("x-forwarded-for", "198.51.100.2".parse().unwrap());
+        assert_eq!(client_ip(peer, &duplicate, &proxies), peer.ip());
+    }
 }

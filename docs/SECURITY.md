@@ -114,7 +114,7 @@ server-side checks.
 
 ### 6.4 Rate limiting + abuse
 Fixed-window budgets per (scope, principal) shared through Redis when
-available (connect 240/min/peer default — GATEWAY_RATE_CONNECT_PER_MIN
+available (connect 240/min/resolved-IP default — GATEWAY_RATE_CONNECT_PER_MIN
 override; writes 2000/min; malformed 50/min; snapshot reads 30/min per
 connection — the `fetch` scope covering `fetch_snapshot` and the
 `sync_request` resync decision). Gateway-hopping cannot evade the global
@@ -602,6 +602,8 @@ GATEWAY_REDIS_URL=redis://redis:6379
 GATEWAY_NATS_SUBJECT_PREFIX=concord.<env>        # same on ALL gateways
 GATEWAY_WORKER_BINARY=/app/concord-worker
 GATEWAY_RATE_CONNECT_PER_MIN=60                  # see 10.4
+# GATEWAY_TRUSTED_PROXY_CIDRS is intentionally unset in the cloud bundle;
+# see the verified-proxy prerequisite in 10.4.
 GATEWAY_MAX_FRAME_SIZE=8388608                   # 8 MiB (PROTOCOL §9.11)
 # --- web env (concord.env) ---
 NEXT_PUBLIC_SYNC_GATEWAY_URL=ws://<ALB-DNS-NAME>:8890/api/v1/sync
@@ -634,10 +636,14 @@ is, auth MUST be enabled — see OPERATIONS.md tunnel note).
 ### 10.4 Rate limits for public internet (recommended values)
 
 Defaults (`connect 240/min/IP`, `write 2000/min`, `malformed 50/min`,
-`fetch 30/min/conn`) are tuned for LOCAL dev. Behind nginx (round-robin
-across 3 gateways) the connect-limit principal is the LB's source IP —
-ALL clients share one bucket per gateway (finding F-P7-SEC-04). Public
-exposure therefore needs:
+`fetch 30/min/conn`) are tuned for LOCAL dev. The gateway now supports
+`GATEWAY_TRUSTED_PROXY_CIDRS`: it ignores forwarded headers from other
+peers and walks the trusted chain from right to left, using the first
+untrusted IP. Missing, duplicate or malformed headers fall back to the
+TCP peer. Invalid proxy ranges and connect budgets fail startup. The
+current cloud bundle does **not** configure trusted ranges, so behind
+nginx all clients still share its source-IP bucket (F-P7-SEC-04).
+Public exposure currently needs:
 
 - `GATEWAY_RATE_CONNECT_PER_MIN=60` — 240 is too generous as a GLOBAL
   bucket; 60/min shared ≈ 1 reconnect-storm of 20 tabs × 3 gateways.
@@ -646,9 +652,12 @@ exposure therefore needs:
 - `GATEWAY_MAX_FRAME_SIZE=8388608` (8 MiB) stays: it is the protocol
   cap validated against snapshot-serve size (SEC5-3), per-frame, not
   per-bucket.
-- Long-term fix (P8, `rust/`-owned): rate-limit on `X-Forwarded-For`
-  (trusted only from nginx/ALB) or the authenticated principal rather
-  than the TCP peer IP.
+- Before enabling client-specific buckets in cloud, pin the nginx-to-gateway
+  source addresses, verify the ALB appends the observed client IP, and set
+  `GATEWAY_TRUSTED_PROXY_CIDRS` only to the actual proxy peer range(s).
+  A wide Docker/VPC range can let another container/peer spoof client IPs;
+  the current bundle deliberately retains the shared bucket until this
+  topology is established and tested end to end.
 
 ### 10.5 CSP, cookies, verbose errors, source maps (honest posture)
 

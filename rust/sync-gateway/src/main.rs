@@ -111,11 +111,14 @@ async fn main() {
         }
         None => None,
     };
+    let mut policies = sync_gateway::ephemeral::ratelimit::default_policies();
+    policies
+        .get_mut(sync_gateway::ephemeral::ratelimit::SCOPE_CONNECT)
+        .expect("default connect policy exists")
+        .max_events = config.connect_rate_per_min;
     let rate_limiter = Arc::new(sync_gateway::ephemeral::ratelimit::RateLimiter::new(
         redis_handle.clone(),
-        sync_gateway::ephemeral::ratelimit::policies_with_env_connect(
-            sync_gateway::ephemeral::ratelimit::default_policies(),
-        ),
+        policies,
     ));
     let presence = redis_handle.map(|handle| {
         Arc::new(sync_gateway::ephemeral::presence::PresenceStore::new(

@@ -90,7 +90,8 @@ time (`--env-file`/orchestrator env). Never bake real values into an image.
 | `GATEWAY_NATS_SUBJECT_PREFIX` | `concord.dev` | namespace for the JetStream stream `CONCORD_OPS_<ns>` + subjects `<ns>.…`. **All gateways in one deployment MUST share one prefix.** |
 | `GATEWAY_ID` | generated (nonzero u64) | logs/origin-suppression/metrics identity only — never a correctness input. u64. |
 | `GATEWAY_JWKS_FILE` | unset | **dev/E2E ONLY** — local JWKS file instead of HTTPS issuer fetch. Never set in production. |
-| `GATEWAY_RATE_CONNECT_PER_MIN` | `240` | overrides the connect rate budget. Invalid values are **silently ignored** (default kept) — no startup failure. |
+| `GATEWAY_RATE_CONNECT_PER_MIN` | `240` | connect attempts per minute per resolved client IP; integer in `[1, 10000]`, otherwise startup fails. |
+| `GATEWAY_TRUSTED_PROXY_CIDRS` | unset (trust no proxy) | comma-separated IPv4/IPv6 CIDRs of proxy peers allowed to supply `X-Forwarded-For` (max 16, no `/0` catch-all); invalid values fail startup. Include only ranges from which the gateway can actually receive a trusted proxy connection. With a trusted peer, the gateway walks a valid, single forwarded chain from right to left and chooses the first untrusted address; missing or malformed chains fall back to the TCP peer. The ingress proxy must append the address it observes, and untrusted peers' headers are ignored. |
 | `GATEWAY_REDIS_URL` | unset | Redis-backed ephemeral tier. Absent ⇒ local-only rate limiting + presence disabled. Unreachable ⇒ fail-soft (same degraded posture). Redis holds NO durable data (see docs/OPERATIONS.md DR section). |
 
 ### Observability (Phase 6)

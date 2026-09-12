@@ -28,6 +28,7 @@ sha2.workspace = true
 hex.workspace = true
 thiserror.workspace = true
 futures-util.workspace = true
+ipnet = "2.12"
 async-nats.workspace = true
 redis.workspace = true
 # Phase 6 observability (P6-M009/M010).

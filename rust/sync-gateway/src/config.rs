@@ -21,6 +21,10 @@ pub struct Config {
     pub clerk_issuer: String,
     /// Comma-separated allowed browser origins (WebSocket upgrade policy).
     pub allowed_origins: Vec<String>,
+    /// IP ranges of proxies permitted to supply X-Forwarded-For. Empty by default.
+    pub trusted_proxy_cidrs: Vec<ipnet::IpNet>,
+    /// Validated connect budget per logical client IP (before authentication).
+    pub connect_rate_per_min: u64,
     /// Maximum accepted WebSocket frame size in bytes.
     pub max_frame_size: usize,
     /// Per-connection outbound queue capacity (count of frames).
@@ -126,6 +130,45 @@ impl Config {
                 .collect(),
             None => vec![DEFAULT_ORIGINS.to_string()],
         };
+        let trusted_proxy_cidrs = env_optional("GATEWAY_TRUSTED_PROXY_CIDRS")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| {
+                let cidr =
+                    value
+                        .trim()
+                        .parse::<ipnet::IpNet>()
+                        .map_err(|_| ConfigError::Invalid {
+                            key: "GATEWAY_TRUSTED_PROXY_CIDRS",
+                            message: "expected comma-separated IP CIDRs".into(),
+                        })?;
+                if cidr.prefix_len() == 0 {
+                    return Err(ConfigError::Invalid {
+                        key: "GATEWAY_TRUSTED_PROXY_CIDRS",
+                        message: "catch-all CIDR would trust arbitrary peers".into(),
+                    });
+                }
+                Ok(cidr)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if trusted_proxy_cidrs.len() > 16 {
+            return Err(ConfigError::Invalid {
+                key: "GATEWAY_TRUSTED_PROXY_CIDRS",
+                message: "at most 16 ranges are supported".into(),
+            });
+        }
+        let connect_rate_per_min = env_parse(
+            "GATEWAY_RATE_CONNECT_PER_MIN",
+            "expected a number in [1, 10000]",
+            240u64,
+        )?;
+        if !(1..=10_000).contains(&connect_rate_per_min) {
+            return Err(ConfigError::Invalid {
+                key: "GATEWAY_RATE_CONNECT_PER_MIN",
+                message: "must be within [1, 10000]".into(),
+            });
+        }
 
         let max_frame_size = env_parse(
             "GATEWAY_MAX_FRAME_SIZE",
@@ -248,6 +291,8 @@ impl Config {
             database_url,
             clerk_issuer,
             allowed_origins,
+            trusted_proxy_cidrs,
+            connect_rate_per_min,
             max_frame_size,
             per_connection_queue_capacity,
             heartbeat_interval,
@@ -285,6 +330,8 @@ mod tests {
             "GATEWAY_MAX_FRAME_SIZE",
             "GATEWAY_QUEUE_CAPACITY",
             "GATEWAY_ALLOWED_ORIGINS",
+            "GATEWAY_TRUSTED_PROXY_CIDRS",
+            "GATEWAY_RATE_CONNECT_PER_MIN",
             "GATEWAY_HEARTBEAT_INTERVAL_SECS",
             "GATEWAY_IDLE_TIMEOUT_SECS",
             "GATEWAY_DB_POOL_SIZE",
@@ -311,6 +358,8 @@ mod tests {
             "GATEWAY_MAX_FRAME_SIZE",
             "GATEWAY_QUEUE_CAPACITY",
             "GATEWAY_ALLOWED_ORIGINS",
+            "GATEWAY_TRUSTED_PROXY_CIDRS",
+            "GATEWAY_RATE_CONNECT_PER_MIN",
             "GATEWAY_HEARTBEAT_INTERVAL_SECS",
             "GATEWAY_IDLE_TIMEOUT_SECS",
             "GATEWAY_DB_POOL_SIZE",
@@ -482,5 +531,47 @@ mod tests {
         with_env(&[("GATEWAY_BIND_HOST", Some("0.0.0.0"))], || {
             assert!(Config::from_env().is_ok());
         });
+    }
+
+    #[test]
+    fn proxy_ranges_and_connect_budget_fail_closed_on_bad_configuration() {
+        with_env(&[], || {
+            let cfg = Config::from_env().expect("defaults");
+            assert!(cfg.trusted_proxy_cidrs.is_empty());
+            assert_eq!(cfg.connect_rate_per_min, 240);
+        });
+        with_env(
+            &[
+                ("GATEWAY_TRUSTED_PROXY_CIDRS", Some("10.0.0.0/8,fd00::/8")),
+                ("GATEWAY_RATE_CONNECT_PER_MIN", Some("60")),
+            ],
+            || {
+                let cfg = Config::from_env().expect("valid ranges");
+                assert_eq!(cfg.trusted_proxy_cidrs.len(), 2);
+                assert_eq!(cfg.connect_rate_per_min, 60);
+            },
+        );
+        for invalid in ["garbage", "0.0.0.0/0", "::/0"] {
+            with_env(&[("GATEWAY_TRUSTED_PROXY_CIDRS", Some(invalid))], || {
+                assert!(matches!(
+                    Config::from_env(),
+                    Err(ConfigError::Invalid {
+                        key: "GATEWAY_TRUSTED_PROXY_CIDRS",
+                        ..
+                    })
+                ));
+            });
+        }
+        for invalid in ["garbage", "0", "10001"] {
+            with_env(&[("GATEWAY_RATE_CONNECT_PER_MIN", Some(invalid))], || {
+                assert!(matches!(
+                    Config::from_env(),
+                    Err(ConfigError::Invalid {
+                        key: "GATEWAY_RATE_CONNECT_PER_MIN",
+                        ..
+                    })
+                ));
+            });
+        }
     }
 }

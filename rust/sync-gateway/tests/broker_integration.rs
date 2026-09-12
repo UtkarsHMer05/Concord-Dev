@@ -303,6 +303,8 @@ async fn forged_broker_cannot_fabricate_durable_state() {
             database_url: "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test".into(),
             clerk_issuer: "https://test.clerk.accounts.dev".into(),
             allowed_origins: vec![],
+            trusted_proxy_cidrs: vec![],
+            connect_rate_per_min: 240,
             max_frame_size: 8 * 1024 * 1024,
             per_connection_queue_capacity: 8,
             heartbeat_interval: std::time::Duration::from_secs(10),
