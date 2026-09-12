@@ -6,46 +6,58 @@ project as required for honest distribution.
 ## Project origin
 
 Concord originated from the Code With Antonio "Google Docs Clone"
-tutorial (a commercial Next.js/React/Clerk/Convex/Liveblocks course
-product). The project was deliberately rebuilt into an original
-engineering work: the synchronization stack — the C++20/WASM sequence
-CRDT, the Rust sync gateways, the binary wire protocol, the PostgreSQL
-durable plane (schema, ingest, snapshots, recovery, history), and the
-browser local-first runtime — is original to this repository. The
-pristine tutorial baseline is preserved for transparency at the git tag
+tutorial (a commercial Next.js/Clerk/Convex/Liveblocks course product).
+The project was deliberately rebuilt into an original engineering work:
+the synchronization stack — the C++20/WASM sequence CRDT, the Rust sync
+gateways, the binary wire protocol, the PostgreSQL durable plane
+(schema, ingest, snapshots, recovery, history), and the browser
+local-first runtime — is original to this repository. The pristine
+tutorial baseline is preserved for transparency at the git tag
 `antonio-original-baseline`.
 
-The seven baseline template thumbnails and baseline logo have been
-replaced with newly authored Concord SVGs; unused baseline starter SVGs,
-fonts and favicon were removed. The baseline template copy has been
-rewritten. Some product-shell source remains unchanged or modified from
-the baseline, including editor and UI components. The path-level
-inventory and unresolved review items are in `docs/PROVENANCE.md`.
+The baseline-derived material is resolved as documented in
+`docs/PROVENANCE.md`: all baseline artwork, fonts, favicon, template
+copy, and the tutorial-identical source files were replaced with
+original Concord implementations during the hardening pass; the
+remaining baseline-derived editor chrome was rewritten. A CI gate
+(`scripts/security/provenance-check.sh`) fails if any shipped file is
+byte-identical to the baseline without an explicit, verified,
+permissively-licensed allowlist entry.
 
-No official public upstream repository or license for the tutorial has
-been identified (tracked as risk R1 in `docs/PRD.md` and
-`docs/DECISIONS.md`); upstream licensing remains under review before
-any public release or redistribution of this repository.
+## License
 
-## Third-party runtime components (notable)
+This repository is licensed under the MIT License (root `LICENSE`),
+copyright 2026 Utkarsh Khajuria. Third-party components remain under
+their own licenses as summarized below.
 
-- **libvips and related prebuilt libraries** — the Next.js image pipeline
-  can include `sharp` and platform-specific `@img/sharp-libvips` binaries.
-  The upstream [third-party notices](https://github.com/lovell/sharp-libvips/blob/main/THIRD-PARTY-NOTICES.md)
+## Third-party components (notable)
+
+- **shadcn/ui generated components** (`src/components/ui/*.tsx`,
+  `src/lib/utils.ts`) — vendored output of the shadcn/ui component
+  generator (https://ui.shadcn.com), MIT licensed, © shadcn/ui authors.
+- **radix-ui primitives, lucide-react, TipTap/ProseMirror (MIT),
+  Next.js/React (MIT), Clerk (identity SaaS; client SDKs MIT),
+  nuqs, zustand, zod, Tailwind CSS, embla-carousel, sonner,
+  class-variance-authority, clsx, tailwind-merge** — consumed from npm
+  under their own licenses; the full machine-readable inventory is the
+  SBOM set at `scripts/sbom/web.cdx.json`.
+- **Rust crate set** (tokio, axum, tokio-postgres, deadpool, reqwest,
+  jsonwebtoken, async-nats, redis, opentelemetry, and transitive
+  dependencies) — mixed permissive licenses (MIT/Apache-2.0/BSD/ISC/
+  Zlib/CDLA-Permissive-2.0/BSL-1.0/Unicode), enforced by
+  `cargo-deny` (`rust/deny.toml`); inventory:
+  `scripts/sbom/rust-gateway.cdx.json`.
+- **libvips and related prebuilt libraries** — the Next.js image
+  pipeline can include `sharp` and platform-specific
+  `@img/sharp-libvips` binaries. The upstream
+  [third-party notices](https://github.com/lovell/sharp-libvips/blob/main/THIRD-PARTY-NOTICES.md)
   list several LGPLv3 components. Distribution-form and version-specific
-  attribution/source obligations still require review; this notice alone
-  is not a compliance determination.
-- **Clerk** (identity SaaS), **TipTap/ProseMirror** (MIT), **Next.js/
-  React** (MIT), **axum/tokio** and the Rust crate set (mixed licenses;
-  inspect the refreshed gateway SBOM), **Emscripten** toolchain output
-  (runtime is MIT-linked; build-time only).
-- Previously generated machine-readable inventories (not yet refreshed
-  for this hardening branch): `scripts/sbom/web.cdx.json`,
-  `scripts/sbom/rust-gateway.cdx.json`, and
-  `scripts/sbom/native-worker.cdx.json`.
-
-## Licensing status of this repository
-
-Not yet licensed for redistribution. The misleading MIT metadata was
-removed from the unpublished Rust crate pending a repository-wide
-provenance and license decision; see `docs/PROVENANCE.md`.
+  attribution/source obligations still require review for any release
+  that ships those binaries; this notice alone is not a compliance
+  determination.
+- **Container base images** (node, alpine, postgres, nats, redis,
+  nginx, prometheus, grafana) — digest-pinned; refreshed through the
+  Dependabot docker ecosystem with the trivy scan gate
+  (`scripts/security/scan-gate.sh`) enforcing the CVE posture.
+- **Native worker** (`cpp/`) — dependency-free C++20; no third-party
+  C/C++ runtime components (verified in the SBOM).

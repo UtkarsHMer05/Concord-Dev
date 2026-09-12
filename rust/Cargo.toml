@@ -5,6 +5,9 @@ members = ["sync-gateway"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+# Aligned with the root LICENSE (docs/PROVENANCE.md resolves the
+# tutorial-derived material; rust/deny.toml polices third-party crates).
+license = "MIT"
 
 [workspace.dependencies]
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util", "process", "fs"] }

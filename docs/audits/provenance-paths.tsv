@@ -34,7 +34,7 @@ src/app/documents/[documentId]/document-input.tsx	fe19d9f2bf4235e375d16c4e07c5b3
 src/app/documents/[documentId]/document.tsx	75b4406c2474db812637caacc8aa4497ad6e15a1	8b01064805d132b9fa6aa6e6586a19945edbab4d	changed
 src/app/documents/[documentId]/editor.tsx	ddf51bdc5d7b87d39ab6edaf5ff6c050410111e7	6c2f990f9cbc56be0ab04046d1a366e7d7fa9863	changed
 src/app/documents/[documentId]/inbox.tsx	f95e7ae14994553c192637091c7cb825f0f58d10	-	removed
-src/app/documents/[documentId]/loading.tsx	b97b9b206e413d4ef54a65861c83860436b09778	b97b9b206e413d4ef54a65861c83860436b09778	identical
+src/app/documents/[documentId]/loading.tsx	b97b9b206e413d4ef54a65861c83860436b09778	1caa9157e04a812551797cbed86a18cf8107cd5d	changed
 src/app/documents/[documentId]/navbar.tsx	c280d0b8b6d59452fec178764f73092638da383d	aad5054fc4663eb9a48d003f9d48209662d82344	changed
 src/app/documents/[documentId]/not-found.tsx	-	fd0e39fce4f47670a4e972893cdc18dedb5dd25e	new
 src/app/documents/[documentId]/page.tsx	4d254d35787e4ce41b9a76c189c94cb8bae6be11	ab3675c134c7ba34155fdd74d90ca88d305635cd	changed
@@ -51,10 +51,11 @@ src/app/globals.css	a30cf537bf684dad0087612fbe474b2102637189	63afcfbf3f92264f292
 src/app/icon.svg	-	d0157b7599546ebb14c1ea05907ab822235256a0	new
 src/app/layout.tsx	213016df4f6b8b1b10e10ed05cde6f4a3fee5e7c	3a1b3980b017a0bb2ed455453742278c085a231a	changed
 src/app/not-found.tsx	-	e84186cb5c75834ce5b34c6ca7fe5af09d929955	new
-src/components/clerk-client-provider.tsx	-	6569ff8b21ba4d6b40df4684eea58f5b8cff9e9d	new
+src/components/clerk-client-provider.tsx	-	c93d519ddaf80cfbff391f78e288a6514d42b4b0	new
 src/components/collaborative-mode-indicator.tsx	-	f23b41fe0e80dfd02350c4121a2c4b8cbe6a9fc8	new
 src/components/convex-client-provider.tsx	0510942ccd65de654e4ccb8928fc7a589a2b4c50	-	removed
-src/components/fullscreen-loader.tsx	1b7bb8721689d7e78a74d239700a4861ba303b14	6c7444b010fd58885739c1b841eaedcf94b183ab	changed
+src/components/fullscreen-loader.tsx	1b7bb8721689d7e78a74d239700a4861ba303b14	-	removed
+src/components/loading-indicator.tsx	-	fa1b24858ceb9c8631d4c3f923cab36dd8826d29	new
 src/components/remove-dialog.tsx	ad5f565350003267a24f16d30c81e436c1f9573e	be4683618ef8e63ce8202ea1bffb3790d5451cc6	changed
 src/components/rename-dialog.tsx	3ccb2aaf05d02de2b69fff4935638e24b4b2c1ba	20c485cbc160480fa36248017df20f0d85cb3fd7	changed
 src/components/save-status-indicator.tsx	-	5f1149eea4db91626ab7318f9df723140ab22db8	new
@@ -106,13 +107,13 @@ src/components/ui/toaster.tsx	171beb46d9c020c1be1ee9cb260b816d0bc2c1dd	-	removed
 src/components/ui/toggle-group.tsx	1c876bbeecabe59b684719afe58e684f34cdecbf	-	removed
 src/components/ui/toggle.tsx	db35d78be41228d233334289527c20d09f5a4c54	-	removed
 src/components/ui/tooltip.tsx	a66b3f22019c44e790760ecd218c288eac2af7eb	-	removed
-src/constants/margins.ts	f0652932698675e026716855b99a9aa692e5b05d	f0652932698675e026716855b99a9aa692e5b05d	identical
+src/constants/margins.ts	f0652932698675e026716855b99a9aa692e5b05d	6bdaf6af0f6d2e98735062ead1afbd4074a7978c	changed
 src/constants/templates.ts	17bb13c147e4c14ba1c30e228043aa08132065c5	51d70c8fc9190e44383b8c2e253b49d25b35fcb3	changed
-src/extensions/font-size.ts	691fe9b10a1e6910c1bb5454453de395eb004e6d	691fe9b10a1e6910c1bb5454453de395eb004e6d	identical
-src/extensions/line-height.ts	8ee0a7cb08e52376ce96b3e5e85ce06ae4e86fce	8ee0a7cb08e52376ce96b3e5e85ce06ae4e86fce	identical
+src/extensions/font-size.ts	691fe9b10a1e6910c1bb5454453de395eb004e6d	01c29af731d707d2765244a5342497686b75f24c	changed
+src/extensions/line-height.ts	8ee0a7cb08e52376ce96b3e5e85ce06ae4e86fce	0d3ebed4931a4ca369a61bdf1e7e9f5d64672670	changed
 src/hooks/use-debounce.ts	bfe046f5512555544462c11073417f42f4ae99c7	3c871fda94dea014d378cc0169be110dd72b7a53	changed
 src/hooks/use-mobile.tsx	2b0fe1dfef3b17850bbac040665f514a8ffd0f15	-	removed
-src/hooks/use-search-param.ts	ac2c6a574d98c5336babba4e10bbfdf5daf8cdbd	ac2c6a574d98c5336babba4e10bbfdf5daf8cdbd	identical
+src/hooks/use-search-param.ts	ac2c6a574d98c5336babba4e10bbfdf5daf8cdbd	00648590e88d069e8cdedf8580ffecc0d02a8d62	changed
 src/hooks/use-toast.ts	a8b931a08236dbe5e2e8e712c8e754f643a28169	-	removed
 src/lib/collaboration/connection-status.ts	-	a1438b185fa33b79f66cbff341dc9beebfac373a	new
 src/lib/collaboration/content.ts	-	5176d539d5d96454d1aa27d51d59a9d990f1aaab	new
@@ -139,7 +140,7 @@ src/lib/sync/use-sync-session.ts	-	12dd4787264a621e5c4d6f4bc1955f8ded998084	new
 src/lib/sync/worker-engine-port.ts	-	f0432034f8c0ebdf79d669d950211eec9bc577a7	new
 src/lib/utils.ts	bd0c391ddd1088e9067844c48835bf4abcd61783	bd0c391ddd1088e9067844c48835bf4abcd61783	identical
 src/middleware.ts	813dd08f480b54dfd2af5813e52d701d083dd10b	-	removed
-src/proxy.ts	-	813dd08f480b54dfd2af5813e52d701d083dd10b	new
+src/proxy.ts	-	b2b5400416612d224f624747ab85e68c0190edaf	new
 src/server/auth/actor-context.ts	-	a609b878ea73d03ee739259c0ca4999448e8a4ce	new
 src/server/auth/authorization.ts	-	4b818a94b2e16c72c06aafc6d7d88c529c233631	new
 src/server/db/client.ts	-	b9b2655c3fd32e5438b1081fc3f4b454cbb068dd	new
@@ -155,5 +156,5 @@ src/server/result.ts	-	cc81cb577966fec30330d7e7435313c2194fc61d	new
 src/server/services/documents.ts	-	6b9502bc0d248f1f624ac3abef91ef4f66ecd1d0	new
 src/server/services/permissions.ts	-	88fde4d33eae27f2daa21a1fd914ceeaa60eba30	new
 src/store/use-bridge-status-store.ts	-	f3f1cd080605d42780f283efd1b6e3d451c0d8f3	new
-src/store/use-editor-store.ts	326ad8494b69970e05d68299e2e4cd9af0cf75a3	326ad8494b69970e05d68299e2e4cd9af0cf75a3	identical
+src/store/use-editor-store.ts	326ad8494b69970e05d68299e2e4cd9af0cf75a3	12a0d72959b10595708cacf2113900b5ddf77ee4	changed
 src/store/use-sync-status-store.ts	-	dac5c659820e91c081f07f2413fde0d02a9c44b7	new

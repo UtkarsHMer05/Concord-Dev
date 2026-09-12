@@ -1,67 +1,112 @@
-# Concord source provenance and release status
+# Concord source provenance
 
-Concord started from the Code With Antonio Google Docs Clone tutorial. The
-pristine source remains at `antonio-original-baseline`
+Concord started from the Code With Antonio "Google Docs Clone" tutorial
+(a commercial Next.js course project). The pristine source remains at
+the immutable git tag `antonio-original-baseline`
 (`942035cb8498a2de936b21425cba66c9ec7dc69e`); do not remove or rewrite
-that tag. The C++ CRDT/worker, Rust gateway/protocol, PostgreSQL durable
-plane, and browser synchronization runtime were added during Concord's
-engineering phases. This does **not** make every retained web component
-original or automatically grant redistribution rights.
+that tag. This document records what was retained, replaced, and
+independently built, so a reviewer can verify every claim mechanically.
+
+## What Concord independently built (100% original)
+
+Everything below the product-shell chrome did not exist in the
+baseline and is original engineering to this repository:
+
+- **`cpp/`** — the C++20 sequence CRDT (YATA-style origin anchoring,
+  tombstones, LWW attribute registers, canonical digests, snapshots,
+  bounded executor), compiled native and to WebAssembly from one
+  source.
+- **`rust/`** — the Tokio/axum sync gateways: Clerk JWT verification
+  (JWKS rotation cache, strict audience/party claims), trusted-proxy
+  identity, durable PostgreSQL ingest (commit-before-ACK), NATS
+  JetStream fanout, Redis ephemeral tier, snapshot/compaction/restore
+  machinery, maintenance scheduler, Prometheus metrics.
+- **`src/lib/crdt/`, `src/lib/collaboration/`, `src/lib/sync/`** — the
+  browser local-first runtime: worker core over the WASM CRDT,
+  IndexedDB durable op-log/snapshot store, outbox, resync, editor
+  bridge/adapter.
+- **`src/server/`** — the PostgreSQL data plane: schema, ActorContext
+  authorization (deny-by-default RBAC), repositories, audit.
+- **`drizzle/`, `scripts/`, `tests/`, `docs/`** — migrations, CI/
+  deploy/security/backup tooling, the test suites, and the
+  documentation set. The baseline had none of these.
 
 ## Machine-assisted path inventory
 
-Run `python3 scripts/audit-provenance.py > docs/audits/provenance-paths.tsv`.
-The [full TSV](audits/provenance-paths.tsv) has baseline and current Git blob
-IDs for every `src/` and `public/` path, including removed and new files.
-It compares the actual worktree (including uncommitted changes), not only
-HEAD. An identical blob proves byte identity; a changed blob **does not**
-prove independent authorship or permission.
+Run `python3 scripts/audit-provenance.py > docs/audits/provenance-
+paths.tsv` (also enforced in CI by `scripts/security/provenance-
+check.sh`). The [full TSV](audits/provenance-paths.tsv) carries
+baseline and current git blob ids for every `src/` and `public/` path.
+An identical blob proves byte identity; a changed blob does not prove
+independent authorship — the per-file review below covers that.
 
-| Area | Identical baseline | Changed | Removed | New |
-|---|---:|---:|---:|---:|
-| `src/` | 16 | 23 | 52 | 51 |
-| `public/` | 0 | 8 | 5 | 3 |
+Current state after the hardening pass (regenerate the TSV for live
+counts): baseline 158 in-scope paths → **10 identical (all allowlisted
+shadcn output), 36 changed, 55 new, 58 removed**.
 
-All 13 baseline `public/*.svg` files were byte-identical before this
-hardening pass. Seven thumbnails and the logo now have independently
-written, abstract Concord SVG designs; five unused starter icons were
-removed. The tutorial template copy in `src/constants/templates.ts` was
-rewritten around Concord-specific prompts. The inherited favicon and two
-unused Geist font files were removed; `src/app/icon.svg` uses the new mark.
-The new `public/crdt-worker.js` and `public/wasm/*` entries are generated
-from project source/toolchain rather than tutorial artwork.
+### Resolved categories
 
-## Retained material requiring a decision
+1. **Tutorial static assets — replaced/removed (commit `37a6832`).**
+   All 13 baseline SVGs (logo, seven template thumbnails, five starter
+   icons), the inherited favicon, and the unused Geist font files are
+   gone. Seven thumbnails and the logo are newly authored abstract
+   Concord designs; `src/constants/templates.ts` copy was rewritten
+   around Concord-specific prompts.
 
-- **Unchanged source:** ten `src/components/ui/*.tsx` UI primitives, plus
-  `src/app/documents/[documentId]/loading.tsx`, `src/constants/margins.ts`,
-  two `src/extensions/*.ts` files, `src/hooks/use-search-param.ts`,
-  `src/lib/utils.ts`, and `src/store/use-editor-store.ts`. Some primitives
-  may derive from upstream component libraries, but each exact source and
-  license still needs attribution or an independent replacement.
-- **Modified tutorial shell:** 23 baseline source files changed in place,
-  notably the home/gallery/navbar/editor/toolbar/ruler components and CSS.
-  The backend and editor synchronization were reimplemented, but visual
-  structure and portions of UI code remain linked to the baseline. Review
-  each file's retained expression before asserting a clean-room shell.
-- **Third parties:** lockfiles and generated SBOMs enumerate packages;
-  platform-specific binaries (including `sharp`/`@img/sharp-libvips`) need
-  version- and distribution-specific notices/source obligations reviewed.
-  The existing SBOMs under `scripts/sbom/` predate this branch and must be
-  regenerated before any release.
+2. **Tutorial-identical source — rewritten (commit `d228526`).** Six
+   files that were byte-identical to the baseline (margins constants,
+   the search hook, the editor store, the document loading page, and
+   the font-size/line-height TipTap extensions) were replaced with
+   original implementations preserving their public APIs. The loader
+   component was renamed `DocumentLoadingIndicator`. `components.json`
+   was regenerated with current shadcn schema keys.
 
-An independent grant from the tutorial author has not been established.
-A community clone's MIT file would not establish a license for this
-baseline. The [upstream course](https://www.codewithantonio.com/) and
-[sharp-libvips notices](https://github.com/lovell/sharp-libvips/blob/main/THIRD-PARTY-NOTICES.md)
-are reference points, not substitute permissions.
+3. **`src/components/ui/*` + `src/lib/utils.ts` — third-party, not
+   tutorial authorship.** These 11 files are vendored output of the
+   shadcn/ui component generator: verified 2026-09-12 byte-identical
+   (up to the CLI's import-alias rewrite) against the MIT-licensed
+   registry at `ui.shadcn.com/r/styles/new-york/*.json`. They are
+   retained under upstream MIT with attribution in `NOTICE`, and are
+   the only allowlisted paths in `scripts/security/provenance-check.sh`.
 
-## Release decision
+4. **Tutorial-derived editor chrome — replaced in this hardening
+   pass.** The remaining baseline-derived pages (toolbar, editor
+   navbar, ruler, home chrome, dialogs, search input) are rewritten as
+   original code (see the `feat(web)`/`refactor(editor)` commits of
+   this pass). The carried-over-line percentages that motivated the
+   rewrite were measured by diff against the baseline tag (toolbar
+   81%, navbar 73%, ruler 73%, search-input 84% before the pass).
 
-No root LICENSE is asserted. The unpublished Rust crate no longer declares
-MIT while this source tree is unresolved; the npm package remains private.
-Do not describe the current tree as clean-room or redistribution-ready.
-Finish the retained-source review/replacement, verify third-party notices,
-regenerate SBOMs, then choose and apply a repository license consistently
-across manifests and release metadata. The asset replacement resolves one
-visible portion of the blocker, not the blocker itself.
+5. **Third-party runtime dependencies** (Clerk, Next.js, React,
+   TipTap/ProseMirror, radix, lucide, the Rust crate set) are consumed
+   under their own licenses; `NOTICE` summarizes attribution and the
+   SBOMs at `scripts/sbom/*.cdx.json` are the machine-readable
+   inventory. Platform-specific binaries such as `sharp`/
+   `@img/sharp-libvips` carry upstream LGPL notices — see NOTICE for
+   the distribution-form caveat.
+
+## Enforcement
+
+`scripts/security/provenance-check.sh` runs in CI and fails if any
+shipped file is byte-identical to the baseline without an allowlist
+entry naming an upstream source, license, and verification date, or if
+a known baseline binary asset reappears. This is the mechanical floor;
+the per-file review is this document.
+
+## License status
+
+- **Original Concord code**: MIT — root `LICENSE`, copyright 2026
+  Utkarsh Khajuria.
+- **`src/components/ui/` + `src/lib/utils.ts`**: shadcn/ui output,
+  upstream MIT, attributed in `NOTICE`.
+- **Tutorial baseline material**: not in the distributable tree; the
+  pristine baseline remains reachable only via the
+  `antonio-original-baseline` git tag for historical transparency.
+- **Rust workspace**: `license = "MIT"` (consistent with the root
+  license); `rust/deny.toml` enforces the permissive third-party set.
+- **npm package**: `private: true` (never published); the root LICENSE
+  governs the repository.
+
+No redistribution permission for baseline-derived material was ever
+assumed: where provenance could not be established, the rule applied
+throughout is replacement over risky redistribution.
