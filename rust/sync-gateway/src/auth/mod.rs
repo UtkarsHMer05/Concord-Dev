@@ -10,13 +10,15 @@
 //! triggers a bounded refresh (key-rotation support). Unit tests inject
 //! keys via the [`JwksSource`] trait — no network in tests.
 
+use futures_util::StreamExt;
 use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet};
 use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::Mutex as AsyncMutex;
 
 /// Verified Clerk principal. `clerk_user_id` is the verified token `sub`;
 /// Concord's `users.id` is resolved later by the DB layer (M015).
@@ -80,20 +82,37 @@ impl JwksSource for HttpJwks {
         let url = self.url.clone();
         Box::pin(async move {
             let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
+                .timeout(Duration::from_secs(10))
                 .build()
                 .map_err(|_| AuthError::JwksUnavailable)?;
-            client
+            let response = client
                 .get(&url)
                 .send()
                 .await
                 .map_err(|_| AuthError::JwksUnavailable)?
-                .json::<JwkSet>()
-                .await
-                .map_err(|_| AuthError::JwksUnavailable)
+                .error_for_status()
+                .map_err(|_| AuthError::JwksUnavailable)?;
+            if response
+                .content_length()
+                .is_some_and(|n| n > MAX_JWKS_BYTES as u64)
+            {
+                return Err(AuthError::JwksUnavailable);
+            }
+            let mut bytes = Vec::new();
+            let mut stream = response.bytes_stream();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|_| AuthError::JwksUnavailable)?;
+                if chunk.len() > MAX_JWKS_BYTES.saturating_sub(bytes.len()) {
+                    return Err(AuthError::JwksUnavailable);
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            serde_json::from_slice(&bytes).map_err(|_| AuthError::JwksUnavailable)
         })
     }
 }
+
+const MAX_JWKS_BYTES: usize = 128 * 1024;
 
 /// File-backed JWKS source (GATEWAY_JWKS_FILE): local dev/E2E path — reads
 /// a standard JWKS document from disk. Never enabled implicitly; the
@@ -144,23 +163,32 @@ impl JwksSource for VerifierSource {
 pub struct TokenVerifier<S: JwksSource = HttpJwks> {
     issuer: String,
     source: S,
-    keys: Mutex<HashMap<String, Arc<DecodingKey>>>,
-    refresh_count: AtomicU64,
-    /// Bound on refresh attempts per unknown `kid` (rotation support with
-    /// resource containment).
-    max_refreshes: u32,
+    cache: Mutex<KeyCache>,
+    refresh_gate: AsyncMutex<()>,
+    refresh_cooldown: Duration,
 }
 
-const DEFAULT_MAX_REFRESHES: u32 = 3;
+#[derive(Default)]
+struct KeyCache {
+    keys: HashMap<String, Arc<DecodingKey>>,
+    negative: HashMap<String, Instant>,
+    loaded_at: Option<Instant>,
+    last_attempt: Option<Instant>,
+}
+
+const KEY_TTL: Duration = Duration::from_secs(60 * 60);
+const NEGATIVE_TTL: Duration = Duration::from_secs(60);
+const DEFAULT_REFRESH_COOLDOWN: Duration = Duration::from_secs(30);
+const MAX_NEGATIVE_KIDS: usize = 256;
 
 impl<S: JwksSource> TokenVerifier<S> {
     pub fn new(issuer: &str, source: S) -> Self {
         Self {
             issuer: issuer.trim_end_matches('/').to_owned(),
             source,
-            keys: Mutex::new(HashMap::new()),
-            refresh_count: AtomicU64::new(0),
-            max_refreshes: DEFAULT_MAX_REFRESHES,
+            cache: Mutex::new(KeyCache::default()),
+            refresh_gate: AsyncMutex::new(()),
+            refresh_cooldown: DEFAULT_REFRESH_COOLDOWN,
         }
     }
 
@@ -210,8 +238,11 @@ impl<S: JwksSource> TokenVerifier<S> {
         // tokens carry no aud claim.
         validation.validate_aud = false;
 
-        let key = self.key_for(&kid).await.ok_or(AuthError::Invalid {
-            reason: "unknown key id",
+        let key = self.key_for(&kid).await.ok_or_else(|| {
+            crate::observability::metrics::incr("concord_jwks_unknown_kid_total");
+            AuthError::Invalid {
+                reason: "unknown key id",
+            }
         })?;
         let data = decode::<ClerkClaims>(token, &key, &validation).map_err(classify)?;
 
@@ -223,30 +254,77 @@ impl<S: JwksSource> TokenVerifier<S> {
     }
 
     async fn key_for(&self, kid: &str) -> Option<Arc<DecodingKey>> {
-        // Fast path: cached key (lock released before any await).
+        if let Some(cached) = self.cached_key(kid) {
+            return Some(cached);
+        }
+        // One caller fetches at a time. Waiters recheck the populated cache;
+        // a burst cannot launch parallel issuer requests.
+        let _gate = self.refresh_gate.lock().await;
+        if let Some(cached) = self.cached_key(kid) {
+            return Some(cached);
+        }
+        let now = Instant::now();
         {
-            let keys = self.keys.lock().ok()?;
-            if let Some(k) = keys.get(kid) {
-                return Some(Arc::clone(k));
+            let mut cache = self.cache.lock().ok()?;
+            if cache.negative.get(kid).is_some_and(|until| *until > now) {
+                return None;
             }
+            if cache
+                .last_attempt
+                .is_some_and(|last| now.duration_since(last) < self.refresh_cooldown)
+            {
+                crate::observability::metrics::incr("concord_jwks_refresh_throttled_total");
+                return None;
+            }
+            cache.last_attempt = Some(now);
         }
-        // Unknown kid: bounded refresh (key rotation). The lock is NOT held
-        // across the await.
-        if self.refresh_count.load(Ordering::Relaxed) >= self.max_refreshes as u64 {
-            return None;
-        }
-        self.refresh_count.fetch_add(1, Ordering::Relaxed);
-        let set = self.source.load_jwks().await.ok()?;
-        let mut keys = self.keys.lock().ok()?;
-        keys.clear();
+        crate::observability::metrics::incr("concord_jwks_refresh_attempts_total");
+        let set = match self.source.load_jwks().await {
+            Ok(set) => set,
+            Err(_) => {
+                crate::observability::metrics::incr("concord_jwks_refresh_failures_total");
+                return None;
+            }
+        };
+        let mut fresh = HashMap::new();
         for jwk in set.keys {
             if let Some(id) = jwk.common.key_id.clone() {
                 if let Ok(key) = decoding_key(&jwk) {
-                    keys.insert(id, Arc::new(key));
+                    fresh.insert(id, Arc::new(key));
                 }
             }
         }
-        keys.get(kid).map(Arc::clone)
+        if fresh.is_empty() {
+            crate::observability::metrics::incr("concord_jwks_refresh_failures_total");
+            return None;
+        }
+        crate::observability::metrics::incr("concord_jwks_refresh_success_total");
+        let mut cache = self.cache.lock().ok()?;
+        cache.keys = fresh;
+        cache.loaded_at = Some(Instant::now());
+        cache.negative.clear();
+        if !cache.keys.contains_key(kid) {
+            if cache.negative.len() >= MAX_NEGATIVE_KIDS {
+                cache.negative.clear();
+            }
+            cache
+                .negative
+                .insert(kid.to_owned(), Instant::now() + NEGATIVE_TTL);
+        }
+        cache.keys.get(kid).map(Arc::clone)
+    }
+
+    fn cached_key(&self, kid: &str) -> Option<Arc<DecodingKey>> {
+        let cache = self.cache.lock().ok()?;
+        if cache
+            .loaded_at
+            .is_some_and(|loaded| loaded.elapsed() < KEY_TTL)
+        {
+            if let Some(key) = cache.keys.get(kid) {
+                return Some(Arc::clone(key));
+            }
+        }
+        None
     }
 }
 
@@ -583,12 +661,13 @@ mod tests {
             }
         }
 
-        let v = TokenVerifier::new(
+        let mut v = TokenVerifier::new(
             ISSUER,
             RotatingJwks {
                 state: state.clone(),
             },
         );
+        v.refresh_cooldown = Duration::ZERO;
         let rt = tokio::runtime::Runtime::new().expect("test runtime");
 
         // Phase 1: token under key-1 verifies and populates the cache.
@@ -613,5 +692,131 @@ mod tests {
             *state.lock().expect("lock") >= 2,
             "rotation required a JWKS refresh"
         );
+    }
+
+    #[test]
+    fn unknown_kids_cannot_permanently_exhaust_rotation_refresh() {
+        const KEY1: &[u8] = include_bytes!("test_rsa_key.der");
+        const KEY2: &[u8] = include_bytes!("test_rsa_key2.der");
+        let state = Arc::new(Mutex::new((0usize, false)));
+        struct RotatingSource(Arc<Mutex<(usize, bool)>>);
+        impl JwksSource for RotatingSource {
+            fn load_jwks(
+                &self,
+            ) -> futures_util::future::BoxFuture<'static, Result<JwkSet, AuthError>> {
+                let state = Arc::clone(&self.0);
+                Box::pin(async move {
+                    let mut state = state.lock().expect("test source lock");
+                    state.0 += 1;
+                    Ok(if state.1 {
+                        jwks_with_kid("new-key", KEY2)
+                    } else {
+                        jwks_with_kid("old-key", KEY1)
+                    })
+                })
+            }
+        }
+        let verifier = TokenVerifier::new(ISSUER, RotatingSource(Arc::clone(&state)));
+        let rt = tokio::runtime::Runtime::new().expect("test runtime");
+        let old = sign(
+            &claims_now("old", ISSUER),
+            &test_encoding_key_from(KEY1),
+            "old-key",
+        );
+        rt.block_on(verifier.verify(&old)).expect("initial key");
+
+        for kid in ["unknown-1", "unknown-2", "unknown-3"] {
+            let token = sign(
+                &claims_now("attacker", ISSUER),
+                &test_encoding_key_from(KEY1),
+                kid,
+            );
+            assert!(rt.block_on(verifier.verify(&token)).is_err());
+        }
+        assert_eq!(
+            state.lock().expect("test source lock").0,
+            1,
+            "an unknown-kid burst within cooldown must not cause extra fetches"
+        );
+        state.lock().expect("test source lock").1 = true;
+        verifier.cache.lock().expect("cache lock").last_attempt =
+            Some(Instant::now() - DEFAULT_REFRESH_COOLDOWN);
+        let rotated = sign(
+            &claims_now("new", ISSUER),
+            &test_encoding_key_from(KEY2),
+            "new-key",
+        );
+        rt.block_on(verifier.verify(&rotated))
+            .expect("unknown kids must not permanently disable real rotation");
+    }
+
+    #[tokio::test]
+    async fn concurrent_unknown_kids_coalesce_to_one_refresh() {
+        const KEY: &[u8] = include_bytes!("test_rsa_key.der");
+        let loads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        struct CountingSource(Arc<std::sync::atomic::AtomicUsize>);
+        impl JwksSource for CountingSource {
+            fn load_jwks(
+                &self,
+            ) -> futures_util::future::BoxFuture<'static, Result<JwkSet, AuthError>> {
+                let loads = Arc::clone(&self.0);
+                Box::pin(async move {
+                    loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    Ok(jwks_with_kid("real-key", KEY))
+                })
+            }
+        }
+        let verifier = Arc::new(TokenVerifier::new(
+            ISSUER,
+            CountingSource(Arc::clone(&loads)),
+        ));
+        let token = sign(
+            &claims_now("attacker", ISSUER),
+            &test_encoding_key_from(KEY),
+            "fake-key",
+        );
+        let tasks = (0..20).map(|_| {
+            let verifier = Arc::clone(&verifier);
+            let token = token.clone();
+            tokio::spawn(async move { verifier.verify(&token).await })
+        });
+        for result in futures_util::future::join_all(tasks).await {
+            assert!(result.expect("task joined").is_err());
+        }
+        assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn oversized_http_jwks_is_rejected_before_body_download() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local test server");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut request = [0u8; 1024];
+            let amount = stream.read(&mut request).await.expect("read request");
+            assert!(amount > 0);
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        MAX_JWKS_BYTES + 1
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .expect("write headers");
+        });
+        let source = HttpJwks {
+            url: format!("http://{addr}/jwks"),
+        };
+        assert!(matches!(
+            source.load_jwks().await,
+            Err(AuthError::JwksUnavailable)
+        ));
+        server.await.expect("test server joined");
     }
 }

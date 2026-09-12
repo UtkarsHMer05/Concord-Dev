@@ -12,7 +12,7 @@ tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "tim
 axum = { version = "0.8", features = ["ws"] }
 tokio-postgres = { version = "0.7.18", features = ["with-chrono-0_4", "with-uuid-1"] }
 deadpool-postgres = { version = "0.14.2", features = ["rt_tokio_1"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }

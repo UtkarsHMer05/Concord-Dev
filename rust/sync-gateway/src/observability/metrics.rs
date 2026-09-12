@@ -75,6 +75,26 @@ const COUNTERS: &[CounterSpec] = &[
         "concord_compaction_bytes_total",
         "Payload bytes pruned from the durable op log by compaction.",
     ),
+    (
+        "concord_jwks_refresh_attempts_total",
+        "JWKS source refresh attempts.",
+    ),
+    (
+        "concord_jwks_refresh_success_total",
+        "Valid JWKS refreshes.",
+    ),
+    (
+        "concord_jwks_refresh_failures_total",
+        "Failed or invalid JWKS refreshes.",
+    ),
+    (
+        "concord_jwks_refresh_throttled_total",
+        "JWKS refreshes deferred by cooldown.",
+    ),
+    (
+        "concord_jwks_unknown_kid_total",
+        "Tokens rejected for an unknown key id.",
+    ),
 ];
 
 /// Labeled counters — label keys fixed; values are bounded enums at call

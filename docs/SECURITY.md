@@ -60,8 +60,11 @@ Last updated: 2026-09-09
 - Per-connection outbound queue is bounded (config; slow consumers are
   disconnected and recover via catch-up — durable ops never silently
   dropped).
-- DB pool bounded; JWKS refresh attempts bounded (rotation without
-  unbounded fetch loops); heartbeat/idle timeouts reap dead sockets
+- DB pool bounded; JWKS loads are singleflight with a 30-second refresh
+  cooldown, 60-second negative cache for missing IDs, 128 KiB response cap,
+  10-second HTTP timeout, and one-hour key-cache TTL. A burst cannot exhaust
+  a permanent refresh budget; rotation retries after cooldown.
+  Heartbeat/idle timeouts reap dead sockets
   (verified: the M021-M030 deadlock fix — every connection now reaps).
 
 ## 5. Known accepted limitations
