@@ -168,7 +168,12 @@ run_rust() {
   if [ -z "${GATEWAY_DATABASE_URL:-}" ]; then
     printf 'SKIP: rust/gateway DB-integration suites — GATEWAY_DATABASE_URL unset (tests self-skip when the DB is unreachable; unit tests still run)\n'
   fi
-  ( cd rust && cargo test --quiet ) || sub_fail=1
+  # --test-threads=1 is the DOCUMENTED serial convention (CONTRIBUTING.md,
+  # release prompt Q4): the chaos suites docker pause/kill the shared
+  # concord-nats/concord-redis containers — a parallel run interleaves
+  # those faults across tests and fails on interference, not on defects
+  # (verified: the same suite is green serially, red in parallel).
+  ( cd rust && cargo test --quiet -- --test-threads=1 ) || sub_fail=1
 
   if [ "$sub_fail" -eq 0 ]; then
     record PASS rust "$start"

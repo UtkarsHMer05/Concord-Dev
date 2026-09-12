@@ -84,7 +84,15 @@ cargo clippy --all-targets -- -D warnings
 cargo test --lib
 cargo test --test db_integration -- --test-threads=1   # shared test DB: serialize
 cargo test --test ws_integration -- --test-threads=1
+cargo test -- --test-threads=1                          # full serial run (see note)
 ```
+
+`--test-threads=1` is the convention for ANY suite that manipulates
+shared state (the compose `concord-db`/`concord-nats`/`concord-redis`
+containers): the chaos suites pause and kill those containers on
+purpose, so a parallel run interleaves the faults and fails on
+interference rather than on defects. `scripts/verify-all.sh` runs the
+Rust gate serially for exactly this reason.
 
 Sanitizer, fuzz, chaos, and benchmark gates exist beyond these
 (as described in [docs/TESTING.md](docs/TESTING.md)); run them when your
