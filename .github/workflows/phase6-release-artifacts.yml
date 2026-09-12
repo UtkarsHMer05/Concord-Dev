@@ -26,11 +26,12 @@
 #     already builds BOTH images from the archive and smoke-starts them.
 #     The image .tar artifacts are exported from the exact images the
 #     script built (same tags, tagged release-stable before export).
-#   - worker artifact: no --version flag exists (cpp/worker/main.cpp is
-#     a frame-protocol binary). A MINIMAL STDIN PROBE is used instead —
-#     documented here and inline: send one generate_ops request
+#   - worker artifact: the worker's --version argv mode (release 1.0.0)
+#     reports the CMake project VERSION + short git sha and exits 0 before
+#     any stdin reading (wired via CONCORD_VERSION/CONCORD_GIT_SHA compile
+#     definitions). As a deeper probe, one generate_ops stdin request
 #     (command 6: [u32 6][u64 seed][u32 op_count][u32 replicas][u32
-#     shape] under the [u32 len] prefix) and assert a status=0 response
+#     shape] under the [u32 len] prefix) asserts a status=0 response
 #     frame carrying a digest and ≥1 batch. This is the same command the
 #     Rust differential verifier uses; a worker that cannot execute it
 #     is not shippable.
@@ -86,13 +87,23 @@ jobs:
         run: |
           cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/native
-      # Minimal stdin command probe (no --version exists): one generate_ops
-      # request → assert status 0 + digest + ≥1 batch. Proven against the
-      # worker protocol (cpp/worker/main.cpp command ids + response shape).
-      - name: Smoke the worker binary (generate_ops stdin probe)
+      # Version probe (--version prints "concord-worker <version> (<sha>)"
+      # and exits 0 before any stdin reading) + a deeper stdin command
+      # probe: one generate_ops request → assert status 0 + digest + ≥1
+      # batch. Proven against the worker protocol (cpp/worker/main.cpp
+      # command ids + response shape).
+      - name: Smoke the worker binary (--version + generate_ops stdin probe)
         run: |
+          ./build/native/worker/concord-worker --version
           python3 - <<'EOF'
           import struct, subprocess, sys
+          # --version must exit 0 with a one-line version report (no stdin).
+          p = subprocess.run(["build/native/worker/concord-worker", "--version"],
+                             capture_output=True, input=b"")
+          assert p.returncode == 0, f"--version exit {p.returncode}"
+          line = p.stdout.decode().strip()
+          assert line.startswith("concord-worker "), f"bad version line: {line!r}"
+          print(f"worker --version OK: {line}")
           payload = struct.pack("<I", 6) + struct.pack("<Q", 1) + struct.pack("<III", 10, 2, 0)
           frame = struct.pack("<I", len(payload)) + payload
           p = subprocess.run(["build/native/worker/concord-worker"], input=frame, capture_output=True)

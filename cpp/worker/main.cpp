@@ -40,6 +40,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -1759,11 +1760,42 @@ int run_worker() {
     return kExitHandled;
 }
 
+// ---------------------------------------------------------------------------
+// --version: report the release identity and exit BEFORE any stdin reading.
+// Zero impact on frame semantics (the process-per-request wrapper and the
+// interactive driver both start at the frame loop; argv is ignored there).
+//
+// Output contract (pinned by tests/worker_test.cpp):
+//   "concord-worker 1.0.0 (<short-sha>)\n"  when CONCORD_GIT_SHA is wired
+//   "concord-worker 1.0.0\n"                 plain form otherwise
+// The version comes from the build (CONCORD_VERSION compile definition,
+// set from the CMake project VERSION == package.json version). The
+// build-definition fallback keeps a bare compile from failing.
+// ---------------------------------------------------------------------------
+#ifndef CONCORD_VERSION
+#define CONCORD_VERSION "unknown"
+#endif
+
+bool print_version() {
+#if defined(CONCORD_GIT_SHA)
+    std::printf("concord-worker %s (%s)\n", CONCORD_VERSION, CONCORD_GIT_SHA);
+#else
+    std::printf("concord-worker %s\n", CONCORD_VERSION);
+#endif
+    (void)std::fflush(stdout);
+    return true;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     // Fatal diagnostics only on stderr; never payload content.
     try {
+        // --version short-circuits before any frame I/O begins.
+        if (argc > 1 && argv[1] == std::string_view("--version")) {
+            (void)print_version();
+            return 0;
+        }
         return run_worker();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "concord-worker: fatal: %s\n", e.what());

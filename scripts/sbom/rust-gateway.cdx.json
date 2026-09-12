@@ -15,10 +15,10 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/concord-sync-gateway@0.1.0",
+      "bom-ref": "pkg:generic/concord-sync-gateway@1.0.0",
       "name": "concord-sync-gateway",
-      "version": "0.1.0",
-      "purl": "pkg:generic/concord-sync-gateway@0.1.0",
+      "version": "1.0.0",
+      "purl": "pkg:generic/concord-sync-gateway@1.0.0",
       "description": "Concord Rust sync-gateway (workspace crate set)"
     },
     "properties": [
@@ -1613,20 +1613,6 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/libm@0.2.16",
-      "name": "libm",
-      "version": "0.2.16",
-      "purl": "pkg:cargo/libm@0.2.16",
-      "licenses": [
-        {
-          "license": {
-            "id": "MIT"
-          }
-        }
-      ]
-    },
-    {
-      "type": "library",
       "bom-ref": "pkg:cargo/libredox@0.1.23",
       "name": "libredox",
       "version": "0.1.23",
@@ -1837,20 +1823,6 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/num-bigint-dig@0.8.6",
-      "name": "num-bigint-dig",
-      "version": "0.8.6",
-      "purl": "pkg:cargo/num-bigint-dig@0.8.6",
-      "licenses": [
-        {
-          "license": {
-            "name": "MIT/Apache-2.0"
-          }
-        }
-      ]
-    },
-    {
-      "type": "library",
       "bom-ref": "pkg:cargo/num-conv@0.2.2",
       "name": "num-conv",
       "version": "0.2.2",
@@ -1869,20 +1841,6 @@
       "name": "num-integer",
       "version": "0.1.47",
       "purl": "pkg:cargo/num-integer@0.1.47",
-      "licenses": [
-        {
-          "license": {
-            "id": "MIT"
-          }
-        }
-      ]
-    },
-    {
-      "type": "library",
-      "bom-ref": "pkg:cargo/num-iter@0.1.46",
-      "name": "num-iter",
-      "version": "0.1.46",
-      "purl": "pkg:cargo/num-iter@0.1.46",
       "licenses": [
         {
           "license": {
@@ -2705,20 +2663,6 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/rsa@0.9.10",
-      "name": "rsa",
-      "version": "0.9.10",
-      "purl": "pkg:cargo/rsa@0.9.10",
-      "licenses": [
-        {
-          "license": {
-            "id": "MIT"
-          }
-        }
-      ]
-    },
-    {
-      "type": "library",
       "bom-ref": "pkg:cargo/rustc-hash@2.1.3",
       "name": "rustc-hash",
       "version": "2.1.3",
@@ -3209,20 +3153,6 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/spin@0.9.9",
-      "name": "spin",
-      "version": "0.9.9",
-      "purl": "pkg:cargo/spin@0.9.9",
-      "licenses": [
-        {
-          "license": {
-            "id": "MIT"
-          }
-        }
-      ]
-    },
-    {
-      "type": "library",
       "bom-ref": "pkg:cargo/spki@0.7.3",
       "name": "spki",
       "version": "0.7.3",
@@ -3307,9 +3237,9 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/sync-gateway@0.1.0",
+      "bom-ref": "pkg:cargo/sync-gateway@1.0.0",
       "name": "sync-gateway",
-      "version": "0.1.0"
+      "version": "1.0.0"
     },
     {
       "type": "library",
@@ -4129,6 +4059,20 @@
       "name": "wasm-bindgen-shared",
       "version": "0.2.128",
       "purl": "pkg:cargo/wasm-bindgen-shared@0.2.128",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/wasm-streams@0.4.2",
+      "name": "wasm-streams",
+      "version": "0.4.2",
+      "purl": "pkg:cargo/wasm-streams@0.4.2",
       "licenses": [
         {
           "license": {

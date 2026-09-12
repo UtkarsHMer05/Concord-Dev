@@ -43,6 +43,13 @@ endif()
 target_compile_options(concord_crdt PRIVATE ${CONCORD_WARNING_FLAGS} ${CONCORD_SANITIZER_FLAGS})
 target_link_options(concord_crdt INTERFACE ${CONCORD_SANITIZER_FLAGS})
 
+# Release identity (top-level project VERSION, == package.json's version):
+# available to the core's own sources via CONCORD_VERSION. The wire-protocol
+# constant (kProtocolVersion in serialize.hpp) is separate and never tracks it.
+target_compile_definitions(concord_crdt PRIVATE
+  CONCORD_VERSION="${CONCORD_VERSION}"
+)
+
 if(CONCORD_BUILD_TESTS)
   add_subdirectory(tests)
 endif()

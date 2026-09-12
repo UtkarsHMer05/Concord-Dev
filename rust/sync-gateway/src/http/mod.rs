@@ -45,6 +45,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health/live", get(live))
         .route("/api/v1/health/ready", get(ready))
+        .route("/api/v1/health/info", get(info))
         .route("/api/v1/metrics", get(metrics))
         .route("/metrics", get(prometheus_metrics))
         .route("/api/v1/sync", get(ws::upgrade))
@@ -56,6 +57,19 @@ async fn live() -> Json<Value> {
         "status": "ok",
         "service": "concord-sync-gateway",
         "protocolVersion": crate::WIRE_PROTOCOL_VERSION,
+    }))
+}
+
+/// Build-info surface (release 1.0.0): EXACTLY four compile-time fields —
+/// version, git sha, build profile, protocol version. Nothing from the
+/// runtime environment is read (build_info.rs), so no env value or secret
+/// can leak through this route. The response shape is pinned by test below.
+async fn info() -> Json<Value> {
+    Json(json!({
+        "version": crate::VERSION,
+        "git_sha": crate::build_info::GIT_SHA,
+        "build_profile": crate::build_info::BUILD_PROFILE,
+        "protocol_version": crate::WIRE_PROTOCOL_VERSION,
     }))
 }
 
@@ -150,3 +164,34 @@ async fn prometheus_metrics(State(_app): State<AppState>) -> (StatusCode, String
 /// builder (main.rs uses `into_make_service_with_connect_info`).
 #[allow(dead_code)]
 fn assert_connect_info_type(_upgrade: WebSocketUpgrade, _connect: ConnectInfo<SocketAddr>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The info route returns the version and NOTHING else: the response
+    /// is pinned to exactly the four documented build fields (no extra
+    /// key can be added silently, and no env value can leak in).
+    #[tokio::test]
+    async fn health_info_returns_version_and_only_version() {
+        let Json(body) = info().await;
+
+        assert_eq!(body["version"], crate::VERSION, "version must be reported");
+        assert_eq!(body["git_sha"], crate::build_info::GIT_SHA);
+        assert_eq!(body["build_profile"], crate::build_info::BUILD_PROFILE);
+        assert_eq!(body["protocol_version"], crate::WIRE_PROTOCOL_VERSION);
+
+        // Exactly the four documented fields — nothing else leaks.
+        let mut keys: Vec<&str> = body
+            .as_object()
+            .expect("info body is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec!["build_profile", "git_sha", "protocol_version", "version"]
+        );
+    }
+}

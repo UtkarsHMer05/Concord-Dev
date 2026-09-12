@@ -54,6 +54,26 @@ FIXED_TIMESTAMP="2026-09-09T00:00:00.000Z"
 log() { printf '[sbom] %s\n' "$*"; }
 
 # ---------------------------------------------------------------------------
+# VERSION WIRING: package.json "version" is the ONE authoritative release
+# version. It is read once here (with node, so no manual JSON parsing) and
+# threaded into every generated SBOM (rust-gateway + native-worker metadata
+# components). Do NOT bump an SBOM's embedded version by hand — regenerate:
+#   bash scripts/security/sbom.sh
+# package.json keeps the same 1.0.0 identity as rust/Cargo.toml's
+# workspace.package.version and cpp/CMakeLists.txt's project VERSION (the
+# three are the release trio; the wire protocol version is a separate
+# constant and never tracks this).
+# ---------------------------------------------------------------------------
+CONCORD_VERSION="$(node -p "require('./package.json').version")" || {
+  echo "sbom: cannot read version from package.json (is node on PATH?)" >&2
+  exit 1
+}
+case "$CONCORD_VERSION" in
+  ''|*[!0-9.]*) echo "sbom: invalid package.json version '$CONCORD_VERSION'" >&2; exit 1 ;;
+esac
+log "release version: $CONCORD_VERSION (from package.json)"
+
+# ---------------------------------------------------------------------------
 # 1. Web (npm) — `npm sbom` (CycloneDX), normalized for determinism.
 # ---------------------------------------------------------------------------
 generate_web() {
@@ -101,11 +121,13 @@ PY
 # ---------------------------------------------------------------------------
 generate_rust() {
   log "rust-gateway: CycloneDX from Cargo.lock (deterministic generator)"
-  python3 - "$ROOT/rust/Cargo.lock" "$OUT_DIR/rust-gateway.cdx.json" "$FIXED_SERIAL" "$FIXED_TIMESTAMP" <<'PY'
+  python3 - "$ROOT/rust/Cargo.lock" "$OUT_DIR/rust-gateway.cdx.json" "$FIXED_SERIAL" "$FIXED_TIMESTAMP" "$CONCORD_VERSION" <<'PY'
 import json, sys, hashlib
 from collections import OrderedDict
 
-lock_path, out_path, serial, timestamp = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+lock_path, out_path, serial, timestamp, concord_version = (
+    sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5],
+)
 
 # Best-effort license resolution from the local cargo registry cache:
 # crates ship their license in Cargo.toml (license field). This is
@@ -193,10 +215,10 @@ metadata["tools"] = [
 ]
 metadata["component"] = {
     "type": "application",
-    "bom-ref": "pkg:generic/concord-sync-gateway@0.1.0",
+    "bom-ref": f"pkg:generic/concord-sync-gateway@{concord_version}",
     "name": "concord-sync-gateway",
-    "version": "0.1.0",
-    "purl": "pkg:generic/concord-sync-gateway@0.1.0",
+    "version": concord_version,
+    "purl": f"pkg:generic/concord-sync-gateway@{concord_version}",
     "description": "Concord Rust sync-gateway (workspace crate set)",
 }
 metadata["properties"] = [
@@ -231,11 +253,13 @@ PY
 # ---------------------------------------------------------------------------
 generate_native() {
   log "native-worker + wasm: hand-authored CycloneDX manifest"
-  python3 - "$OUT_DIR/native-worker.cdx.json" "$FIXED_SERIAL" "$FIXED_TIMESTAMP" <<'PY'
+  python3 - "$OUT_DIR/native-worker.cdx.json" "$FIXED_SERIAL" "$FIXED_TIMESTAMP" "$CONCORD_VERSION" <<'PY'
 import json, sys, subprocess, os
 from collections import OrderedDict
 
-out_path, serial, timestamp = sys.argv[1], sys.argv[2], sys.argv[3]
+out_path, serial, timestamp, concord_version = (
+    sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4],
+)
 root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(out_path))))
 
 def tool_version(cmd, args):
@@ -283,33 +307,33 @@ bom["metadata"] = metadata
 components = [
     {
         "type": "application",
-        "bom-ref": "pkg:generic/concord-worker@0.1.0",
+        "bom-ref": f"pkg:generic/concord-worker@{concord_version}",
         "name": "concord-worker",
-        "version": "0.1.0",
+        "version": concord_version,
         "description": "C++ native snapshot/restore worker (cpp/worker): C++20 stdlib only, no third-party libraries",
-        "purl": "pkg:generic/concord-worker@0.1.0",
+        "purl": f"pkg:generic/concord-worker@{concord_version}",
         "licenses": [{"license": {"name": "MIT"}}],
     },
     {
         "type": "library",
-        "bom-ref": "pkg:generic/concord-crdt-cpp@0.1.0",
+        "bom-ref": f"pkg:generic/concord-crdt-cpp@{concord_version}",
         "name": "concord-crdt-cpp",
-        "version": "0.1.0",
+        "version": concord_version,
         "description": "C++ CRDT core (cpp/crdt): header+impl C++20 stdlib only, no third-party libraries",
-        "purl": "pkg:generic/concord-crdt-cpp@0.1.0",
+        "purl": f"pkg:generic/concord-crdt-cpp@{concord_version}",
         "licenses": [{"license": {"name": "MIT"}}],
     },
     {
         "type": "library",
-        "bom-ref": "pkg:generic/concord-crdt-wasm@0.1.0",
+        "bom-ref": f"pkg:generic/concord-crdt-wasm@{concord_version}",
         "name": "concord-crdt-wasm",
-        "version": "0.1.0",
+        "version": concord_version,
         "description": (
             "WASM build of the SAME C++ CRDT core (wasm/): compiled with "
             "the Emscripten toolchain; identical source to the native "
             "component, browser-side replica engine"
         ),
-        "purl": "pkg:generic/concord-crdt-wasm@0.1.0",
+        "purl": f"pkg:generic/concord-crdt-wasm@{concord_version}",
         "licenses": [{"license": {"name": "MIT"}}],
     },
 ]

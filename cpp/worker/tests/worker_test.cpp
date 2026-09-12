@@ -117,6 +117,11 @@ struct WorkerRun {
 // that exercise the framing layer itself.
 WorkerRun run_worker_raw(const std::string& frame);
 
+// Runs the worker with extra ARGV arguments and raw stdin bytes — used by
+// the --version test (arguments only; stdin is an empty file so the test
+// proves the argv path never reads a frame).
+WorkerRun run_worker_args(const std::vector<std::string>& args, const std::string& frame);
+
 WorkerRun run_worker(const std::string& payload) {
     // Frame = [u32 LE len][payload].
     std::string frame;
@@ -128,6 +133,10 @@ WorkerRun run_worker(const std::string& payload) {
 }
 
 WorkerRun run_worker_raw(const std::string& frame) {
+    return run_worker_args({}, frame);
+}
+
+WorkerRun run_worker_args(const std::vector<std::string>& args, const std::string& frame) {
     // The worker is driven with stdin redirected from a temp file; stdout
     // and stderr are captured to files and read back (deterministic; the
     // paths are quoted because the build tree may contain spaces).
@@ -148,8 +157,11 @@ WorkerRun run_worker_raw(const std::string& frame) {
         (void)std::fclose(in);
     }
 
-    const std::string cmd = "\"" CONCORD_WORKER_TEST_BIN "\" < \"" + in_path +
-                            "\" > \"" + out_path + "\" 2> \"" + err_path + "\"";
+    std::string cmd = "\"" CONCORD_WORKER_TEST_BIN "\"";
+    for (const std::string& arg : args) {
+        cmd += " \"" + arg + "\"";
+    }
+    cmd += " < \"" + in_path + "\" > \"" + out_path + "\" 2> \"" + err_path + "\"";
     const int rc = std::system(cmd.c_str());
 
     // system() returns a wait status: the shell exit code is bits 8..15.
@@ -1969,6 +1981,52 @@ CONCORD_TEST(restore_diff_history_collision_concurrent_after) {
 // interleaving — same contract, different pending-drain order).
 CONCORD_TEST(restore_diff_history_collision_concurrent_before) {
     run_restore_history_collision_case(true);
+}
+
+// ---------------------------------------------------------------------------
+// --version: the worker prints its release identity to stdout and exits 0
+// BEFORE reading stdin (argv short-circuit; zero frame impact). The line is
+// either "concord-worker 1.0.0 (<short-sha>)" or "concord-worker 1.0.0".
+// ---------------------------------------------------------------------------
+CONCORD_TEST(version_flag_prints_and_exits_zero) {
+    // Empty stdin + --version: a worker that fell through to the frame loop
+    // would exit 1 (framing failure on a short header), so exit 0 here is
+    // the proof the argv path short-circuits before any stdin reading.
+    const WorkerRun ver = run_worker_args({"--version"}, "");
+    CHECK_EQ(ver.exit_code, 0);
+
+    // Exactly one line, newline-terminated, no extra bytes.
+    CHECK(!ver.stdout_bytes.empty());
+    CHECK_EQ(ver.stdout_bytes.back(), '\n');
+    std::size_t lines = 0;
+    for (const char c : ver.stdout_bytes) {
+        lines += (c == '\n') ? 1 : 0;
+    }
+    CHECK_EQ(lines, 1);
+
+    // Shape: "concord-worker <version>[( <sha>)]".
+    const std::string line = ver.stdout_bytes.substr(
+        0, ver.stdout_bytes.size() - 1);  // drop the trailing newline
+    CHECK(line.rfind("concord-worker ", 0) == 0);
+    const std::size_t first_space = std::string("concord-worker ").size();
+    const std::string rest = line.substr(first_space);
+    const std::size_t space_after_version = rest.find(' ');
+    if (space_after_version == std::string::npos) {
+        // Plain form: "concord-worker 1.0.0" — version is non-empty,
+        // printable, and starts with a digit.
+        CHECK(!rest.empty());
+        CHECK(rest[0] >= '0' && rest[0] <= '9');
+    } else {
+        // Sha form: "concord-worker 1.0.0 (<sha>)" — parens around a
+        // non-empty sha.
+        const std::string version = rest.substr(0, space_after_version);
+        const std::string tail = rest.substr(space_after_version + 1);
+        CHECK(!version.empty());
+        CHECK_EQ(tail.front(), '(');
+        CHECK_EQ(tail.back(), ')');
+        CHECK(tail.size() > 2);  // non-empty sha inside the parens
+    }
+    CHECK(ver.stderr_bytes.empty());
 }
 
 }  // namespace
