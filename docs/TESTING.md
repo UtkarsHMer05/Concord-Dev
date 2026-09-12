@@ -43,7 +43,9 @@ npm run smoke          # HTTP checks against a running server (health, 401s,
 
 Database integration tests run against the isolated `concord_test` database
 (`DATABASE_TEST_URL`) and **replay all migrations from an empty schema on
-every run**. `npm run db:test:prepare` recreates it on demand.
+every DB-project run**. `npm run db:test:prepare` recreates it on demand.
+The `unit` project does not connect to or reset PostgreSQL, even when
+`.env.local` defines `DATABASE_TEST_URL`.
 
 ### Fresh GitHub Actions runners
 

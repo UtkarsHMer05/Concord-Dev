@@ -12,9 +12,6 @@ try {
 export default defineConfig({
   test: {
     environment: "node",
-    globalSetup: process.env.DATABASE_TEST_URL
-      ? ["tests/db/global-setup.ts"]
-      : undefined,
     projects: [
       {
         test: {
@@ -39,6 +36,10 @@ export default defineConfig({
         test: {
           name: "db",
           include: ["tests/db/**/*.test.ts"],
+          // Unit tests must not require or reset the isolated database.
+          globalSetup: process.env.DATABASE_TEST_URL
+            ? ["tests/db/global-setup.ts"]
+            : undefined,
           setupFiles: ["tests/db/setup-env.ts"],
           // One shared test database: test files must not run concurrently
           // or they would truncate each other's fixture data.
