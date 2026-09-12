@@ -130,15 +130,21 @@ async fn main() {
         config: Arc::new(config.clone()),
         registry: registry.clone(),
         repo: Arc::new(GatewayRepo::new(db)),
-        verifier: Arc::new(TokenVerifier::new(
-            &config.clerk_issuer,
-            match &config.jwks_file {
-                Some(path) => VerifierSource::File(sync_gateway::auth::FileJwks::new(path)),
-                None => {
-                    VerifierSource::Http(sync_gateway::auth::HttpJwks::new(&config.clerk_issuer))
-                }
-            },
-        )),
+        verifier: Arc::new(
+            TokenVerifier::new(
+                &config.clerk_issuer,
+                match &config.jwks_file {
+                    Some(path) => VerifierSource::File(sync_gateway::auth::FileJwks::new(path)),
+                    None => VerifierSource::Http(sync_gateway::auth::HttpJwks::new(
+                        &config.clerk_issuer,
+                    )),
+                },
+            )
+            .with_claims_policy(
+                config.clerk_audience.as_deref(),
+                config.clerk_authorized_party.as_deref(),
+            ),
+        ),
         draining: Arc::new(AtomicBool::new(false)),
         bus,
         gateway_id,

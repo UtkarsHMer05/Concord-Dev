@@ -19,6 +19,10 @@ pub struct Config {
     /// Clerk instance issuer (`https://<instance>.clerk.accounts.dev`).
     /// REQUIRED in this phase (no safe default).
     pub clerk_issuer: String,
+    /// Exact expected audience in Clerk-issued session tokens when configured.
+    pub clerk_audience: Option<String>,
+    /// Exact authorized-party origin (azp) when configured.
+    pub clerk_authorized_party: Option<String>,
     /// Comma-separated allowed browser origins (WebSocket upgrade policy).
     pub allowed_origins: Vec<String>,
     /// IP ranges of proxies permitted to supply X-Forwarded-For. Empty by default.
@@ -117,6 +121,22 @@ impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         let database_url = env_required("GATEWAY_DATABASE_URL")?;
         let clerk_issuer = env_required("GATEWAY_CLERK_ISSUER")?;
+        let clerk_audience = env_optional("GATEWAY_CLERK_AUDIENCE");
+        let clerk_authorized_party = env_optional("GATEWAY_CLERK_AUTHORIZED_PARTY");
+        for (key, value) in [
+            ("GATEWAY_CLERK_AUDIENCE", &clerk_audience),
+            ("GATEWAY_CLERK_AUTHORIZED_PARTY", &clerk_authorized_party),
+        ] {
+            if value
+                .as_ref()
+                .is_some_and(|v| v.trim() != v || v.is_empty() || v.len() > 256)
+            {
+                return Err(ConfigError::Invalid {
+                    key,
+                    message: "must be a nonempty exact claim without surrounding whitespace (max 256 bytes)".into(),
+                });
+            }
+        }
 
         let bind_host =
             env_optional("GATEWAY_BIND_HOST").unwrap_or_else(|| DEFAULT_BIND_HOST.to_string());
@@ -290,6 +310,8 @@ impl Config {
             bind_port,
             database_url,
             clerk_issuer,
+            clerk_audience,
+            clerk_authorized_party,
             allowed_origins,
             trusted_proxy_cidrs,
             connect_rate_per_min,
@@ -330,6 +352,8 @@ mod tests {
             "GATEWAY_MAX_FRAME_SIZE",
             "GATEWAY_QUEUE_CAPACITY",
             "GATEWAY_ALLOWED_ORIGINS",
+            "GATEWAY_CLERK_AUDIENCE",
+            "GATEWAY_CLERK_AUTHORIZED_PARTY",
             "GATEWAY_TRUSTED_PROXY_CIDRS",
             "GATEWAY_RATE_CONNECT_PER_MIN",
             "GATEWAY_HEARTBEAT_INTERVAL_SECS",
@@ -358,6 +382,8 @@ mod tests {
             "GATEWAY_MAX_FRAME_SIZE",
             "GATEWAY_QUEUE_CAPACITY",
             "GATEWAY_ALLOWED_ORIGINS",
+            "GATEWAY_CLERK_AUDIENCE",
+            "GATEWAY_CLERK_AUTHORIZED_PARTY",
             "GATEWAY_TRUSTED_PROXY_CIDRS",
             "GATEWAY_RATE_CONNECT_PER_MIN",
             "GATEWAY_HEARTBEAT_INTERVAL_SECS",
@@ -570,6 +596,43 @@ mod tests {
                         key: "GATEWAY_RATE_CONNECT_PER_MIN",
                         ..
                     })
+                ));
+            });
+        }
+    }
+
+    #[test]
+    fn exact_clerk_claim_policy_is_optional_but_never_silently_malformed() {
+        with_env(&[], || {
+            let cfg = Config::from_env().expect("dev compatibility");
+            assert!(cfg.clerk_audience.is_none());
+            assert!(cfg.clerk_authorized_party.is_none());
+        });
+        with_env(
+            &[
+                ("GATEWAY_CLERK_AUDIENCE", Some("concord-sync")),
+                (
+                    "GATEWAY_CLERK_AUTHORIZED_PARTY",
+                    Some("https://concord.example"),
+                ),
+            ],
+            || {
+                let cfg = Config::from_env().expect("strict claims");
+                assert_eq!(cfg.clerk_audience.as_deref(), Some("concord-sync"));
+                assert_eq!(
+                    cfg.clerk_authorized_party.as_deref(),
+                    Some("https://concord.example")
+                );
+            },
+        );
+        for (key, bad) in [
+            ("GATEWAY_CLERK_AUDIENCE", ""),
+            ("GATEWAY_CLERK_AUTHORIZED_PARTY", " https://concord.example"),
+        ] {
+            with_env(&[(key, Some(bad))], || {
+                assert!(matches!(
+                    Config::from_env(),
+                    Err(ConfigError::Invalid { .. })
                 ));
             });
         }

@@ -44,6 +44,7 @@ pub enum AuthError {
 #[derive(Debug, Deserialize)]
 struct ClerkClaims {
     sub: String,
+    azp: Option<String>,
 }
 
 /// JWKS source: real HTTPS fetcher or test injector. Async-native (a
@@ -162,6 +163,8 @@ impl JwksSource for VerifierSource {
 /// tests).
 pub struct TokenVerifier<S: JwksSource = HttpJwks> {
     issuer: String,
+    audience: Option<String>,
+    authorized_party: Option<String>,
     source: S,
     cache: Mutex<KeyCache>,
     refresh_gate: AsyncMutex<()>,
@@ -185,11 +188,26 @@ impl<S: JwksSource> TokenVerifier<S> {
     pub fn new(issuer: &str, source: S) -> Self {
         Self {
             issuer: issuer.trim_end_matches('/').to_owned(),
+            audience: None,
+            authorized_party: None,
             source,
             cache: Mutex::new(KeyCache::default()),
             refresh_gate: AsyncMutex::new(()),
             refresh_cooldown: DEFAULT_REFRESH_COOLDOWN,
         }
+    }
+
+    /// Configure an exact audience and/or authorized party. The default
+    /// remains compatible with existing local session-token fixtures; cloud
+    /// must explicitly set both values after its Clerk claim migration.
+    pub fn with_claims_policy(
+        mut self,
+        audience: Option<&str>,
+        authorized_party: Option<&str>,
+    ) -> Self {
+        self.audience = audience.map(str::to_owned);
+        self.authorized_party = authorized_party.map(str::to_owned);
+        self
     }
 
     /// Verifies a session token and returns the Clerk principal (`sub`).
@@ -223,20 +241,17 @@ impl<S: JwksSource> TokenVerifier<S> {
 
         let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
         validation.set_issuer(&[&self.issuer]);
-        validation.set_required_spec_claims(&["exp", "sub", "iss"]);
+        if let Some(audience) = &self.audience {
+            validation.set_audience(&[audience]);
+            validation.set_required_spec_claims(&["exp", "sub", "iss", "aud"]);
+        } else {
+            validation.set_required_spec_claims(&["exp", "sub", "iss"]);
+            // Compatibility for development tokens without Concord's aud.
+            validation.validate_aud = false;
+        }
         validation.validate_exp = true;
         validation.validate_nbf = true;
         validation.leeway = 5;
-        // aud is NOT a gateway security boundary — disable jsonwebtoken's
-        // default audience check. The boundary is issuer + RS256 signature
-        // (pinned above) + required exp/sub/iss claims; Clerk controls the
-        // aud/azp claims per JWT template (this instance's default template
-        // carries aud="convex" from the pre-Concord tutorial era), and the
-        // gateway performs no aud-based authorization. Found live on
-        // staging: real Clerk tokens failed with InvalidAudience
-        // (classified "claims") while local E2E passed because test-JWKS
-        // tokens carry no aud claim.
-        validation.validate_aud = false;
 
         let key = self.key_for(&kid).await.ok_or_else(|| {
             crate::observability::metrics::incr("concord_jwks_unknown_kid_total");
@@ -245,6 +260,14 @@ impl<S: JwksSource> TokenVerifier<S> {
             }
         })?;
         let data = decode::<ClerkClaims>(token, &key, &validation).map_err(classify)?;
+
+        if let Some(expected) = &self.authorized_party {
+            if data.claims.azp.as_deref() != Some(expected.as_str()) {
+                return Err(AuthError::Invalid {
+                    reason: "authorized party mismatch",
+                });
+            }
+        }
 
         let sub = data.claims.sub;
         if sub.is_empty() {
@@ -525,6 +548,56 @@ mod tests {
             .block_on(verifier(KID, include_bytes!("test_rsa_key.der")).verify(&token))
             .expect("token with aud claim verifies (aud is not an authz boundary)");
         assert_eq!(principal.clerk_user_id, "user_clerk_real");
+    }
+
+    #[test]
+    fn strict_claims_reject_cross_service_and_cross_origin_tokens() {
+        let rt = tokio::runtime::Runtime::new().expect("test runtime");
+        let key = test_encoding_key();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs();
+        let verifier = verifier(KID, include_bytes!("test_rsa_key.der"))
+            .with_claims_policy(Some("concord-sync"), Some("https://concord.example"));
+        let base = serde_json::json!({
+            "iss": ISSUER, "sub": "user_1", "exp": now + 600,
+            "aud": "concord-sync", "azp": "https://concord.example"
+        });
+        let check = |claims: &serde_json::Value| {
+            let token = sign(claims, &key, KID);
+            rt.block_on(verifier.verify(&token))
+        };
+        assert!(check(&base).is_ok());
+        let mut array = base.clone();
+        array["aud"] = serde_json::json!(["other", "concord-sync"]);
+        assert!(check(&array).is_ok());
+        let mut wrong_aud = base.clone();
+        wrong_aud["aud"] = serde_json::json!("convex");
+        assert!(check(&wrong_aud).is_err());
+        let mut missing_aud = base.clone();
+        missing_aud.as_object_mut().unwrap().remove("aud");
+        assert!(check(&missing_aud).is_err());
+        let mut wrong_party = base.clone();
+        wrong_party["azp"] = serde_json::json!("https://evil.example");
+        assert!(matches!(
+            check(&wrong_party),
+            Err(AuthError::Invalid {
+                reason: "authorized party mismatch"
+            })
+        ));
+        let mut missing_party = base.clone();
+        missing_party.as_object_mut().unwrap().remove("azp");
+        assert!(check(&missing_party).is_err());
+        let mut future = base.clone();
+        future["nbf"] = serde_json::json!(now + 3600);
+        assert!(check(&future).is_err());
+        let mut empty_sub = base.clone();
+        empty_sub["sub"] = serde_json::json!("");
+        assert!(matches!(check(&empty_sub), Err(AuthError::MissingSubject)));
+        let mut no_sub = base.clone();
+        no_sub.as_object_mut().unwrap().remove("sub");
+        assert!(check(&no_sub).is_err());
     }
 
     #[test]

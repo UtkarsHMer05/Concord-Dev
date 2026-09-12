@@ -56,6 +56,15 @@ set +a
 : "${CLERK_SECRET_KEY:?CLERK_SECRET_KEY missing in .env.local}"
 : "${CLERK_JWT_ISSUER_DOMAIN:?CLERK_JWT_ISSUER_DOMAIN missing in .env.local}"
 : "${DATABASE_URL:?DATABASE_URL missing in .env.local}"
+# The old Clerk session token carried aud="convex". Require an explicit
+# Concord-specific audience before publishing a new cloud bundle; the
+# operator must first update the Clerk session claims and verify a fresh
+# token. Fail before building or modifying ECR/SSM if not coordinated.
+: "${GATEWAY_CLERK_AUDIENCE:?set GATEWAY_CLERK_AUDIENCE to the verified Concord session-token audience in .env.local}"
+if [ "$GATEWAY_CLERK_AUDIENCE" = convex ]; then
+  echo 'error: tutorial-era aud=convex is not a Concord audience' >&2
+  exit 2
+fi
 # PG_PASSWORD: per-environment cloud DB password. CRITICAL: on re-publish
 # (new RC, same environment) the password MUST be REUSED — the compose
 # Postgres volume initialized with it on first boot; a fresh value makes
@@ -195,6 +204,8 @@ CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
 GATEWAY_BIND_HOST=0.0.0.0
 GATEWAY_DATABASE_URL=postgres://${PG_USER}:${PG_PASSWORD}@db:5432/${PG_DB}
 GATEWAY_CLERK_ISSUER=${CLERK_JWT_ISSUER_DOMAIN}
+GATEWAY_CLERK_AUDIENCE=${GATEWAY_CLERK_AUDIENCE}
+GATEWAY_CLERK_AUTHORIZED_PARTY=${APP_URL}
 GATEWAY_ALLOWED_ORIGINS=${GATEWAY_ALLOWED_ORIGINS}
 GATEWAY_NATS_URL=nats://nats:4222
 GATEWAY_REDIS_URL=redis://redis:6379

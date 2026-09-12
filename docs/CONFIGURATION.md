@@ -67,6 +67,8 @@ time (`--env-file`/orchestrator env). Never bake real values into an image.
 |---|---|---|
 | `GATEWAY_DATABASE_URL` | secret | Durable op log. Unreachable DB → exit 3 during startup. |
 | `GATEWAY_CLERK_ISSUER` | public | `https://<instance>.clerk.accounts.dev` (dev) or the production issuer domain. Must match the Clerk instance that signs client JWTs — a mismatch fails verification (auth rejected). |
+| `GATEWAY_CLERK_AUDIENCE` | public | Optional in local development for existing test tokens. When set, the signed session token must contain this exact `aud` (a string or a member of an array); missing/wrong claims are rejected. New cloud bundles require a verified Concord-specific audience before publishing. |
+| `GATEWAY_CLERK_AUTHORIZED_PARTY` | public | Optional in local development. When set, the signed token's `azp` must match this exact app origin; missing/wrong claims are rejected. The cloud bundle sets it to its ALB app origin. |
 
 ### Required in staging/prod deployments
 

@@ -597,6 +597,8 @@ GATEWAY_ALLOWED_ORIGINS=http://<ALB-DNS-NAME>   # the ORIGIN the browser
                                                 # With TLS: https://<host>.
 GATEWAY_DATABASE_URL=postgres://...              # SSM SecureString
 GATEWAY_CLERK_ISSUER=https://<instance>.clerk.accounts.dev
+GATEWAY_CLERK_AUDIENCE=concord-sync             # example; see claim migration below
+GATEWAY_CLERK_AUTHORIZED_PARTY=http://<ALB-DNS-NAME>
 GATEWAY_NATS_URL=nats://nats:4222
 GATEWAY_REDIS_URL=redis://redis:6379
 GATEWAY_NATS_SUBJECT_PREFIX=concord.<env>        # same on ALL gateways
@@ -609,6 +611,25 @@ GATEWAY_MAX_FRAME_SIZE=8388608                   # 8 MiB (PROTOCOL §9.11)
 NEXT_PUBLIC_SYNC_GATEWAY_URL=ws://<ALB-DNS-NAME>:8890/api/v1/sync
                                                 # wss://<host>:8443/... with TLS
 ```
+
+**Clerk claim migration before the next cloud bundle:** Concord's browser
+currently calls `getToken()` without a template, so this is a **session
+token**, not a separately generated JWT template. In the matching Clerk
+instance's Dashboard, go to **Sessions → Customize session token → Claims**,
+remove the tutorial-era `"aud": "convex"` setting and set a Concord-specific
+claim such as `"aud": "concord-sync"`. Save it, sign in again, and verify a
+fresh session token locally has the expected `iss`, `aud`, and `azp` values
+without logging or sharing the complete token. Set the exact audience as
+`GATEWAY_CLERK_AUDIENCE` in the private `.env.local` used by
+`push-bundle.sh`; it refuses a missing or literal `convex` value before
+publishing. The bundle sets `GATEWAY_CLERK_AUTHORIZED_PARTY` from the ALB
+app URL. Dev/test leaves these options unset until its own token claims
+are migrated; a configured audience/party is enforced strictly by the
+gateway. This code path has unit tests, but the Clerk dashboard and a
+live cloud authentication round trip still require verification.
+[Clerk session-token claim editor](https://clerk.com/docs/guides/sessions/customize-session-tokens)
+and [Clerk session-token claims](https://clerk.com/docs/guides/sessions/session-tokens)
+describe these settings and the `azp` claim.
 
 **`GATEWAY_ALLOWED_ORIGINS` is ENFORCED at the upgrade (closed in
 P7-M046, commit `3dbd5d9` — finding F-P7-SEC-01):** the gateway rejects

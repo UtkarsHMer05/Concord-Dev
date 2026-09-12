@@ -253,6 +253,8 @@ async fn main() {
         bind_port: 0,
         database_url: DB_URL.into(),
         clerk_issuer: ISSUER.into(),
+        clerk_audience: None,
+        clerk_authorized_party: None,
         allowed_origins: vec![],
         trusted_proxy_cidrs: vec![],
         connect_rate_per_min: 240,
