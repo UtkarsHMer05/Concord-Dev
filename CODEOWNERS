@@ -1,0 +1,40 @@
+# CODEOWNERS — github.com/UtkarsHMer05/Concord-Dev
+# Single-owner repository; grouped by area for review routing anyway.
+
+# Default owner for everything not matched below
+* @UtkarsHMer05
+
+# C++20 CRDT core + native worker (sequence engine, snapshots, fuzz, campaigns)
+/cpp @UtkarsHMer05
+
+# Rust/Tokio sync gateway (auth, ingest, broker, ephemeral, chaos tests)
+/rust @UtkarsHMer05
+
+# Browser CRDT client runtime (worker, adapter, bridge, sync session)
+/src/lib/crdt @UtkarsHMer05
+/src/lib/sync @UtkarsHMer05
+/src/lib/collaboration @UtkarsHMer05
+
+# Web data plane: schema, authorization, repositories, services, env contract
+/src/server @UtkarsHMer05
+
+# Verify / benchmark / deploy / CI / security tooling
+/scripts @UtkarsHMer05
+/.github @UtkarsHMer05
+
+# Documentation set and audits
+/docs @UtkarsHMer05
+
+# Database migrations
+/drizzle @UtkarsHMer05
+
+# WASM build + smoke tests
+/wasm @UtkarsHMer05
+
+# CI-checked governance files
+/CHANGELOG.md @UtkarsHMer05
+/SECURITY.md @UtkarsHMer05
+/CONTRIBUTING.md @UtkarsHMer05
+/CODEOWNERS @UtkarsHMer05
+/LICENSE @UtkarsHMer05
+/NOTICE @UtkarsHMer05

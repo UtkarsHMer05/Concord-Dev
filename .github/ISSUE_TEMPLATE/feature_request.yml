@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest a capability or improvement for Concord.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Concord's v1 boundary is deliberately
+        narrow (collaborative text subset, single-node data tier per
+        environment — see the README's honest-scope section and
+        [docs/ROADMAP.md](https://github.com/UtkarsHMer05/Concord-Dev/blob/main/docs/ROADMAP.md));
+        proposals that fit the local-first / systems-engineering direction
+        are most likely to move forward.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem does this solve? What is currently impossible, painful, or misleading?
+      placeholder: I cannot … because Concord currently …
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should exist instead? Sketch the behavior you want (UI, protocol, CLI, or API surface).
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought of, including "do nothing" — and why they fall short.
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Who hits this problem and when? A concrete scenario (your own workflow is fine).
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context (optional)
+      description: Mockups, links, prior art, or anything else that helps evaluate the request.

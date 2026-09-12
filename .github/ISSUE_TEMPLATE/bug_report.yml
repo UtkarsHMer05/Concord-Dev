@@ -1,0 +1,101 @@
+name: Bug report
+description: Something in Concord behaves incorrectly or crashes.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. If this is a security
+        vulnerability, do **not** use this form — report it privately via the
+        repository's Security tab ("Report a vulnerability") per
+        [SECURITY.md](https://github.com/UtkarsHMer05/Concord-Dev/blob/main/SECURITY.md).
+
+        Please fill in the sections below with as much detail as you can.
+        Reproduction steps matter most.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug description
+      description: A clear, concise description of what is wrong.
+      placeholder: The editor shows "synced" while edits are still pending locally…
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps to reproduce the behavior. Include the exact commit or release you tested if you built from source.
+      placeholder: |
+        1. Sign in with an email code
+        2. Create a document
+        3. Type while offline, then reconnect
+        4. See error…
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened (including any error message shown in the UI).
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome (standard)
+        - Firefox
+        - Safari
+        - Safari (embedded WebView, e.g. in-app)
+        - Edge
+        - Other
+        - N/A — server / CLI / CI
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - iOS / iPadOS
+        - Android
+        - Other
+        - N/A — server / CLI / CI
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console / crash logs (optional)
+      description: >
+        Browser console output, worker errors, or gateway logs. Redact any
+        tokens or secrets before pasting — never paste a full session token.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context (optional)
+      description: Anything else that helps diagnose — document type, collaborators online, offline/online transitions, reloads, etc.
