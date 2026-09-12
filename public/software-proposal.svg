@@ -1,39 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 517">
-  <!-- White Background -->
-  <rect width="400" height="517" fill="white"/>
-  
-  <!-- Logo/Quarter Circle in top left -->
-  <path d="M0 0 L80 0 A80 80 0 0 0 0 80 Z" fill="#006D77"/>
-  
-  <!-- Main Title -->
-  <text x="40" y="150" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#006D77">
-    SOFTWARE
-  </text>
-  <text x="40" y="180" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#006D77">
-    DEVELOPMENT
-  </text>
-  <text x="40" y="210" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#006D77">
-    PROPOSAL
-  </text>
-  
-  <!-- Bottom Section -->
-  <text x="40" y="350" font-family="Arial, sans-serif" font-size="12" fill="#666666">
-    PREPARED FOR
-  </text>
-  <text x="40" y="370" font-family="Arial, sans-serif" font-size="11" fill="#333333">
-    Client's name
-  </text>
-  <text x="40" y="390" font-family="Arial, sans-serif" font-size="11" fill="#333333">
-    Client's company name
-  </text>
-  
-  <text x="40" y="420" font-family="Arial, sans-serif" font-size="12" fill="#666666">
-    PREPARED BY
-  </text>
-  <text x="40" y="440" font-family="Arial, sans-serif" font-size="11" fill="#333333">
-    Your name
-  </text>
-  <text x="40" y="460" font-family="Arial, sans-serif" font-size="11" fill="#333333">
-    Your company name
-  </text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 517" role="img" aria-label="Software plan template illustration">
+ <rect width="400" height="517" fill="#edf3f5"/>
+ <rect x="34" y="29" width="332" height="459" rx="18" fill="white" stroke="#d7e2e8" stroke-width="2"/>
+ <path d="M34 46a17 17 0 0 1 17-17h298a17 17 0 0 1 17 17v70H34Z" fill="#3057a4"/>
+ <circle cx="65" cy="73" r="7" fill="white" opacity=".9"/><circle cx="87" cy="73" r="7" fill="white" opacity=".55"/>
+ <path d="M66 149h119" stroke="#3057a4" stroke-width="9" stroke-linecap="round" opacity=".8"/>
+ <rect x="100" y="194" width="200" height="132" rx="16" fill="#e2eaff"/><path d="m151 238-23 22 23 22m98-44 23 22-23 22m-38-50-21 56" stroke="#3057a4" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+ <path d="M69 404h262M69 426h193M69 448h228" stroke="#d6e2e8" stroke-width="8" stroke-linecap="round"/>
+ </svg>

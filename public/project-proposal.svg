@@ -1,38 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 517">
-  <!-- White Background -->
-  <rect width="400" height="517" fill="white"/>
-  
-  <!-- Geometric Pattern -->
-  <g transform="translate(50, 30) scale(0.7)">
-    <!-- Background layers -->
-    <path d="M0 0 L450 0 L450 250 L0 250 Z" fill="#80CBC4"/>
-    <path d="M0 50 L200 50 L350 200 L0 200 Z" fill="#E8C59C" transform="rotate(-10)"/>
-    <path d="M100 100 L450 100 L450 250 L100 250 Z" fill="#4DB6AC" transform="rotate(-10)"/>
-    <path d="M-50 150 L100 150 L100 200 L-50 200 Z" fill="#FF5722" transform="rotate(-10)"/>
-    <path d="M350 180 L450 180 L450 230 L350 230 Z" fill="#5D4037" transform="rotate(-10)"/>
-  </g>
-
-  <!-- Project Title -->
-  <text x="50" y="300" font-family="Arial, sans-serif" font-size="24" fill="#5D4037" font-weight="bold">
-    Project Name
-  </text>
-  
-  <!-- Date -->
-  <text x="50" y="330" font-family="Arial, sans-serif" font-size="12" fill="#666666">
-    09.04.20XX
-  </text>
-  
-  <!-- Contact Information -->
-  <text x="50" y="380" font-family="Arial, sans-serif" font-size="12" fill="#666666">
-    Your Name
-  </text>
-  <text x="50" y="400" font-family="Arial, sans-serif" font-size="12" fill="#666666">
-    Your Company
-  </text>
-  <text x="50" y="420" font-family="Arial, sans-serif" font-size="12" fill="#666666">
-    123 Your Street
-  </text>
-  <text x="50" y="440" font-family="Arial, sans-serif" font-size="12" fill="#666666">
-    Your City, ST 12345
-  </text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 517" role="img" aria-label="Project brief template illustration">
+ <rect width="400" height="517" fill="#edf3f5"/>
+ <rect x="34" y="29" width="332" height="459" rx="18" fill="white" stroke="#d7e2e8" stroke-width="2"/>
+ <path d="M34 46a17 17 0 0 1 17-17h298a17 17 0 0 1 17 17v70H34Z" fill="#6554ad"/>
+ <circle cx="65" cy="73" r="7" fill="white" opacity=".9"/><circle cx="87" cy="73" r="7" fill="white" opacity=".55"/>
+ <path d="M66 149h119" stroke="#6554ad" stroke-width="9" stroke-linecap="round" opacity=".8"/>
+ <rect x="102" y="191" width="72" height="64" rx="12" fill="#dcd4fa"/><rect x="226" y="191" width="72" height="64" rx="12" fill="#dcd4fa"/><rect x="164" y="287" width="72" height="64" rx="12" fill="#dcd4fa"/><path d="M174 223h52m-26 32v32" stroke="#6554ad" stroke-width="7" stroke-linecap="round"/>
+ <path d="M69 404h262M69 426h193M69 448h228" stroke="#d6e2e8" stroke-width="8" stroke-linecap="round"/>
+ </svg>

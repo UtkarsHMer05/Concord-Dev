@@ -1,118 +1,71 @@
+/** Concord-authored starting points. The artwork lives in public/*.svg. */
 export const templates = [
-  { 
-    id: "blank", 
-    label: "Blank Document", 
-    imageUrl: "/blank-document.svg",
-    initialContent: "",
-  },
-  { 
-    id: "software-proposal", 
-    label: "Software development proposal", 
-    imageUrl: "/software-proposal.svg",
+  { id: "blank", label: "Blank document", imageUrl: "/blank-document.svg", initialContent: "" },
+  {
+    id: "software-proposal", label: "Software plan", imageUrl: "/software-proposal.svg",
     initialContent: `
-      <h1>Software Development Proposal</h1>
-      <h2>Project Overview</h2>
-      <p>Brief description of the proposed software development project.</p>
-      
-      <h2>Scope of Work</h2>
-      <p>Detailed breakdown of project deliverables and requirements.</p>
-      
-      <h2>Timeline</h2>
-      <p>Project milestones and delivery schedule.</p>
-      
-      <h2>Budget</h2>
-      <p>Cost breakdown and payment terms.</p>
-    `
-  },
-  { 
-    id: "project-proposal", 
-    label: "Project proposal", 
-    imageUrl: "/project-proposal.svg",
-    initialContent: `
-      <h1>Project Proposal</h1>
-      <h2>Executive Summary</h2>
-      <p>Brief overview of the project proposal.</p>
-      
-      <h2>Project Goals</h2>
-      <p>Key objectives and expected outcomes.</p>
-      
-      <h2>Implementation Plan</h2>
-      <p>Strategy and methodology for project execution.</p>
-      
-      <h2>Resources Required</h2>
-      <p>Team, equipment, and budget requirements.</p>
+      <h1>Software plan</h1>
+      <p>What problem are we solving, and who needs the result?</p>
+      <h2>Outcome</h2>
+      <p>Describe the experience users will have when this work is complete.</p>
+      <h2>Boundaries</h2>
+      <p>List the work included, the work deferred, and the assumptions to test.</p>
+      <h2>Delivery checkpoints</h2>
+      <p>Record owners, review dates, and evidence that each checkpoint is done.</p>
     `,
   },
-  { 
-    id: "business-letter", 
-    label: "Business letter", 
-    imageUrl: "/business-letter.svg",
+  {
+    id: "project-proposal", label: "Project brief", imageUrl: "/project-proposal.svg",
     initialContent: `
-      <h1>Business Letter</h1>
-      <p>This is a business letter template.</p>
+      <h1>Project brief</h1>
+      <p>Write the decision this project needs to support.</p>
+      <h2>Context and constraints</h2>
+      <p>Capture the current state, the people affected, and the limits of the work.</p>
+      <h2>Proposed approach</h2>
+      <p>Explain the first useful milestone and how the team will learn from it.</p>
+      <h2>Open decisions</h2>
+      <p>List the questions, owners, and dates needed to move forward.</p>
     `,
   },
-  { 
-    id: "resume", 
-    label: "Resume", 
-    imageUrl: "/resume.svg",
+  {
+    id: "business-letter", label: "Business note", imageUrl: "/business-letter.svg",
     initialContent: `
-      <h1>[Your Name]</h1>
-      <p>[Contact Information]</p>
-      
-      <h2>Professional Summary</h2>
-      <p>Brief overview of your professional background and key strengths.</p>
-      
-      <h2>Work Experience</h2>
-      <p>[Company Name] - [Position]<br>
-      [Date Range]</p>
-      
-      <h2>Education</h2>
-      <p>[Degree] - [Institution]<br>
-      [Graduation Year]</p>
-      
-      <h2>Skills</h2>
-      <p>List of relevant skills and competencies.</p>
+      <p>[Date]</p><p>To: [Recipient and organization]</p>
+      <h1>Re: [Topic]</h1><p>I'm writing about [specific purpose].</p>
+      <p>The relevant details are [facts, dates, and next steps].</p>
+      <p>Please let me know by [date] if anything needs clarification.</p>
+      <p>[Your name and contact details]</p>
     `,
   },
-  { 
-    id: "cover-letter", 
-    label: "Cover letter", 
-    imageUrl: "/cover-letter.svg",
+  {
+    id: "resume", label: "Profile", imageUrl: "/resume.svg",
     initialContent: `
-      <p>[Your Name]<br>
-      [Your Address]<br>
-      [City, State ZIP]</p>
-      
-      <p>[Date]</p>
-      
-      <p>[Recipient's Name]<br>
-      [Company Name]<br>
-      [Company Address]</p>
-      
-      <p>Dear [Recipient's Name],</p>
-      
-      <p>I am writing to express my interest in [position] at [company name].</p>
-      
-      <p>Sincerely,<br>
-      [Your Name]</p>
+      <h1>[Your name]</h1><p>[Location] · [Email] · [Portfolio]</p>
+      <h2>What I do</h2><p>Summarize the problems you solve and the impact you aim to make.</p>
+      <h2>Selected work</h2><p>[Role] · [Team] · [Dates]</p>
+      <p>Describe one outcome, your contribution, and a measurable result.</p>
+      <h2>Tools and education</h2>
+      <p>Include skills and learning that are relevant to this opportunity.</p>
     `,
   },
-  { 
-    id: "letter", 
-    label: "Letter", 
-    imageUrl: "/letter.svg",
+  {
+    id: "cover-letter", label: "Introduction", imageUrl: "/cover-letter.svg",
     initialContent: `
-      <p>Subject: [Email Subject]</p>
-      
-      <p>Dear [Recipient],</p>
-      
-      <p>I hope this email finds you well.</p>
-      
-      <p>[Email Body]</p>
-      
-      <p>Best regards,<br>
-      [Your Name]</p>
+      <p>[Your name] · [Contact details]</p><p>[Date] · [Team or hiring manager]</p>
+      <h1>Why this work matters to me</h1>
+      <p>Connect one real piece of your experience to the team's challenge.</p>
+      <p>Show the work you did, what changed, and what you learned.</p>
+      <p>Explain how you would contribute in the first few months.</p>
+      <p>Thank you for considering my application.<br>[Your name]</p>
+    `,
+  },
+  {
+    id: "letter", label: "Personal note", imageUrl: "/letter.svg",
+    initialContent: `
+      <h1>A note to [name]</h1><p>I wanted to share [news, thanks, or an idea].</p>
+      <p>Here's the part that stayed with me: [your story].</p>
+      <p>I'd love to hear what you think when you have time.</p>
+      <p>Warmly,<br>[Your name]</p>
     `,
   },
 ];

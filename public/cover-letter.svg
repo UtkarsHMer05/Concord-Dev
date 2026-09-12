@@ -1,34 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 517">
-  <!-- White Background -->
-  <rect width="400" height="517" fill="white"/>
-  
-  <!-- Header with contact info -->
-  <text x="40" y="40" font-family="Arial, sans-serif" font-size="18" font-weight="bold">Your Name</text>
-  <text x="40" y="60" font-family="Arial, sans-serif" font-size="11">123 Your Street</text>
-  <text x="40" y="75" font-family="Arial, sans-serif" font-size="11">Your City, ST 12345</text>
-  <text x="40" y="90" font-family="Arial, sans-serif" font-size="11">phone: (555) 555-5555</text>
-  <text x="40" y="105" font-family="Arial, sans-serif" font-size="11">email: your.email@example.com</text>
-  
-  <!-- Date -->
-  <text x="40" y="140" font-family="Arial, sans-serif" font-size="11">September 24, 2024</text>
-  
-  <!-- Recipient Info -->
-  <text x="40" y="180" font-family="Arial, sans-serif" font-size="11">Hiring Manager</text>
-  <text x="40" y="195" font-family="Arial, sans-serif" font-size="11">Company Name</text>
-  <text x="40" y="210" font-family="Arial, sans-serif" font-size="11">123 Company Street</text>
-  <text x="40" y="225" font-family="Arial, sans-serif" font-size="11">Company City, ST 12345</text>
-  
-  <!-- Greeting -->
-  <text x="40" y="265" font-family="Arial, sans-serif" font-size="11">Dear Hiring Manager,</text>
-  
-  <!-- Letter Body Placeholder Lines -->
-  <line x1="40" y1="300" x2="360" y2="300" stroke="#CCCCCC" stroke-width="1"/>
-  <line x1="40" y1="320" x2="360" y2="320" stroke="#CCCCCC" stroke-width="1"/>
-  <line x1="40" y1="340" x2="360" y2="340" stroke="#CCCCCC" stroke-width="1"/>
-  <line x1="40" y1="360" x2="360" y2="360" stroke="#CCCCCC" stroke-width="1"/>
-  <line x1="40" y1="380" x2="360" y2="380" stroke="#CCCCCC" stroke-width="1"/>
-  
-  <!-- Closing -->
-  <text x="40" y="440" font-family="Arial, sans-serif" font-size="11">Sincerely,</text>
-  <text x="40" y="480" font-family="Arial, sans-serif" font-size="11">Your Name</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 517" role="img" aria-label="Introduction template illustration">
+ <rect width="400" height="517" fill="#edf3f5"/>
+ <rect x="34" y="29" width="332" height="459" rx="18" fill="white" stroke="#d7e2e8" stroke-width="2"/>
+ <path d="M34 46a17 17 0 0 1 17-17h298a17 17 0 0 1 17 17v70H34Z" fill="#ae4865"/>
+ <circle cx="65" cy="73" r="7" fill="white" opacity=".9"/><circle cx="87" cy="73" r="7" fill="white" opacity=".55"/>
+ <path d="M66 149h119" stroke="#ae4865" stroke-width="9" stroke-linecap="round" opacity=".8"/>
+ <rect x="100" y="186" width="200" height="172" rx="14" fill="#f9dfe8"/><circle cx="141" cy="229" r="18" fill="#ae4865"/><path d="M174 223h96M119 271h161M119 294h128M119 317h101" stroke="#ae4865" stroke-width="7" stroke-linecap="round" opacity=".7"/>
+ <path d="M69 404h262M69 426h193M69 448h228" stroke="#d6e2e8" stroke-width="8" stroke-linecap="round"/>
+ </svg>

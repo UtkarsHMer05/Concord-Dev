@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 517">
-  <!-- White Background -->
-  <rect width="400" height="517" fill="white"/>
-  
-  <!-- Centered Plus Shape -->
-  <g transform="translate(100, 158.5) scale(2)">
-    <path d="M20 45 h25 v-25 h10 v25 h25 v10 h-25 v25 h-10 v-25 h-25 z" fill="#4285f4"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 517" role="img" aria-label="New page template illustration">
+ <rect width="400" height="517" fill="#edf3f5"/>
+ <rect x="34" y="29" width="332" height="459" rx="18" fill="white" stroke="#d7e2e8" stroke-width="2"/>
+ <path d="M34 46a17 17 0 0 1 17-17h298a17 17 0 0 1 17 17v70H34Z" fill="#174b65"/>
+ <circle cx="65" cy="73" r="7" fill="white" opacity=".9"/><circle cx="87" cy="73" r="7" fill="white" opacity=".55"/>
+ <path d="M66 149h119" stroke="#174b65" stroke-width="9" stroke-linecap="round" opacity=".8"/>
+ <circle cx="200" cy="258" r="66" fill="#d8f0ef"/><path d="M200 225v66M167 258h66" stroke="#174b65" stroke-width="10" stroke-linecap="round"/>
+ <path d="M69 404h262M69 426h193M69 448h228" stroke="#d6e2e8" stroke-width="8" stroke-linecap="round"/>
+ </svg>

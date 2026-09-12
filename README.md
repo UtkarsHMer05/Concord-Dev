@@ -166,7 +166,7 @@ document, **50.1 %** of durable bytes remain.
 | Snapshot+tail recovery | **98.4 % faster** than full replay (65.2 → 0.96 s p50; 100 k history / 1 k tail; 5 runs) |
 | Correctness campaigns | **181/181 scenarios**, 0 divergent replicas, 0 lost durable-ACKed ops |
 | Fuzzing | **5 M executions, 0 crashes** (every fixed crash pinned by a corpus regression) |
-| Browser WASM path | typing 0.003 ms/op; 5 k-op fanout batch 227 ms; runtime bundle 180 KB |
+| Node-instrumented WASM/worker proxy | typing 0.003 ms/op; 5 k-op fanout batch 227 ms; runtime bundle 180 KB (not real-browser latency) |
 
 Environments, run counts, denominators, and reproduction commands for
 every number: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
