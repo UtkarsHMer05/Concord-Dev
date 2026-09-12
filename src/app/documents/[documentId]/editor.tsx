@@ -1,5 +1,20 @@
 "use client";
 
+/**
+ * Concord editor surface.
+ *
+ * Owns the single TipTap instance and wires it into the local-first pipeline:
+ *
+ *   TipTap editor ⇄ CrdtEditorBridge ⇄ CRDT worker (IndexedDB-durable)
+ *                                        ⇄ SyncSession ⇄ gateway (optional)
+ *
+ * When the CRDT path is healthy, edits become durable operations owned by
+ * the worker, and the Phase-1 whole-document mirror must NOT also save
+ * (double-write). When the bridge degrades — unsupported content or worker
+ * failure — the mirror takes over durability and the mode indicator tells
+ * the user the truth (DEC-016 seam, DEC-025 reconciled subset).
+ */
+
 import StarterKit from '@tiptap/starter-kit'
 import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
@@ -12,7 +27,7 @@ import Highlight from "@tiptap/extension-highlight"
 import FontFamily from '@tiptap/extension-font-family'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useEditor, EditorContent, type Editor as TipTapEditor } from '@tiptap/react'
 import { useEffect, useMemo, useRef } from 'react'
 
 import { useEditorStore } from '@/store/use-editor-store';
@@ -36,69 +51,79 @@ interface EditorProps {
   seedPmDoc: PmNode | null;
 }
 
+/**
+ * TipTap's table extension family registers five separate nodes/marks, so
+ * they are grouped into one spreadable list to keep the editor config flat.
+ */
+const TABLE_EXTENSIONS = [Table, TableRow, TableHeader, TableCell];
+
+/** Page surface styling for the editable element (the "sheet" look). */
+const EDITOR_SHEET_CLASS =
+  "focus:outline-none print:border-0 bg-white border border-[#C7C7C7] flex flex-col min-h-[1054px] w-[816px] pt-10 pr-14 pb-10 cursor-text";
+
+/**
+ * Every editor lifecycle hook TipTap offers funnels into the same store
+ * refresh: the toolbar and menubar read the instance imperatively, so any
+ * state-bearing event republishes the latest editor into the store.
+ */
+const publishEditorToStore =
+  (setEditor: (editor: TipTapEditor | null) => void) =>
+  ({ editor }: { editor: TipTapEditor }) => {
+    setEditor(editor);
+  };
+
 export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
   const { editorContent, content, settings, canEditContent } = useDocumentSession();
   const { setEditor } = useEditorStore();
   const setBridgeStatus = useBridgeStatusStore((s) => s.setState);
   const bridgeMode = useBridgeStatusStore((s) => s.state.mode);
-  // The bridge is created after the editor exists; onUpdate routes through
-  // this ref so the creation-time closure stays valid.
+  // The bridge exists only after the editor instance does; onUpdate routes
+  // through this ref so the handler keeps working across bridge restarts.
   const bridgeRef = useRef<CrdtEditorBridge | null>(null);
 
   const editor = useEditor({
     autofocus: true,
     immediatelyRender: false,
-    // VIEWER/COMMENTER roles get a read-only editor (server enforces anyway).
+    // VIEWER/COMMENTER roles get a read-only surface (the server rejects
+    // their writes regardless — this is UX, not enforcement).
     editable: canEditContent,
-    // null content keeps the editor empty until the session content loads;
-    // TipTap JSON or template HTML are both accepted.
+    // null content keeps the sheet blank until session content arrives;
+    // both TipTap JSON envelopes and template HTML are accepted here.
     content: editorContent ?? undefined,
-    onCreate({ editor }) {
-      setEditor(editor);
-    },
-    onDestroy() {
-      setEditor(null);
-    },
+    onCreate: publishEditorToStore(setEditor),
+    onDestroy: () => setEditor(null),
     onUpdate({ editor }) {
       setEditor(editor)
-      // Two write paths, mutually exclusive per session (D16):
-      // - CRDT mode: ops flow through the worker → SyncSession → gateway;
-      //   the whole-document mirror must NOT double-save.
-      // - fallback mode (unsupported content / worker failure): the
-      //   Phase 1 PostgreSQL mirror owns durability.
+      // Durability routing — exactly one owner per session:
+      // - CRDT mode: the worker owns persistence; a whole-document mirror
+      //   save here would double-write.
+      // - fallback mode: the Phase-1 PostgreSQL mirror is the owner.
       if (bridgeMode !== 'crdt') {
         content.saveContent(editor.getJSON())
       }
-      // Phase 2 local-first path: diff against the CRDT canonical state and
-      // emit durable operations through the worker. Failures degrade the
-      // session to the Phase-1 mirror (logged, never unhandled).
+      // Local-first path: diff against the CRDT canonical state and emit
+      // durable ops through the worker. Failures degrade the session to
+      // the Phase-1 mirror (logged, never unhandled).
       bridgeRef.current?.onLocalTransaction(editor).catch((error: unknown) => {
         console.error("[concord-crdt] local transaction failed:", error)
       })
     },
-    onSelectionUpdate({ editor }) {
-      setEditor(editor)
-    },
-    onTransaction({ editor }) {
-      setEditor(editor)
-    },
-    onFocus({ editor }) {
-      setEditor(editor)
-    },
-    onBlur({ editor }) {
-      setEditor(editor)
-    },
-    onContentError({ editor }) {
-      setEditor(editor)
-    },
+    onSelectionUpdate: publishEditorToStore(setEditor),
+    onTransaction: publishEditorToStore(setEditor),
+    onFocus: publishEditorToStore(setEditor),
+    onBlur: publishEditorToStore(setEditor),
+    onContentError: publishEditorToStore(setEditor),
     editorProps: {
       attributes: {
+        // Ruler-controlled margins land as sheet padding (page settings are
+        // client-local, not document content).
         style: `padding-left: ${settings.leftMargin}px; padding-right: ${settings.rightMargin}px;`,
-        class: "focus:outline-none print:border-0 bg-white border border-[#C7C7C7] flex flex-col min-h-[1054px] w-[816px] pt-10 pr-14 pb-10 cursor-text"
+        class: EDITOR_SHEET_CLASS,
       },
     },
     extensions: [
       StarterKit.configure({
+        // Link/underline ship with richer dedicated configs below.
         link: false,
         underline: false,
       }),
@@ -108,12 +133,14 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
         types: ["heading", "paragraph"]
       }),
       Link.configure({
+        // In-app navigation must win over external link clicks.
         openOnClick: false,
         autolink: true,
-        defaultProtocol: "https"
+        defaultProtocol: 'https'
       }),
       Color,
       Highlight.configure({
+        // Per-selection highlight colors (registry-supported mark).
         multicolor: true,
       }),
       FontFamily,
@@ -122,10 +149,7 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
       Image.configure({
         resize: { enabled: true },
       }),
-      Table,
-      TableRow,
-      TableHeader,
-      TableCell,
+      ...TABLE_EXTENSIONS,
       TaskItem.configure({
         nested: true,
       }),
@@ -133,10 +157,9 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
     ],
   })
 
-  // Bridge lifecycle (client-side only): the bridge is CREATED derived from
-  // the editor instance (stable per editor), and started in the effect. The
-  // useMemo value also feeds the sync-session hook without touching refs
-  // during render.
+  // Bridge lifecycle: construct derived from the editor instance (stable per
+  // editor), then start inside the effect. The useMemo result also feeds the
+  // sync-session hook without touching refs during render.
   const bridge = useMemo(() => {
     if (!crdtClient || !editor) {
       return null;
@@ -146,11 +169,10 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
       client: crdtClient,
       documentId,
       seedPmDoc,
-      // M008 honesty rule: the fallback (unsupported content → whole-document
-      // save path) is surfaced to the UI, never silent.
+      // Surface fallback transitions honestly instead of failing silently.
       onStatusChange: setBridgeStatus,
     });
-    // seedPmDoc is read once at bridge start; the bridge is per editor.
+    // seedPmDoc is consumed once at bridge start; the bridge is per editor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [crdtClient, editor, documentId, setBridgeStatus]);
 
@@ -164,12 +186,12 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
       bridgeRef.current = null;
       setBridgeStatus({ mode: "idle" });
     };
-    // The bridge identity IS the dependency: start once per instance.
+    // Bridge identity IS the dependency: start once per instance.
   }, [bridge, setBridgeStatus]);
 
-  // Realtime wiring (D16): once the bridge is on the CRDT path, start the
-  // SyncSession (REAL worker engine port) against the configured gateway.
-  // No gateway URL / signed out / fallback ⇒ stays local-only (truthful).
+  // Realtime layer: only when the bridge is on the CRDT path does the
+  // SyncSession start against the gateway. Signed out / no gateway URL /
+  // fallback mode ⇒ the session stays local-only and truthful about it.
   useSyncSession({
     documentId,
     crdtClient,
@@ -179,6 +201,8 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
   return (
     <div className="size-full overflow-x-auto bg-[#F9FBFD] px-4 print:p-0 print:bg-white print:overflow-visible">
       <Ruler />
+      {/* Fixed 816px sheet, horizontally centered; the outer container
+          scrolls on viewports narrower than the page. */}
       <div className="min-w-max flex justify-center w-[816px] py-4 print:py-0 mx-auto print:w-full print:min-w-0">
         <EditorContent editor={editor} />
       </div>

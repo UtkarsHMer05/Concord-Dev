@@ -6,6 +6,20 @@ import { Toaster } from "@/components/ui/sonner";
 import { ClerkClientProvider } from "@/components/clerk-client-provider";
 
 import "./globals.css";
+
+/**
+ * Root layout — the single place app-wide client providers are mounted.
+ *
+ * Provider order matters:
+ * - `NuqsAdapter` wraps everything so any component may read/write URL
+ *   search params (the home search box) inside server components.
+ * - `ClerkClientProvider` gates the tree on authentication: Clerk owns
+ *   identity, while Concord's own server layer owns authorization.
+ * - `Toaster` mounts last so sonner toasts (used by actions like rename /
+ *   delete / template create) render above the gated tree.
+ */
+
+/** Single Inter instance shared by every route in the app. */
 const inter = Inter({
   subsets: ["latin"],
 });
@@ -34,9 +48,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={inter.className}
-      >
+      <body className={inter.className}>
         <NuqsAdapter>
           <ClerkClientProvider>
             <Toaster />

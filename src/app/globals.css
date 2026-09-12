@@ -1,3 +1,14 @@
+/* =========================================================================
+   Concord global styles.
+   - The Tailwind v4 theme token blocks map design-system variables to
+     utility classes and stay aligned with the shadcn ui/* primitives.
+   - The `.tiptap` section styles *rendered document content*. Those styles
+     follow the document into exports and print, so they deliberately mirror
+     the CRDT-supported node/mark set (paragraphs, headings, lists, tasks,
+     tables, images, links — DEC-025 subset): anything Concord's replica
+     cannot round-trip does not get bespoke styling here either.
+   ========================================================================= */
+
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -28,6 +39,7 @@
   --radius-sm: calc(var(--radius) - 4px);
 }
 
+/* Default document font; the editor sheet inherits it. */
 body {
   font-family: Arial, Helvetica, sans-serif;
 }
@@ -115,133 +127,144 @@ body {
   }
 }
 
+/* -------------------------------------------------------------------------
+   Rendered document content (.tiptap = the ProseMirror contenteditable).
+   Grouped by node kind; only registry-supported nodes are covered.
+   ------------------------------------------------------------------------- */
+
 .tiptap {
-  /* Link styles */
+  /* Links are always interactive, never content-colored. */
   a {
-    @apply text-blue-600;
     cursor: pointer;
+
+    @apply text-blue-600;
 
     &:hover {
       @apply underline;
     }
   }
 
-  /* Image-specific styling */
+  /* Media: block-level, capped to the text column. */
   img {
     display: block;
     height: auto;
-    margin: 1.5rem 0;
     max-width: 100%;
+    margin: 1.5rem 0;
 
     &.ProseMirror-selectednode {
       outline: 3px solid var(--primary);
     }
   }
 
-  /* Table-specific styling */
+  /* Tables: fixed layout keeps column widths stable while editing. */
   table {
-    border-collapse: collapse;
+    width: 100%;
     margin: 0;
     overflow: hidden;
+    border-collapse: collapse;
     table-layout: fixed;
-    width: 100%;
 
-    td,
-    th {
-      border: 1px solid black;
-      box-sizing: border-box;
+    th,
+    td {
+      position: relative;
       min-width: 1em;
       padding: 6px 8px;
-      position: relative;
+      border: 1px solid black;
+      box-sizing: border-box;
       vertical-align: top;
 
+      /* Children of cells must not inherit list paragraph spacing. */
       > * {
         margin-bottom: 0;
       }
     }
 
     th {
-      background-color: #c7c7c7;
       font-weight: bold;
       text-align: left;
+      background-color: #c7c7c7;
     }
 
+    /* TipTap's cell-selection overlay and resize affordances. */
     .selectedCell:after {
-      background: rgba(149, 149, 150, 0.2);
       content: "";
-      left: 0; right: 0; top: 0; bottom: 0;
-      pointer-events: none;
       position: absolute;
+      inset: 0;
       z-index: 2;
+      pointer-events: none;
+      background: rgba(149, 149, 150, 0.2);
     }
 
     .column-resize-handle {
-      background-color: var(--primary);
-      bottom: -2px;
-      pointer-events: none;
       position: absolute;
-      right: -2px;
       top: 0;
+      right: -2px;
+      bottom: -2px;
       width: 4px;
+      pointer-events: none;
+      background-color: var(--primary);
     }
   }
 
+  /* Horizontal scroll for tables wider than the text column. */
   .tableWrapper {
-    margin: 1.5rem 0;
     overflow-x: auto;
+    margin: 1.5rem 0;
   }
 
+  /* Column-resize drag cursor (TipTap sets .resize-cursor while dragging). */
   &.resize-cursor {
-    cursor: ew-resize;
     cursor: col-resize;
+    cursor: ew-resize;
   }
 
-  /* Heading styles */
-  h1, 
-  h2, 
-  h3, 
-  h4, 
-  h5, 
+  /* Headings: tight leading, generous space above to separate sections. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
   h6 {
     line-height: 1.1;
     margin-top: 2.5rem;
     text-wrap: pretty;
   }
 
-  h1, 
+  /* Top-level h1/h2 get extra separation from preceding content. */
+  h1,
   h2 {
     margin-top: 3.5rem;
     margin-bottom: 1.5rem;
   }
 
-  h1 { 
-    font-size: 1.4rem; 
+  h1 {
+    font-size: 1.4rem;
   }
 
-  h2 { 
-    font-size: 1.2rem; 
+  h2 {
+    font-size: 1.2rem;
   }
 
-  h3 { 
-    font-size: 1.1rem; 
+  h3 {
+    font-size: 1.1rem;
   }
 
-  h4, 
-  h5, 
-  h6 { 
-    font-size: 1rem; 
+  h4,
+  h5,
+  h6 {
+    font-size: 1rem;
   }
 
-  /* List styles */
-  ul, 
-  ol {
+  /* List shells. */
+  ol,
+  ul {
     padding: 0 1rem;
     margin: 1.25rem 1rem 1.25rem 0.4rem;
   }
 
   ul li {
     list-style-type: disc;
-    
+
     p {
       margin-top: 0.25em;
       margin-bottom: 0.25em;
@@ -257,15 +280,15 @@ body {
     }
   }
 
-  /* Task list specific styles */
+  /* Task lists: checkbox rendered by the TaskItem extension; layout here. */
   ul[data-type="taskList"] {
-    list-style: none;
-    margin-left: 0;
     padding: 0;
+    margin-left: 0;
+    list-style: none;
 
     li {
-      align-items: flex-start;
       display: flex;
+      align-items: flex-start;
 
       > label {
         flex: 0 0 auto;
@@ -282,36 +305,14 @@ body {
       cursor: pointer;
     }
 
+    /* Nested task lists sit flush with their parent item. */
     ul[data-type="taskList"] {
       margin: 0;
     }
   }
 }
 
-/* For mobile */
-.floating-threads {
-  display: none;
-}
-
-/* For desktop */
-.anchored-threads {
-  display: block;
-  max-width: 300px;
-  width: 100%;
-  position: absolute;
-  right: 12px;
-}
-
-@media (max-width: 640px) {
-  .floating-threads {
-    display: block;
-  }
-
-  .anchored-threads {
-    display: none;
-  }
-}
-
+/* Radix dropdown poppers must stack above the fixed editor chrome. */
 div[data-radix-popper-content-wrapper] {
   z-index: 50 !important;
 }
