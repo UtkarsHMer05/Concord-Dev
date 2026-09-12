@@ -4,7 +4,7 @@
 phases A–Q)
 **Start SHA:** `c2f33c7` (branch `phase/7-production-release`, post-v1
 README commit)
-**End SHA:** `17d5629` (branch `codex/9-5-hardening`, 21 commits)
+**End SHA:** `17d5629` — the last CODE commit on branch `codex/9-5-hardening`; everything after it (through HEAD) is docs/report finalization only.
 **Date:** 2026-09-12
 **Verdict inputs:** every claim below was re-verified on the final tree
 this date; commands and counts are from the final runs, not reused from

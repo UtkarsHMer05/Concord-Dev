@@ -58,6 +58,7 @@ body {
     /* Buttons/inputs carry the strongest contrast pairs. */
     --primary: 0 0% 9%;
     --primary-foreground: 0 0% 98%;
+    /* Secondary + muted: low-contrast fills for chrome, not content. */
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
@@ -74,18 +75,21 @@ body {
     /* Chart palette: five distinct hues at consistent perceived weight. */
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
+    /* Chart 3–5: cool-to-warm hues for later series. */
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
+    /* Component corner radius scale base. */
     --radius: 0.5rem;
     /* Sidebar tokens (unused today but part of the shadcn contract). */
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
     --sidebar-primary: 240 5.9% 10%;
     --sidebar-primary-foreground: 0 0% 98%;
-    /* Accent/border/ring complete the sidebar ramp. */
+    /* Accent pair, then border + focus ring close the ramp. */
     --sidebar-accent: 240 4.8% 95.9%;
     --sidebar-accent-foreground: 240 5.9% 10%;
+    /* Border + ring finish the light sidebar set. */
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
@@ -111,6 +115,7 @@ body {
     /* Destructive darkens (lightness 30.6%) instead of lightening. */
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
+    /* Border/input/ring sit one step above the background. */
     --border: 0 0% 14.9%;
     --input: 0 0% 14.9%;
     --ring: 0 0% 83.1%;
@@ -129,6 +134,7 @@ body {
     /* Dark accent/border/ring values for the slate ramp. */
     --sidebar-accent: 240 3.7% 15.9%;
     --sidebar-accent-foreground: 240 4.8% 95.9%;
+    /* Border + focus ring close the dark sidebar set. */
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
@@ -245,8 +251,7 @@ body {
   }
 
   /* Top-level h1/h2 get extra separation from preceding content. */
-  h1,
-  h2 {
+  h1, h2 {
     margin-top: 3.5rem;
     margin-bottom: 1.5rem;
   }
@@ -263,9 +268,8 @@ body {
     font-size: 1.1rem;
   }
 
-  h4,
-  h5,
-  h6 {
+  /* Body-text size for the minor heading levels. */
+  h4, h5, h6 {
     font-size: 1rem;
   }
 
@@ -278,20 +282,18 @@ body {
 
   ul li {
     list-style-type: disc;
-
-    p {
-      margin-top: 0.25em;
-      margin-bottom: 0.25em;
-    }
   }
 
   ol li {
     list-style-type: decimal;
+  }
 
-    p {
-      margin-top: 0.25em;
-      margin-bottom: 0.25em;
-    }
+  /* List-item paragraphs keep half-em vertical breathing room — shared by
+     both bullet and ordered items. */
+  ul li p,
+  ol li p {
+    margin-top: 0.25em;
+    margin-bottom: 0.25em;
   }
 
   /* Task lists: checkbox rendered by the TaskItem extension; layout here. */
@@ -305,6 +307,7 @@ body {
       align-items: flex-start;
 
       > label {
+        /* Fixed-size checkbox label; clicks must not select text. */
         flex: 0 0 auto;
         margin-right: 0.5rem;
         user-select: none;
@@ -319,10 +322,8 @@ body {
       cursor: pointer;
     }
 
-    /* Nested task lists sit flush with their parent item. */
-    ul[data-type="taskList"] {
-      margin: 0;
-    }
+    /* Nested task lists sit flush with their parent item (margin 0). */
+    ul[data-type="taskList"] { margin: 0; }
   }
 }
 

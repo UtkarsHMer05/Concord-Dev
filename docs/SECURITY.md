@@ -684,14 +684,23 @@ Public exposure currently needs:
 ### 10.5 CSP, cookies, verbose errors, source maps (honest posture)
 
 - **CSP: shipped since P7-M027 (b0d233f), hardened in P7-M033
-  (e367827).** All responses carry a baseline CSP via `next.config.ts`
-  `headers()`: `default-src 'self'`; `script-src 'self'
-  'wasm-unsafe-eval' 'unsafe-inline' https://*.clerk.accounts.dev`;
-  `worker-src 'self' blob:`; `child-src 'self' blob:`; `connect-src
-  'self' https://*.clerk.accounts.dev ws: wss:`; `img-src 'self' data:
-  blob: …`; `object-src 'none'`; `base-uri 'self'`; `form-action
-  'self'`; `frame-ancestors 'none'`; plus nosniff, X-Frame-Options
-  DENY, Referrer-Policy, and Permissions-Policy on every response.
+  (e367827), nonce-based since the v1 hardening pass (05c9623).** The
+  policy is generated per request by the middleware (`src/proxy.ts`):
+  `default-src 'self'`; `script-src 'self' 'nonce-<per-request>'
+  'strict-dynamic' 'wasm-unsafe-eval'` (dev adds React's debug
+  `'unsafe-eval'`); `worker-src 'self' blob:`; `child-src 'self'
+  blob:`; `connect-src 'self' <clerk-frontend-api> ws: wss:`;
+  `img-src 'self' data: blob: https://img.clerk.com`; `object-src
+  'none'`; `base-uri 'self'`; `form-action 'self'`;
+  `frame-ancestors 'none'`; plus `upgrade-insecure-requests` in
+  production. Nosniff, X-Frame-Options DENY, Referrer-Policy, and
+  Permissions-Policy still ship on every response via
+  `next.config.ts`. Script `'unsafe-inline'` is GONE: Next 16 stamps
+  the nonce onto all framework/page scripts (parsed from the request
+  CSP header) and Clerk's server components do the same; the
+  effective header is pinned by `tests/proxy-claim-policy.test.ts`
+  and was live-verified (per-request nonce rotation + nonce-bearing
+  script tags).
   **Live production E2E (P7-M033) found the cost of the initial
   omission of `'wasm-unsafe-eval'`: WebKit gates
   `WebAssembly.instantiate` on script-src, so the CRDT worker's engine
@@ -699,8 +708,9 @@ Public exposure currently needs:
   swallowed promise rejection) and every session silently degraded to
   the fallback save path.** The fix added the narrow wasm directive and
   a fail-fast rejection path in the worker's `instantiateWasm` hook;
-  both are regression-pinned. A nonce-based CSP (removing
-  `'unsafe-inline'`) remains the documented follow-up.
+  both are regression-pinned. The nonce-based CSP follow-up was
+  completed in the hardening pass (05c9623) — `'unsafe-inline'` is no
+  longer present in script-src in any mode.
 - **Cookies/session: Clerk defaults, not overridden.** Concord code
   never touches `document.cookie` or Clerk cookie options (verified by
   grep) — Clerk's httpOnly/secure/sameSite defaults apply unmodified.
