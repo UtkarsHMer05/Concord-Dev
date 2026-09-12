@@ -16,6 +16,8 @@
   <img src="https://img.shields.io/badge/Truth-PostgreSQL%2018-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
   <img src="https://img.shields.io/badge/Transport-NATS%20JetStream-34A1C1?logo=nats&logoColor=white" alt="NATS" />
   <img src="https://img.shields.io/badge/Cached-Redis-DC382D?logo=redis&logoColor=white" alt="Redis" />
+  <img src="https://img.shields.io/badge/license-MIT-black" alt="License: MIT" />
+  <img src="https://img.shields.io/badge/release-1.0.0-blue" alt="Release 1.0.0" />
 </p>
 
 <p align="center">
@@ -304,15 +306,21 @@ Remaining v1 limitations, stated plainly:
 
 This project originated from the Code With Antonio "Google Docs Clone"
 tutorial (Next.js/React/Clerk/Convex/Liveblocks) and was deliberately
-rebuilt into an original engineering project: only the tutorial's
-product shell survives as a derivative — the synchronization stack,
-wire protocol, CRDT, gateways, and data layer are original to this
-repository. The pristine tutorial baseline is preserved at the git tag
-`antonio-original-baseline`; attribution is retained, and upstream
-licensing remains under review before any public release
-(see [`docs/DECISIONS.md`](docs/DECISIONS.md)).
+rebuilt into an original engineering project. The tutorial-derived
+material is fully resolved: all baseline artwork, fonts, template copy,
+and tutorial-identical source were replaced with original Concord
+implementations; the retained `src/components/ui/` primitives are
+verified shadcn/ui generator output (MIT, attributed in
+[`NOTICE`](NOTICE)); and the full synchronization stack — CRDT, wire
+protocol, gateways, data layer — is original to this repository. The
+pristine tutorial baseline is preserved for transparency at the git tag
+`antonio-original-baseline`, and CI enforces the boundary
+(`scripts/security/provenance-check.sh` fails if any shipped file is
+byte-identical to the baseline without a verified permissive-license
+allowlist entry). The full record is
+[`docs/PROVENANCE.md`](docs/PROVENANCE.md).
 
 ## License
 
-Not yet licensed for redistribution; licensing is resolved before
-public release (see Provenance above).
+MIT — see [`LICENSE`](LICENSE). Third-party components remain under
+their own licenses, summarized in [`NOTICE`](NOTICE).
