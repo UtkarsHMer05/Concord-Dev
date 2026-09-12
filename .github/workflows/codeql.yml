@@ -51,7 +51,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@df32e235ff5b1e63d5697ec5e07624cada7484b8 # v3.29.7
+        uses: github/codeql-action/init@faaca9a8f6edddba5725ffe5adefdab6669a2eca # v3.38.0 (commit behind the annotated tag)
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -62,6 +62,6 @@ jobs:
             -DCONCORD_BUILD_TESTS=OFF -DCONCORD_BUILD_BENCHMARKS=OFF
           cmake --build build/codeql
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@df32e235ff5b1e63d5697ec5e07624cada7484b8 # v3.29.7
+        uses: github/codeql-action/analyze@faaca9a8f6edddba5725ffe5adefdab6669a2eca # v3.38.0 (commit behind the annotated tag)
         with:
           category: "/language:${{ matrix.language }}"
