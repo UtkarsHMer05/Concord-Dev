@@ -12,7 +12,8 @@
 //!
 //! `op bytes` are Phase 2 canonical operation frames (PROTOCOL §7) carried
 //! verbatim — the gateway never rewrites them. Envelope-level validation
-//! lives in [`super::envelope`]; here we enforce framing bounds only.
+//! lives in [`super::envelope`]; validated client ingress also rejects
+//! maintenance-reserved origin replica IDs before any database write.
 
 use super::error::{DecodeError, EncodeError};
 use super::limits::{MAX_BATCH_OPS, MAX_BATCH_PAYLOAD_BYTES, MAX_OP_BYTES, MAX_SYNC_PAGE_OPS};
@@ -92,6 +93,14 @@ impl DataFrame {
                 let mut identities = Vec::with_capacity(ops.ops.len());
                 for op in &ops.ops {
                     let env = super::envelope::validate_op(op)?;
+                    // SYSC (worker) and REST (history) are server-owned.
+                    // Only the origin is reserved: clients may legitimately
+                    // reference maintenance operations as anchors/targets.
+                    if matches!(env.identity.replica, 0x5359_5343 | 0x5245_5354) {
+                        return Err(DecodeError::BadOperation {
+                            reason: "client operation uses reserved maintenance replica".into(),
+                        });
+                    }
                     if !seen.insert(env.identity) {
                         return Err(DecodeError::BadBinaryBody {
                             reason: format!(
@@ -278,4 +287,51 @@ fn encode_sync_batch(f: &SyncBatch) -> Result<Vec<u8>, EncodeError> {
     out.extend_from_slice(&(f.ops.len() as u16).to_be_bytes());
     encode_ops(&f.ops, &mut out)?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod maintenance_identity_tests {
+    use super::*;
+
+    fn insert(replica: u64) -> Vec<u8> {
+        let mut op = vec![1, 1];
+        op.extend_from_slice(&replica.to_le_bytes());
+        op.extend_from_slice(&1u64.to_le_bytes());
+        op.extend_from_slice(&1u64.to_le_bytes());
+        op.extend_from_slice(&[0, 0, 1, 1, b'a', 0]);
+        op
+    }
+
+    #[test]
+    fn client_ingress_rejects_both_reserved_replicas_but_allows_legacy_ids() {
+        for replica in [0x5359_5343, 0x5245_5354] {
+            let bytes = DataFrame::ClientOps(ClientOps {
+                batch_id: 1,
+                ops: vec![insert(replica)],
+                identities: vec![],
+            })
+            .encode()
+            .expect("encode");
+            assert!(matches!(
+                DataFrame::decode_client_ops_validated(&bytes),
+                Err(DecodeError::BadOperation { .. })
+            ));
+        }
+        for replica in [1, 42, 0x8000_0000_0000_0001] {
+            let bytes = DataFrame::ClientOps(ClientOps {
+                batch_id: 1,
+                ops: vec![insert(replica)],
+                identities: vec![],
+            })
+            .encode()
+            .expect("encode");
+            assert_eq!(
+                DataFrame::decode_client_ops_validated(&bytes)
+                    .expect("legacy client replica")
+                    .identities[0]
+                    .replica,
+                replica
+            );
+        }
+    }
 }

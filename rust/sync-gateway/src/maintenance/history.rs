@@ -57,28 +57,14 @@ pub const MAX_REVISIONS_LIMIT: i64 = 200;
 ///
 /// Collision analysis (mirrors the worker's kMaintenanceReplica note in
 /// cpp/worker/main.cpp:46): the only production client id allocator is
-/// `replicaIdForDocument` (src/lib/crdt/editor-bridge.ts:45-71) — 8
-/// bytes from Web Crypto `getRandomValues` (Math.random fallback),
-/// then `bytes[0] |= 1`, yielding a full-width random u64. A random
-/// allocator can therefore hit ANY value with tiny probability (an id
-/// below 2^31 — where both reserved constants live — requires the top
-/// 33 bits to all be zero: probability 2^-33 per allocation). The
-/// structural mitigation is the same as the worker's, inverted: the
-/// worker reserves 0x53595343 ("SYSC") and REJECTS ops carrying it, so
-/// this module cannot reuse it for ops the worker must fold — hence a
-/// DIFFERENT constant from a disjoint purpose. This module does not
-/// yet emit restore ops (see DEC-039 note below); the constant is
-/// defined, documented, and enforced on the ingest side NOW so any
-/// future forward-op restore path starts from a stable identity
-/// contract:
-///   - TODO(ws): reject `client_ops` batches claiming the maintenance
-///     replicas (0x53595343 or 0x52455354) in ws `handle_binary` /
-///     `DataFrame::decode_client_ops_validated` — there is currently no
-///     such rejection; adding it is outside this module's file scope.
-///   - This module refuses to ingest any restore batch whose ops do
-///     NOT carry [`MAINTENANCE_RESTORE_REPLICA`] (ownership: history.rs
-///     is the ingest path for restore batches only). Counter basis for
-///     future restore ops: timestamp-based —
+/// `replicaIdForDocument` (src/lib/crdt/editor-bridge.ts) — new client IDs
+/// set the high bit, while these maintenance IDs are below 2^31. Existing
+/// client IDs remain compatible except for the two reserved values, which
+/// `DataFrame::decode_client_ops_validated` rejects at ingress. The worker
+/// reserves 0x53595343 ("SYSC") and rejects ops carrying it; restore uses
+/// this distinct 0x52455354 ("REST") ID. This module refuses to ingest
+/// restore batches whose ops do not carry [`MAINTENANCE_RESTORE_REPLICA`].
+/// Counter basis for restore ops: timestamp-based —
 ///     `(millis since epoch) << 8 | batch sequence` — deterministic,
 ///     monotonic across restarts, with the DB unique index on
 ///     (document_id, operation_id) making a collision a harmless

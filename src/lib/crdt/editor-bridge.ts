@@ -47,10 +47,11 @@ export interface BridgeInit {
 }
 
 /**
- * Stable per-browser+document replica identity (never zero; collision with a
- * concurrent editor is astronomically unlikely for 63 random bits).
+ * Stable per-browser+document replica identity. New IDs use the high half of
+ * u64, disjoint from the system's low reserved REST/SYSC IDs. Existing
+ * stored client IDs remain valid for backwards compatibility.
  */
-function replicaIdForDocument(documentId: string): bigint {
+export function replicaIdForDocument(documentId: string): bigint {
     const key = `concord.replica.${documentId}`;
     try {
         const stored = globalThis.localStorage?.getItem(key);
@@ -68,7 +69,7 @@ function replicaIdForDocument(documentId: string): bigint {
             bytes[i] = Math.floor(Math.random() * 256);
         }
     }
-    bytes[0] |= 1; // never zero
+    bytes[0] |= 0x80; // getBigUint64 is big-endian: high bit disjoins maintenance IDs
     const value = new DataView(bytes.buffer).getBigUint64(0);
     try {
         globalThis.localStorage?.setItem(key, value.toString());

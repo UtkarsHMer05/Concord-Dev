@@ -248,6 +248,11 @@ PostgreSQL — never from client input.
    `error {unauthorized}` + close. The verified principal is the only truth;
    client-supplied identities are never trusted.
 
+At `client_ops` ingress, origin replica IDs `0x53595343` (`SYSC`) and
+`0x52455354` (`REST`) are rejected as server-owned maintenance identities.
+Older ordinary client IDs remain accepted; newly allocated browser IDs use
+the upper half of the unsigned 64-bit namespace.
+
 ### 9.6 Join and initial sync
 
 5. Client sends `join_document {documentId, stateSummary}` where

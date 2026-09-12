@@ -5,10 +5,31 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Editor } from "@tiptap/react";
 
-import { CrdtEditorBridge, type BridgeState } from "@/lib/crdt/editor-bridge";
+import { CrdtEditorBridge, replicaIdForDocument, type BridgeState } from "@/lib/crdt/editor-bridge";
+
+it("allocates client replicas outside the maintenance namespace and retains legacy IDs", () => {
+    const stored = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+    });
+    vi.stubGlobal("crypto", {
+        getRandomValues: (bytes: Uint8Array) => bytes.fill(0),
+    });
+    try {
+        const fresh = replicaIdForDocument("new");
+        expect(fresh & (1n << 63n)).not.toBe(0n);
+        expect(fresh).not.toBe(0x53595343n);
+        expect(fresh).not.toBe(0x52455354n);
+        stored.set("concord.replica.existing", "42");
+        expect(replicaIdForDocument("existing")).toBe(42n);
+    } finally {
+        vi.unstubAllGlobals();
+    }
+});
 import type { StreamEntryJson } from "@/lib/crdt/adapter";
 import { blocksToPmDoc, pmDocToBlocks, type PmNode } from "@/lib/crdt/pm-model";
 import type { CrdtClient } from "@/lib/crdt/worker/client";
