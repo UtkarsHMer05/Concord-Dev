@@ -27,26 +27,12 @@ using namespace concord::crdt;
 
 namespace {
 
-// Corpus root is relative to the test binary's build directory; tests run
-// from the build tree per add_test, but direct invocation happens from the
-// repo root too, so try both known layouts.
+// CMake provides the source-tree corpus path. The binary can run from any
+// directory, including an out-of-tree CTest build.
 [[nodiscard]] std::string find_corpus_root() {
-    const char* candidates[] = {
-        "cpp/crdt/fuzz/corpus",                         // run from repo root
-        "../../../../../cpp/crdt/fuzz/corpus",          // run from build/<tree>/crdt/tests
-        "../../../../cpp/crdt/fuzz/corpus",             // run from build/<tree>/crdt
-        "../../../cpp/crdt/fuzz/corpus",                // run from build/<tree>
-        "../../../../../../cpp/crdt/fuzz/corpus",       // deeper build layouts
-    };
-    for (const char* candidate : candidates) {
-        std::ifstream probe(std::string{candidate} + "/recovery/seed_valid",
-                            std::ios::binary);
-        if (probe.good()) {
-            probe.close();
-            return candidate;
-        }
-    }
-    return {};
+    const std::string root{CONCORD_CORPUS_DIR};
+    std::ifstream probe(root + "/recovery/seed_valid", std::ios::binary);
+    return probe.good() ? root : std::string{};
 }
 
 [[nodiscard]] std::vector<std::uint8_t> read_file(const std::string& path) {
@@ -142,11 +128,9 @@ bool replay_worker(const std::vector<std::uint8_t>& bytes) {
 CONCORD_TEST(fuzz_regressions_recovery_corpus) {
     const std::string root = find_corpus_root();
     if (root.empty()) {
-        // Corpus directory not found from this working directory: skip
-        // WITH a loud note (never silently green).
+        // Missing source corpus is a hard failure, never a silent skip.
         std::fprintf(stderr,
-                     "NOTE fuzz_regressions: corpus root not found from cwd; "
-                     "run from the repo root or a build tree\n");
+                     "ERROR fuzz_regressions: configured source corpus missing\n");
         CHECK(false);
         return;
     }

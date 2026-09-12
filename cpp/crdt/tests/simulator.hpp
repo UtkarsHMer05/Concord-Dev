@@ -6,6 +6,7 @@
 // full trace (seed, schedule, op ids, final digests) is printed.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <map>

@@ -6,12 +6,8 @@
 #            db_integration + ws_integration serialized against a Postgres
 #            service container (run_migrations is executed inside the
 #            db_integration suite itself — no separate migrate step).
-#   native   cmake Release configure+build + core (concord_crdt_tests) and
-#            worker (concord_worker_tests) suites. Decision documented in
-#            the job: scripts/verify-native.sh hardcodes macOS-specific
-#            flags (-DCMAKE_OSX_ARCHITECTURES=arm64), so CI runs the RAW
-#            portable cmake steps (same as phase2-core/phase5-recovery
-#            house style) instead of the wrapper.
+#   native   portable cmake Release configure+build + root CTest (core,
+#            property smoke and worker protocol suites).
 #   wasm     emscripten emsdk install + npm run wasm:build + wasm smoke
 #            (reuses the phase2-core pattern: emsdk clone, no container).
 #   security secret-scan (tree mode — history mode is the nightly tier),
@@ -146,18 +142,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: lukka/get-cmake@latest
-      # RAW cmake steps, NOT scripts/verify-native.sh: that wrapper passes
-      # -DCMAKE_OSX_ARCHITECTURES=arm64 (macOS-only) and assumes the
-      # build/ dir layout of the dev machine. The C++ tree itself is
-      # portable C++20 (cmake>=3.24 + Ninja via get-cmake), and these are
+      # Portable C++20 (cmake>=3.24 + Ninja via get-cmake); these are
       # exactly the steps phase2-core.yml / phase5-recovery.yml run —
       # reusing them keeps CI portable and consistent with house style.
-      - name: Configure + build (Release) + core + worker tests
+      - name: Configure + build (Release) + native CTest
         run: |
           cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/native
-          ./build/native/crdt/tests/concord_crdt_tests
-          ./build/native/worker/tests/concord_worker_tests
+          ctest --test-dir build/native --output-on-failure
 
   wasm:
     runs-on: ubuntu-latest

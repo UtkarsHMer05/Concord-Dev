@@ -29,6 +29,7 @@
 //
 // Style: matches the codebase's zero-dependency conventions (std::mt19937
 // seeded determinism, no I/O beyond printf, structured failure output).
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>

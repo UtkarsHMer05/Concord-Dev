@@ -16,6 +16,5 @@ target_compile_options(concord-worker PRIVATE ${CONCORD_WARNING_FLAGS} ${CONCORD
 target_link_options(concord-worker PRIVATE ${CONCORD_SANITIZER_FLAGS})
 
 if(CONCORD_BUILD_TESTS)
-  enable_testing()
   add_subdirectory(tests)
 endif()

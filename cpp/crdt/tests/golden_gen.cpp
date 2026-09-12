@@ -8,6 +8,7 @@
 //
 // Output shape:
 // {"ops":["<hex>","<hex>",...],"visible":<json>,"digest":"sha256:..."}
+#include <algorithm>
 #include <cstdio>
 #include <optional>
 #include <random>

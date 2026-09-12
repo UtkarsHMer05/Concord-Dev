@@ -25,3 +25,4 @@ target_compile_definitions(concord_worker_tests PRIVATE
 )
 
 add_test(NAME concord_worker_tests COMMAND concord_worker_tests)
+set_tests_properties(concord_worker_tests PROPERTIES LABELS "worker;smoke" TIMEOUT 120)

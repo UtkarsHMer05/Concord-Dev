@@ -1,0 +1,55 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "dev-debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/native-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/native",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "asan-ubsan",
+      "inherits": "dev-debug",
+      "binaryDir": "${sourceDir}/../build/sanitize",
+      "cacheVariables": {
+        "CONCORD_SANITIZE_ADDRESS": "ON",
+        "CONCORD_SANITIZE_UNDEFINED": "ON"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "dev-debug",
+      "binaryDir": "${sourceDir}/../build/tsan",
+      "cacheVariables": { "CONCORD_SANITIZE_THREAD": "ON" }
+    },
+    {
+      "name": "fuzz",
+      "inherits": "dev-debug",
+      "binaryDir": "${sourceDir}/../build/fuzz",
+      "cacheVariables": {
+        "CONCORD_BUILD_FUZZ": "ON",
+        "CONCORD_FUZZ_STANDALONE": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev-debug", "configurePreset": "dev-debug" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "asan-ubsan", "configurePreset": "asan-ubsan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "fuzz", "configurePreset": "fuzz" }
+  ],
+  "testPresets": [
+    { "name": "dev-debug", "configurePreset": "dev-debug", "output": { "outputOnFailure": true } },
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
+    { "name": "asan-ubsan", "configurePreset": "asan-ubsan", "output": { "outputOnFailure": true } },
+    { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true } }
+  ]
+}

@@ -78,8 +78,9 @@ without adding an audit exception.
 ```bash
 # Configure + build (Debug)
 cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-      -DCMAKE_OSX_ARCHITECTURES=arm64
+      -DCONCORD_BUILD_TESTS=ON
 cmake --build build/native
+ctest --test-dir build/native --output-on-failure
 
 # Full native suite (unit + integration + property seeds + simulator corpus)
 ./build/native/crdt/tests/concord_crdt_tests
@@ -97,10 +98,9 @@ deterministic multi-replica simulator (partitions, duplication, reordering).
 
 ```bash
 cmake -S cpp -B build/sanitize -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-      -DCONCORD_SANITIZE_ADDRESS=ON -DCONCORD_SANITIZE_UNDEFINED=ON \
-      -DCMAKE_OSX_ARCHITECTURES=arm64
+      -DCONCORD_SANITIZE_ADDRESS=ON -DCONCORD_SANITIZE_UNDEFINED=ON
 cmake --build build/sanitize
-./build/sanitize/crdt/tests/concord_crdt_tests
+ctest --test-dir build/sanitize --output-on-failure
 ```
 
 ThreadSanitizer is part of the shipped gate (the Phase 6 release-gate

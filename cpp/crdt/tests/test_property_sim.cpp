@@ -4,6 +4,7 @@
 // Every scenario is reproducible from its seed; failures print a trace.
 #include "test_harness.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>

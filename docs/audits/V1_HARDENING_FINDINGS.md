@@ -6,8 +6,8 @@ against this branch. A status of open is not a release approval.
 
 | ID | Severity | Domain | Finding | Evidence | Fix | Regression test | Status |
 |---|---|---|---|---|---|---|---|
-| HARD-NATIVE-001 | Medium | portability | GCC fails on indirect `<algorithm>` include | Baseline GCC compile at `test_property_sim.cpp:73` | Pending direct-include audit | GCC/Clang build | Open |
-| HARD-NATIVE-002 | Medium | tooling | Root CTest discovers zero tests; corpus lookup depends on cwd | `ctest --test-dir build/native -N` reports zero | Pending root testing and source-dir path | Root CTest from outside repo | Open |
+| HARD-NATIVE-001 | Medium | portability | GCC fails on indirect `<algorithm>` include | Baseline GCC compile at `test_property_sim.cpp:73` | Direct includes in four translation units/header | GCC 15 and Apple Clang 21 Release build + 3/3 CTest each | Closed |
+| HARD-NATIVE-002 | Medium | tooling | Root CTest discovers zero tests; corpus lookup depends on cwd | Baseline `ctest --test-dir build/native -N` reports zero | Root `enable_testing`, source-dir corpus definition, three labeled/time-limited tests | Root CTest 3/3; direct fuzz test from `/tmp`, 7 corpus inputs, 64/64 core | Closed |
 | HARD-AUTH-001 | High | gateway auth | Process-lifetime JWKS refresh budget can be exhausted | `refresh_count` and `max_refreshes=3` in `auth/mod.rs`; exploit regression pending | Pending bounded reusable refresh design | Unknown-kid burst followed by legitimate rotation | Open |
 | HARD-AUTH-002 | High | gateway auth | No strict audience policy; deployed template historically uses `aud=convex` | `validation.validate_aud = false` | Pending explicit prod contract and dev compatibility | Wrong/missing/correct audience | Open |
 | HARD-AUTH-003 | High | gateway ingest | Reserved maintenance replica IDs may be client-forgeable | `history.rs` note; ingress review pending | Pending ingress rejection | Forged `REST`/`SYSC` op | Open |

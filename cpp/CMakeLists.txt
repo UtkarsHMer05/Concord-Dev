@@ -16,6 +16,10 @@ option(CONCORD_SANITIZE_ADDRESS "Instrument with AddressSanitizer" OFF)
 option(CONCORD_SANITIZE_UNDEFINED "Instrument with UndefinedBehaviorSanitizer" OFF)
 option(CONCORD_SANITIZE_THREAD "Instrument with ThreadSanitizer" OFF)
 
+if(CONCORD_BUILD_TESTS)
+  enable_testing()
+endif()
+
 # Sanitizer flags apply to all Concord targets (no third-party code exists in
 # this tree, so there is no third-party suppression surface).
 set(CONCORD_SANITIZER_FLAGS "")

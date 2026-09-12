@@ -48,9 +48,8 @@ concurrency:
 jobs:
   # ---------------------------------------------------------------------------
   # ASan+UBSan and TSan trees: core+worker suites + PR-tier campaign run
-  # against the SANITIZED binaries (per SA-CPP6's local matrix, ported to
-  # ubuntu per the M043 native-portability decision: raw cmake, no
-  # verify-native.sh because of its macOS -DCMAKE_OSX_ARCHITECTURES pin).
+  # against the SANITIZED binaries (per SA-CPP6's local matrix). The
+  # canonical native wrapper and the raw CMake commands are both portable.
   # ---------------------------------------------------------------------------
   native-sanitizers:
     runs-on: ubuntu-latest

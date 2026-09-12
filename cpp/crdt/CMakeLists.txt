@@ -44,7 +44,6 @@ target_compile_options(concord_crdt PRIVATE ${CONCORD_WARNING_FLAGS} ${CONCORD_S
 target_link_options(concord_crdt INTERFACE ${CONCORD_SANITIZER_FLAGS})
 
 if(CONCORD_BUILD_TESTS)
-  enable_testing()
   add_subdirectory(tests)
 endif()
 
