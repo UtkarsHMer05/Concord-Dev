@@ -23,7 +23,7 @@
 // WARMUP by also running a 5s probe run first (throwaway) so caches, JIT
 // paths and DB connections are hot. Result cell records runs=3, medians.
 
-import { execFileSync, execFile } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 
@@ -89,7 +89,6 @@ function aggregate(env, cellId, workload, runs, seconds) {
     return s[Math.floor(s.length / 2)];
   };
   const ackThroughputs = runs.map((r) => (r.durable_acks ?? 0) / seconds);
-  const sendThroughputs = runs.map((r) => (r.ops_sent ?? 0) / seconds);
   const peerFrames = runs.reduce((a, r) => a + (r.peer_frames ?? 0), 0);
   const reconnects = runs.reduce((a, r) => a + (r.reconnects ?? 0), 0);
   const opsSent = runs.reduce((a, r) => a + (r.ops_sent ?? 0), 0);

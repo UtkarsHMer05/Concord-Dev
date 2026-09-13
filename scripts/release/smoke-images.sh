@@ -184,7 +184,7 @@ smoke_web
 smoke_worker
 echo
 if [ "${#FAIL[@]}" -eq 0 ]; then
-  echo "RESULT: PASS (${#PASS[@]}/${#PASS[@]} images)"
+  echo "RESULT: PASS (${#PASS[@]}/3 image checks)"
 else
   echo "RESULT: FAIL — images: ${FAIL[*]}"
   exit 1

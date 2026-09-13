@@ -25,3 +25,12 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 8
+  # Dockerfiles live under /docker. This covers the pinned base images used
+  # by the gateway, web and worker release images; compose-only dev images
+  # are intentionally documented in docker-compose*.yml and are not
+  # claimed as Dependabot-managed.
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 8

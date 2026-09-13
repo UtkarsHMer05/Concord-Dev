@@ -1,256 +1,337 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Concord full verification orchestrator (release 1.0.0).
+# Concord verification orchestrator.
 #
-# Runs every quality gate in one command and prints a PASS/FAIL/SKIP line
-# per step (with duration), then exits 1 if any non-SKIP step failed.
-# ALL steps run regardless of earlier failures — the summary is the point.
-#
-# Gates:
-#   web        npm run typecheck, lint, test, test:db*, test:realtime*, build
-#              (* = SKIP with reason when DATABASE_TEST_URL is unset or the
-#               compose db is down)
-#   native     scripts/verify-native.sh Release (cmake build + ctest)
-#   rust       cargo fmt --check, clippy -D warnings, test
-#              (gateway tests needing the DB self-skip when it is down; the
-#               runner notes when GATEWAY_DATABASE_URL is unset)
-#   wasm       scripts/verify-wasm.sh (SKIP with reason when emcc is absent)
-#   provenance scripts/security/provenance-check.sh
-#   secrets    scripts/security/secret-scan.sh (working tree)
+# The default developer mode is explicit about unavailable optional
+# prerequisites. `--strict` is the release/audit mode: every selected gate
+# must run, and a missing database, broker, browser, tag, or scanner is a
+# failure. No nested test suite is allowed to turn a prerequisite skip into a
+# green aggregate result.
 #
 # Usage:
-#   bash scripts/verify-all.sh            # everything
-#   STEPS="web rust" bash scripts/verify-all.sh   # subset (comma/space list)
+#   bash scripts/verify-all.sh
+#   bash scripts/verify-all.sh --strict
+#   STEPS="web native" bash scripts/verify-all.sh --strict
 #
-# Compatibility: bash 3.2+ (macOS), macOS + Linux.
+# STEPS values: web native rust wasm browser provenance security
 # ---------------------------------------------------------------------------
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-# Steps selected (default: all, in canonical order).
-ALL_STEPS="web native rust wasm provenance secrets"
+STRICT=0
+for arg in "$@"; do
+  case "$arg" in
+    --strict) STRICT=1 ;;
+    -h|--help)
+      sed -n '2,24p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "verify-all: unknown option: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+# Load local development variables without printing them. CI supplies its
+# variables explicitly. The Node test runners independently load .env.local;
+# this shell load keeps service and tool prerequisites consistent with them.
+if [ -f .env.local ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env.local
+  set +a
+fi
+
+ALL_STEPS="web native rust wasm browser provenance security"
 STEPS="${STEPS:-$ALL_STEPS}"
 
-# Aggregate result bookkeeping.
 declare -a SUMMARY_STATUS=()
 declare -a SUMMARY_NAME=()
 declare -a SUMMARY_DURATION=()
 declare -a SUMMARY_NOTE=()
 declare -i FAILED=0
 declare -i SKIPPED=0
+declare -i REQUIRED_SKIPPED=0
+declare -i PASSED=0
 
 human_duration() {
-  # seconds -> "1m23s" / "45.2s"
-  local secs="$1"
-  if command -v awk >/dev/null 2>&1; then
-    awk -v s="$secs" 'BEGIN {
-      if (s >= 60) printf "%dm%.0fs", int(s/60), s%60; else printf "%.1fs", s
-    }'
-  else
-    printf '%ss' "$secs"
-  fi
+  local seconds="$1"
+  awk -v s="$seconds" 'BEGIN {
+    if (s >= 60) printf "%dm%.0fs", int(s/60), s%60
+    else printf "%.1fs", s
+  }'
 }
 
 record() {
-  # record <status> <name> <start-epoch> [note]
-  local status="$1" name="$2" start="$3" note="${4:-}"
-  local dur
-  dur="$(human_duration "$(awk -v a="$start" -v b="$(date +%s)" 'BEGIN{print b-a}')")"
+  # record <status> <name> <start-epoch> [note] [required]
+  local status="$1"
+  local name="$2"
+  local start="$3"
+  local note="${4:-}"
+  local required="${5:-0}"
+  local duration
+  duration="$(human_duration "$(awk -v a="$start" -v b="$(date +%s)" 'BEGIN { print b-a }')")"
+
   SUMMARY_STATUS+=("$status")
   SUMMARY_NAME+=("$name")
-  SUMMARY_DURATION+=("$dur")
+  SUMMARY_DURATION+=("$duration")
   SUMMARY_NOTE+=("$note")
-  printf '%s: %s (%s)' "$status" "$name" "$dur"
+  printf '%s: %s (%s)' "$status" "$name" "$duration"
   [ -n "$note" ] && printf ' — %s' "$note"
   printf '\n'
-  if [ "$status" = "FAIL" ]; then
-    FAILED=$((FAILED + 1))
-  elif [ "$status" = "SKIP" ]; then
-    SKIPPED=$((SKIPPED + 1))
-  fi
+
+  case "$status" in
+    PASS) PASSED=$((PASSED + 1)) ;;
+    FAIL) FAILED=$((FAILED + 1)) ;;
+    SKIP)
+      SKIPPED=$((SKIPPED + 1))
+      [ "$required" -eq 1 ] && REQUIRED_SKIPPED=$((REQUIRED_SKIPPED + 1))
+      ;;
+  esac
 }
 
 in_steps() {
-  # in_steps <name> — true when the step was selected via $STEPS
-  local want="$1" item
+  local wanted="$1"
+  local item
   local IFS=' ,'
   for item in $STEPS; do
-    [ "$item" = "$want" ] && return 0
+    [ "$item" = "$wanted" ] && return 0
   done
   return 1
 }
 
-# ---------------------------------------------------------------------------
-# Database availability probe (shared by the DB-dependent gates).
-# The vitest db project requires DATABASE_TEST_URL to point at the isolated
-# concord_test database (docker compose db on host port 5433); the realtime
-# suite spawns the gateway binary against the same stack.
-# ---------------------------------------------------------------------------
+run_cmd() {
+  # run_cmd <summary-name> <command> [args...]
+  local name="$1"
+  shift
+  local start
+  start="$(date +%s)"
+  if "$@"; then
+    record PASS "$name" "$start"
+  else
+    record FAIL "$name" "$start"
+  fi
+}
+
+missing_required() {
+  # missing_required <name> <reason>
+  local name="$1"
+  local reason="$2"
+  local start
+  start="$(date +%s)"
+  if [ "$STRICT" -eq 1 ]; then
+    record FAIL "$name" "$start" "$reason"
+  else
+    record SKIP "$name" "$start" "$reason" 1
+  fi
+}
+
+compose_service_available() {
+  local service="$1"
+  command -v docker >/dev/null 2>&1 || return 1
+  local status
+  status="$(docker compose ps --format '{{.Service}} {{.State}} {{.Health}}' "$service" 2>/dev/null)" || return 1
+  printf '%s\n' "$status" | grep -Eiq 'running|up|healthy'
+}
+
 db_available() {
-  if [ -z "${DATABASE_TEST_URL:-}" ]; then
-    return 1
-  fi
-  # Live probe: compose reports the db container healthy?
-  if command -v docker >/dev/null 2>&1 && docker compose ps db >/dev/null 2>&1; then
-    if docker compose ps --format json db 2>/dev/null \
-        | grep -q '"Health":"healthy"\|"State":"running"\|"Status":"running"'; then
-      return 0
-    fi
-    # Older docker versions: fall back to the plain-text table.
-    if docker compose ps db 2>/dev/null | grep -q "concord-db.*[Uu]p\|db.*healthy"; then
-      return 0
-    fi
-  fi
-  return 1
+  [ -n "${DATABASE_TEST_URL:-}" ] || return 1
+  printf '%s' "$DATABASE_TEST_URL" | grep -q 'concord_test' || return 1
+  compose_service_available db || return 1
+  # A running container is not enough: prove PostgreSQL accepts connections.
+  docker compose exec -T db pg_isready -U "${POSTGRES_USER:-concord}" -d postgres >/dev/null 2>&1
 }
 
-# ---------------------------------------------------------------------------
-# web
-# ---------------------------------------------------------------------------
+infra_available() {
+  db_available || return 1
+  compose_service_available nats || return 1
+  compose_service_available redis || return 1
+}
+
+run_rust_cmd() {
+  ( cd rust && "$@" )
+}
+
+run_native_compiler() {
+  local label="$1"
+  local compiler="$2"
+  local start
+  start="$(date +%s)"
+
+  if ! command -v "$compiler" >/dev/null 2>&1; then
+    if [ "$STRICT" -eq 1 ]; then
+      record FAIL "native/$label" "$start" "$compiler is not installed"
+    else
+      record SKIP "native/$label" "$start" "$compiler is not installed" 1
+    fi
+    return
+  fi
+  if ! command -v cmake >/dev/null 2>&1; then
+    record FAIL "native/$label" "$start" "cmake is not installed"
+    return
+  fi
+  if ! command -v ninja >/dev/null 2>&1; then
+    record FAIL "native/$label" "$start" "ninja is not installed"
+    return
+  fi
+
+  local build_dir
+  build_dir="$(mktemp -d "${TMPDIR:-/tmp}/concord-verify-${label}.XXXXXX")" || {
+    record FAIL "native/$label" "$start" "could not create an isolated build directory"
+    return
+  }
+  if cmake -S cpp -B "$build_dir" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_COMPILER="$compiler" \
+      -DCONCORD_WARNINGS_AS_ERRORS=ON \
+      -DCONCORD_BUILD_TESTS=ON \
+      -DCONCORD_BUILD_FUZZ=OFF \
+    && cmake --build "$build_dir" --parallel 2 \
+    && ctest --test-dir "$build_dir" --output-on-failure --parallel 1; then
+    record PASS "native/$label" "$start" "isolated build: $build_dir"
+  else
+    record FAIL "native/$label" "$start" "isolated build: $build_dir"
+  fi
+}
+
 run_web() {
-  local start; start="$(date +%s)"
-  local sub_fail=0
-
-  npm run typecheck || sub_fail=1
-  npm run lint      || sub_fail=1
-  npm run test      || sub_fail=1
+  run_cmd web/typecheck npm run typecheck
+  run_cmd web/lint npm run lint
+  run_cmd web/unit npm run test
 
   if db_available; then
-    npm run test:db || sub_fail=1
+    local start
+    start="$(date +%s)"
+    if npm run db:test:prepare && npm run test:db; then
+      record PASS web/db "$start"
+    else
+      record FAIL web/db "$start"
+    fi
   else
-    printf 'SKIP: web/test:db — DATABASE_TEST_URL unset or compose db down (try: docker compose up -d db)\n'
+    missing_required web/db "DATABASE_TEST_URL must target concord_test and the compose PostgreSQL service must be healthy"
   fi
 
-  if db_available; then
-    npm run test:realtime || sub_fail=1
-  else
-    printf 'SKIP: web/test:realtime — needs the compose db stack + gateway build (DATABASE_TEST_URL unset or compose db down)\n'
-  fi
+  run_cmd web/build npm run build
 
-  npm run build || sub_fail=1
-
-  if [ "$sub_fail" -eq 0 ]; then
-    record PASS web "$start"
+  if infra_available \
+      && [ -x rust/target/release/sync-gateway ] \
+      && [ -f .agent/scratch/phase-3/e2e-jwks.json ] \
+      && [ -f .agent/scratch/phase-3/e2e-key.der ]; then
+    run_cmd web/realtime npm run test:realtime
   else
-    record FAIL web "$start"
+    missing_required web/realtime "requires healthy db+nats+redis, the release gateway, and the local E2E JWKS fixture"
   fi
 }
 
-# ---------------------------------------------------------------------------
-# native
-# ---------------------------------------------------------------------------
 run_native() {
-  local start; start="$(date +%s)"
-  if ./scripts/verify-native.sh Release; then
-    record PASS native "$start"
-  else
-    record FAIL native "$start"
-  fi
+  run_native_compiler gcc g++
+  run_native_compiler clang clang++
 }
 
-# ---------------------------------------------------------------------------
-# rust
-# ---------------------------------------------------------------------------
 run_rust() {
-  local start; start="$(date +%s)"
-  local sub_fail=0
-
   if ! command -v cargo >/dev/null 2>&1; then
-    record SKIP rust "$start" "cargo not found (install rustup)"
+    missing_required rust/toolchain "cargo is not installed"
     return
   fi
 
-  ( cd rust && cargo fmt --check ) || sub_fail=1
-  ( cd rust && cargo clippy --all-targets --all-features --quiet -- -D warnings ) || sub_fail=1
-
-  if [ -z "${GATEWAY_DATABASE_URL:-}" ]; then
-    printf 'SKIP: rust/gateway DB-integration suites — GATEWAY_DATABASE_URL unset (tests self-skip when the DB is unreachable; unit tests still run)\n'
-  fi
-  # --test-threads=1 is the DOCUMENTED serial convention (CONTRIBUTING.md,
-  # release prompt Q4): the chaos suites docker pause/kill the shared
-  # concord-nats/concord-redis containers — a parallel run interleaves
-  # those faults across tests and fails on interference, not on defects
-  # (verified: the same suite is green serially, red in parallel).
-  ( cd rust && cargo test --quiet -- --test-threads=1 ) || sub_fail=1
-
-  if [ "$sub_fail" -eq 0 ]; then
-    record PASS rust "$start"
+  if infra_available; then
+    record PASS rust/prerequisites "$(date +%s)" "PostgreSQL, NATS and Redis are reachable"
   else
-    record FAIL rust "$start"
+    missing_required rust/prerequisites "requires healthy db+nats+redis for integration and distributed suites"
   fi
+
+  run_cmd rust/fmt run_rust_cmd cargo fmt --all --check
+  run_cmd rust/clippy run_rust_cmd cargo clippy --all-targets --all-features --quiet -- -D warnings
+  run_cmd rust/tests run_rust_cmd cargo test --quiet -- --test-threads=1
 }
 
-# ---------------------------------------------------------------------------
-# wasm
-# ---------------------------------------------------------------------------
 run_wasm() {
-  local start; start="$(date +%s)"
   if ! command -v emcc >/dev/null 2>&1; then
-    record SKIP wasm "$start" "emcc not found (Emscripten not installed — only the WASM build needs it)"
+    missing_required wasm/build "emcc is not installed"
     return
   fi
-  if ./scripts/verify-wasm.sh; then
-    record PASS wasm "$start"
-  else
-    record FAIL wasm "$start"
-  fi
+  run_cmd wasm/build-and-smoke bash scripts/verify-wasm.sh
 }
 
-# ---------------------------------------------------------------------------
-# provenance
-# ---------------------------------------------------------------------------
+run_browser() {
+  local reason=""
+  if ! command -v npx >/dev/null 2>&1; then
+    reason="npx is not installed"
+  elif ! infra_available; then
+    reason="requires healthy db+nats+redis"
+  elif [ -z "${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}" ] || [ -z "${CLERK_SECRET_KEY:-}" ]; then
+    reason="requires NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY for the documented disposable Clerk test instance"
+  elif [ ! -x rust/target/release/sync-gateway ] || [ ! -x build/native/worker/concord-worker ]; then
+    reason="requires the release gateway and native worker binaries"
+  elif [ ! -f public/crdt-worker.js ]; then
+    reason="public/crdt-worker.js is missing; run npm run wasm:build && npm run worker:bundle"
+  fi
+
+  if [ -n "$reason" ]; then
+    missing_required browser/prerequisites "$reason"
+    return
+  fi
+
+  run_cmd browser/chromium npm run test:browser
+  run_cmd browser/firefox npm run test:browser:smoke:firefox
+  run_cmd browser/webkit npm run test:browser:smoke:webkit
+}
+
 run_provenance() {
-  local start; start="$(date +%s)"
-  if ./scripts/security/provenance-check.sh; then
-    record PASS provenance "$start"
+  run_cmd provenance/scan bash scripts/security/provenance-check.sh
+  run_cmd provenance/regression bash scripts/security/provenance-tests.sh
+  run_cmd provenance/ledger bash scripts/security/validate-findings.sh
+}
+
+run_security() {
+  run_cmd security/secrets bash scripts/security/secret-scan.sh
+  run_cmd security/secrets-history bash scripts/security/secret-scan.sh --history
+  run_cmd security/npm-audit npm audit --audit-level=high
+
+  if cargo audit --version >/dev/null 2>&1; then
+    run_cmd security/cargo-audit run_rust_cmd cargo audit
   else
-    record FAIL provenance "$start"
+    missing_required security/cargo-audit "cargo-audit is not installed"
+  fi
+  if cargo deny --version >/dev/null 2>&1; then
+    run_cmd security/cargo-deny run_rust_cmd cargo deny --workspace check
+  else
+    missing_required security/cargo-deny "cargo-deny is not installed"
+  fi
+
+  if command -v trivy >/dev/null 2>&1 || (command -v docker >/dev/null 2>&1 && docker scout >/dev/null 2>&1); then
+    run_cmd security/dependency-scan bash scripts/security/dep-scan.sh
+  else
+    missing_required security/container-scanner "trivy or docker scout is not installed"
   fi
 }
 
-# ---------------------------------------------------------------------------
-# secrets (secret-scan takes no args for the working tree; --json/--history
-# are optional modes — the default tree scan is the gate)
-# ---------------------------------------------------------------------------
-run_secrets() {
-  local start; start="$(date +%s)"
-  if bash scripts/security/secret-scan.sh; then
-    record PASS secrets "$start"
-  else
-    record FAIL secrets "$start"
-  fi
-}
-
-# ---------------------------------------------------------------------------
-# Orchestrate: run every selected step regardless of earlier failures.
-# ---------------------------------------------------------------------------
-printf 'verify-all: steps [%s]\n\n' "$STEPS"
+printf 'verify-all: mode=%s steps=[%s]\n\n' "$([ "$STRICT" -eq 1 ] && printf strict || printf developer)" "$STEPS"
 
 if in_steps web; then run_web; fi
 if in_steps native; then run_native; fi
 if in_steps rust; then run_rust; fi
 if in_steps wasm; then run_wasm; fi
+if in_steps browser; then run_browser; fi
 if in_steps provenance; then run_provenance; fi
-if in_steps secrets; then run_secrets; fi
+if in_steps security; then run_security; fi
 
-# ---------------------------------------------------------------------------
-# Final summary (always printed; exit code follows the failures).
-# ---------------------------------------------------------------------------
 printf '\n==================== verify-all summary ====================\n'
-printf '%-10s %-12s %-8s %s\n' "STATUS" "STEP" "TIME" "NOTE"
-printf '%-10s %-12s %-8s %s\n' "------" "----" "----" "----"
+printf '%-10s %-28s %-8s %s\n' "STATUS" "GATE" "TIME" "NOTE"
+printf '%-10s %-28s %-8s %s\n' "------" "----" "----" "----"
 i=0
 while [ "$i" -lt "${#SUMMARY_STATUS[@]}" ]; do
-  printf '%-10s %-12s %-8s %s\n' \
+  printf '%-10s %-28s %-8s %s\n' \
     "${SUMMARY_STATUS[$i]}" "${SUMMARY_NAME[$i]}" "${SUMMARY_DURATION[$i]}" "${SUMMARY_NOTE[$i]}"
   i=$((i + 1))
 done
 printf '=============================================================\n'
-printf 'verify-all: %d failed, %d skipped, %d run\n' "$FAILED" "$SKIPPED" "${#SUMMARY_STATUS[@]}"
+printf 'PASS: %d\nFAIL: %d\nSKIP: %d\nrequired SKIP: %d\n' "$PASSED" "$FAILED" "$SKIPPED" "$REQUIRED_SKIPPED"
 
-if [ "$FAILED" -gt 0 ]; then
+if [ "$FAILED" -gt 0 ] || { [ "$STRICT" -eq 1 ] && [ "$REQUIRED_SKIPPED" -gt 0 ]; }; then
   exit 1
 fi
 exit 0

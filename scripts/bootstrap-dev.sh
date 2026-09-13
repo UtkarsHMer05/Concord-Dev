@@ -5,7 +5,7 @@
 # One-shot setup for a fresh checkout (macOS + Linux):
 #   1. checks every prerequisite with a per-tool fix hint,
 #   2. installs node modules (npm ci when a lockfile exists, else install),
-#   3. starts the dev Postgres (docker compose up -d db),
+#   3. starts the local Postgres/NATS/Redis stack,
 #   4. runs database migrations,
 #   5. prints the next steps (npm run dev).
 #
@@ -134,9 +134,9 @@ ok "node_modules ready"
 if [ "${SKIP_DOCKER:-0}" = "1" ]; then
   log "SKIP_DOCKER=1 — skipping compose stack + migrations"
 else
-  log "starting dev database (docker compose up -d db)..."
-  docker compose up -d db
-  ok "dev db up (127.0.0.1:5433)"
+  log "starting local infrastructure (docker compose up -d db nats redis)..."
+  docker compose up -d db nats redis
+  ok "dev infrastructure up (Postgres 5433, NATS 4222, Redis 6379)"
 
   log "running migrations (npm run db:migrate)..."
   npm run db:migrate
@@ -146,8 +146,14 @@ else
   if npm run db:test:prepare; then
     ok "test database ready (concord_test)"
   else
-    log "WARN: test-database prepare failed — DB integration tests will skip/fail until it exists"
+    fail "isolated test-database preparation failed" \
+      "ensure the compose Postgres service is healthy, then re-run: npm run db:test:prepare"
   fi
+fi
+
+if [ "$failures" -gt 0 ]; then
+  printf '[bootstrap] %d failure(s) remain — bootstrap did not complete.\n' "$failures" >&2
+  exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -165,6 +171,7 @@ cat <<'EOF'
 
   # Full gates before opening a PR:
   bash scripts/verify-all.sh
+  bash scripts/verify-all.sh --strict   # release/audit mode; no required skips
 
 Docs: docs/ (see docs/SECURITY.md for the local stack details).
 EOF

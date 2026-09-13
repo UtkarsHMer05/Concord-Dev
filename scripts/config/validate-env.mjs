@@ -11,8 +11,8 @@
 //   - web:     src/server/env.ts (zod schema)
 //   - gateway: rust/sync-gateway/src/config.rs (fail-fast Config::from_env,
 //              exit code 2 on config errors) + GATEWAY_RATE_CONNECT_PER_MIN
-//              (ephemeral/ratelimit.rs, optional, invalid = silently kept
-//              default) + RUST_LOG (tracing filter)
+//              (ephemeral/ratelimit.rs, optional, invalid = startup failure)
+//              + RUST_LOG (tracing filter)
 //   - worker:  GATEWAY_WORKER_BINARY path contract (config.rs validates it
 //              is a readable FILE when set)
 // When the source contracts change, this matrix must change with them —
@@ -35,9 +35,10 @@ import { parseArgs } from "node:util";
 // ---------------------------------------------------------------------------
 
 const POSTGRES_URL = (v) => /^postgres(ql)?:\/\/\S+/.test(v);
-const HTTPS_URL = (v) => /^https:\/\/\S+/.test(v);
 const WS_URL = (v) => /^(nats|redis):\/\/\S+/.test(v);
 const POSITIVE_INT = (v) => /^\d+$/.test(v) && Number(v) >= 1;
+const FRAME_SIZE = (v) => /^\d+$/.test(v) && Number(v) >= 1024;
+const CONNECT_RATE = (v) => /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 10000;
 const PORT = (v) => /^\d+$/.test(v) && Number(v) > 0 && Number(v) < 65536;
 const IP_ADDR = (v) =>
   /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.test(v) &&
@@ -141,7 +142,7 @@ const MATRIX = {
     kind: "public",
     what: "Max accepted WS frame bytes (default 8 MiB, min 1024; PROTOCOL 9.11)",
     failure: "< 1024 or non-numeric -> ConfigError::Invalid, exit 2",
-    format: POSITIVE_INT,
+    format: FRAME_SIZE,
   },
   GATEWAY_QUEUE_CAPACITY: {
     service: "gateway",
@@ -218,8 +219,8 @@ const MATRIX = {
     required: [],
     kind: "public",
     what: "Connect-rate budget per minute (default 240; overrides the connect policy)",
-    failure: "invalid/absent value is silently ignored (default kept) — no startup failure",
-    format: POSITIVE_INT,
+    failure: "invalid value -> ConfigError::Invalid, exit 2; absent uses the default 240",
+    format: CONNECT_RATE,
   },
   GATEWAY_OTEL_ENABLED: {
     service: "gateway",

@@ -330,9 +330,8 @@ async function main() {
 
   // --- docker stop -t 30 while sessions are live ---------------------------
   const t0 = Date.now();
-  let stdout = "";
   try {
-    stdout = execFileSync("docker", ["stop", "-t", "30", containerName], { encoding: "utf8" });
+    execFileSync("docker", ["stop", "-t", "30", containerName], { encoding: "utf8", stdio: "ignore" });
   } catch (e) {
     console.error("docker stop failed:", e.message);
     process.exit(1);

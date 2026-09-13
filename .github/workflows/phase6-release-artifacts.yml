@@ -9,7 +9,8 @@
 # be decoration; the honest statement is: no deploy steps exist here.
 # ================================================================
 #
-# Triggers: workflow_dispatch (manual release build) + tag push "v*".
+# Triggers: workflow_dispatch (manual release build) + canonical v1-style
+# tag pushes (both the historical `concord-v*` convention and `v*`).
 #
 # Artifacts produced (into release-artifacts/, uploaded once):
 #   concord-web-image.tar          hardened web image (docker/web.Dockerfile)
@@ -51,7 +52,7 @@ name: phase6-release-artifacts
 on:
   workflow_dispatch:
   push:
-    tags: ["v*"]
+    tags: ["v*", "concord-v*"]
 
 concurrency:
   group: phase6-release-artifacts-${{ github.ref }}
@@ -72,6 +73,8 @@ jobs:
           # not required, but a clean HEAD is; checkout of the tag commit
           # is exactly what should be released.
           fetch-depth: 1
+      - name: Pin reproducible release timestamp to the checked-out commit
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct \"$GITHUB_SHA\")" >> "$GITHUB_ENV"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -188,6 +191,20 @@ jobs:
           severity: CRITICAL,HIGH
       - name: Enforce scan verdict (allowlist-gated; new critical/high fails)
         run: scripts/security/scan-gate.sh release-artifacts/trivy-web.json release-artifacts/trivy-gateway.json
+
+      # ---------------- Traceability manifest ----------------
+      # The manifest is written before SHA256SUMS so the sums file can cover
+      # it without a circular self-hash. It carries the exact checked-out
+      # commit/tag, protocol version, artifact/SBOM hashes and toolchain
+      # versions. Docker image IDs are recorded when available.
+      - name: Write release traceability manifest
+        run: |
+          node scripts/release/write-manifest.mjs \
+            --dir release-artifacts \
+            --commit "$GITHUB_SHA" \
+            --tag "${GITHUB_REF_NAME:-manual}" \
+            --image-ref "concord-gateway:${GITHUB_REF_NAME:-manual}" \
+            --image-ref "concord-web:${GITHUB_REF_NAME:-manual}"
 
       # ---------------- Checksums ----------------
       - name: SHA256SUMS over every artifact

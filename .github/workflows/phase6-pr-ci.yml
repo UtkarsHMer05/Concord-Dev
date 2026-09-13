@@ -7,27 +7,23 @@
 #            service container (run_migrations is executed inside the
 #            db_integration suite itself — no separate migrate step).
 #   native   portable cmake Release configure+build + root CTest (core,
-#            property smoke and worker protocol suites).
+#            property smoke and worker protocol suites) in GCC and Clang
+#            matrix lanes.
 #   wasm     emscripten emsdk install + npm run wasm:build + wasm smoke
 #            (reuses the phase2-core pattern: emsdk clone, no container).
 #   security secret-scan (tree mode — history mode is the nightly tier),
-#            dep-scan + npm audit + cargo audit. dep-scan exits 1 BY
-#            DESIGN when the pinned DEV-ONLY container base images carry
-#            critical CVEs — those are DOCUMENTED-ACCEPTED residual risk
-#            (docs/SECURITY.md §9.2: every critical/high sits in
-#            base-image OS packages or embedded Go toolchain artifacts,
-#            none in postgresql/nats-server/redis-server/nginx
-#            themselves; images are loopback-bound, dev-only). This job
-#            therefore runs dep-scan with continue-on-error: true AND
-#            re-fails on exit codes other than 0/1 (2 = usage error,
-#            real tool failures must still fail the PR). The full gate
-#            (M049, LEAD) owns the documented-residual-risk signoff —
-#            nothing is hidden here: the scan output is printed in the
-#            job log either way.
+#            source dependency audit + cargo audit/deny. The PR job records
+#            that image scanning is intentionally not run here; the release
+#            workflow owns the mandatory Trivy image gate. No scan step uses
+#            continue-on-error or converts a scanner failure into success.
 #
 # Protocol parity (golden vectors TS⇄Rust): covered by web unit tests
 # (tests/protocol + fixtures/) and rust cargo test --lib (protocol golden
 # tests) — both run in the web and rust jobs above; no separate job needed.
+#
+#   browser  real Playwright Chromium journey + accessibility, with Firefox
+#            and WebKit auth/editor smoke coverage against the real Clerk
+#            dev instance, gateway, PostgreSQL, NATS, Redis and WASM worker.
 #
 # SHARED-DB HAZARD (from SA-CHAOS6/SA-WEB6): all Rust integration suites
 # and the TS db/realtime projects share ONE concord_test database. This
@@ -144,8 +140,13 @@ jobs:
         working-directory: rust
 
   native:
+    name: native (${{ matrix.compiler }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -156,9 +157,12 @@ jobs:
       # reusing them keeps CI portable and consistent with house style.
       - name: Configure + build (Release) + native CTest
         run: |
-          cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S cpp -B build/native -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCONCORD_WARNINGS_AS_ERRORS=ON
           cmake --build build/native
-          ctest --test-dir build/native --output-on-failure
+          ctest --test-dir build/native --output-on-failure --parallel 1
 
   wasm:
     runs-on: ubuntu-latest
@@ -177,6 +181,80 @@ jobs:
       - uses: ./.github/actions/build-wasm
       - name: CRDT parity/runtime tests against the built module
         run: npx vitest run tests/crdt
+
+  browser:
+    name: browser (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            command: npm run test:browser
+          - browser: firefox
+            command: npm run test:browser:smoke:firefox
+          - browser: webkit
+            command: npm run test:browser:smoke:webkit
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: concord
+          POSTGRES_PASSWORD: concord_local_dev
+          POSTGRES_DB: concord
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U concord -d concord"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      nats:
+        image: nats:2.11.6-alpine
+        ports: ["4222:4222"]
+      redis:
+        image: redis:8.8.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      DATABASE_TEST_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CONCORD_E2E_CLERK_PUBLISHABLE_KEY }}
+      CLERK_SECRET_KEY: ${{ secrets.CONCORD_E2E_CLERK_SECRET_KEY }}
+      GATEWAY_CLERK_ISSUER: ${{ secrets.CONCORD_E2E_CLERK_ISSUER }}
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable snapshot
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # latest snapshot
+      - run: npm ci
+      - name: Require the disposable Clerk E2E instance configuration
+        run: |
+          test -n "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" || { echo "CONCORD_E2E_CLERK_PUBLISHABLE_KEY repository secret is required" >&2; exit 1; }
+          test -n "$CLERK_SECRET_KEY" || { echo "CONCORD_E2E_CLERK_SECRET_KEY repository secret is required" >&2; exit 1; }
+      - uses: ./.github/actions/build-wasm
+      - name: Build release gateway
+        run: cargo build --release
+        working-directory: rust
+      - name: Build release native worker
+        run: |
+          cmake -S cpp -B build/native -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCONCORD_WARNINGS_AS_ERRORS=ON
+          cmake --build build/native --target concord-worker
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run real browser gate
+        run: ${{ matrix.command }}
 
   security:
     runs-on: ubuntu-latest
@@ -212,31 +290,12 @@ jobs:
             cargo install cargo-audit --locked
           fi
           (cd rust && cargo audit)
-      # dep-scan aggregate. Exit policy (script header): non-zero (1) ONLY
-      # when a critical/high finding exists that is not covered by a
-      # documented acceptance. The KNOWN container base-image criticals
-      # are DOCUMENTED-ACCEPTED dev-only residual risk — SECURITY.md §9.2
-      # (all criticals sit in base-image OS/Go-toolchain packages, not
-      # the actual server applications; images are loopback-bound dev
-      # deps). Handling here is the "simplest honest option": allow the
-      # documented exit-1, print the full classified report, and hard-fail
-      # on any OTHER exit code (2 = usage error) so real regressions in
-      # the npm/Rust trees still fail the PR. The M049 release gate owns
-      # the residual-risk signoff; nothing is suppressed.
-      - name: Dependency scan (dep-scan; container criticals documented-accepted per SECURITY.md §9.2)
-        run: |
-          set +e
-          bash scripts/security/dep-scan.sh
-          rc=$?
-          set -e
-          if [ "$rc" -eq 0 ]; then
-            echo "dep-scan: no critical/high findings."
-          elif [ "$rc" -eq 1 ]; then
-            echo "::warning::dep-scan reported critical/high findings. The KNOWN container base-image criticals are DOCUMENTED-ACCEPTED dev-only residual risk (docs/SECURITY.md §9.2) — npm/Rust findings in this report are NOT covered by that acceptance and must be triaged. The M049 gate owns the signoff; output above is the full classified report."
-          else
-            echo "::error::dep-scan exited $rc (usage/tool error) — failing the PR."
-            exit "$rc"
-          fi
+      # Source dependency aggregate. Container scanning is deliberately
+      # explicit here: release-artifacts runs Trivy + scan-gate against the
+      # exact images it builds. A skipped PR image scan must not be mistaken
+      # for a green image result.
+      - name: Dependency scan (source trees; container scan is release-only)
+        run: bash scripts/security/dep-scan.sh --skip-containers
       # Provenance gate (hardening G2/G6): no shipped file may be
       # byte-identical to the antonio-original-baseline tutorial tree
       # unless allowlisted with a verified permissive upstream license

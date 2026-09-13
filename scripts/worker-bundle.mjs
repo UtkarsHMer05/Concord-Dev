@@ -3,7 +3,8 @@
 //
 // WHY: Turbopack's worker chunking resolves its otherChunks list with a
 // page-relative base that 404s inside the worker context on nested routes
-// (…/documents/<id> — observed live on production: the worker bootstrap
+// (…/documents/<id> — observed during a historical production-shaped
+// exercise: the worker bootstrap
 // loads, its chunk fetch double-prefixes to /_next/static/chunks/static/
 // chunks/… and 404s, the init RPC never answers, the bridge stalls idle).
 // A pre-bundled static worker file with an ABSOLUTE URL (/crdt-worker.js)
