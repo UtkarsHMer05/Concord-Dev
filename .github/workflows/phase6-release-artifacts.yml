@@ -276,8 +276,8 @@ jobs:
             --dir release-artifacts \
             --commit "$(git rev-parse HEAD)" \
             --tag "${GITHUB_REF_NAME:-manual}" \
-            --image-ref "concord-gateway:${GITHUB_REF_NAME:-manual}" \
-            --image-ref "concord-web:${GITHUB_REF_NAME:-manual}"
+            --image-ref "concord-gateway:release" \
+            --image-ref "concord-web:release"
 
       # ---------------- Checksums ----------------
       - name: SHA256SUMS over every artifact
