@@ -202,6 +202,14 @@ jobs:
           docker logs concord-release-smoke-db
           exit 1
 
+      # The gateway owns only its schema family; Phase 1's documents/users
+      # tables are created by Drizzle. Provision both families in the
+      # disposable database before exercising the gateway startup path.
+      - name: Apply web schema migrations for image smoke
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
+
       # ---------------- Hardened release images + smoke ----------------
       # smoke-images.sh: builds BOTH images from `git archive HEAD` (clean
       # committed tree — in-flight working-tree edits cannot leak into the
