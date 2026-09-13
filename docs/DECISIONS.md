@@ -1226,7 +1226,7 @@ retained and will not be removed.
 
 - **Context:** scanners alone cannot prove authorization semantics.
 - **Decision:** the formal threat model (SECURITY.md §8) maps every row
-  to an existing executable test or a named planned milestone; Phase 6
+  to executable evidence or an explicitly documented posture limitation; Phase 6
   added the authorization/IDOR matrix, live-revocation proofs
   (in-transaction recheck → immediate enforcement at the next batch
   boundary, no TTL cache), internal broker/Redis trust abuse suites,

@@ -166,10 +166,10 @@ aspirational numbers we aim to MEASURE, not service-level agreements:
 
 ## Known gaps (deliberate, tracked)
 
-- `concord_worker_queue_depth` emits 0: the maintenance scheduler IS
-  spawned in `main.rs` when `GATEWAY_WORKER_BINARY` is set (DEC-045,
-  live-proven), and the gauge is wired to scheduler claim execution
-  (set to 1 while a claimed job runs, 0 between claims).
+- `concord_worker_queue_depth` is 0 between jobs and 1 while a claimed job
+  runs: the maintenance scheduler is spawned in `main.rs` when
+  `GATEWAY_WORKER_BINARY` is set (DEC-045, live-proven), and the gauge is
+  wired to scheduler claim execution.
 - `concord_queue_depth{queue}` only has the `conn_send` class: the
   protocol uses one bounded mpsc per connection; no separate
   ingress/fanout/catchup queues exist to measure.

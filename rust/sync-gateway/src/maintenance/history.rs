@@ -1033,7 +1033,7 @@ mod tests {
     /// The reserved restore replica is a stable, documented constant
     /// disjoint from the worker's own reserved id ("SYSC" 0x53595343)
     /// — required because the worker REJECTS ops carrying its own id,
-    /// so restore-emitted ops (a future phase) must use a different
+    /// so restore-emitted ops must use a different
     /// reserved band.
     #[test]
     fn reserved_restore_replica_is_distinct_and_documented() {

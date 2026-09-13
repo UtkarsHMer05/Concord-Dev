@@ -175,8 +175,9 @@ DEC-031..034, docs/OPERATIONS.md, docs/SECURITY.md §6.
   suites green; CI enforced; observability live; benchmark gates wired.
   **Met:** 181/181 correctness scenarios (0 lost durable-ACKed ops,
   0 divergent replicas within the defined fault model); 27/27 chaos;
-  sanitizer matrix + 5M fuzz execs clean; threat model 32/32 rows mapped
-  to controls with executable or explicitly planned-fuzz coverage recorded;
+  sanitizer matrix + 5M historical fuzz execs clean; threat model 32/32 rows
+  mapped to controls with executable or scheduled/manual extended-fuzz
+  coverage recorded;
   secret scan clean (tree + full history); five
   phase-6 CI workflows + regression comparator; Prometheus/Grafana +
   OTel live; benchmark schema + baselines wired (98.6% recovery,

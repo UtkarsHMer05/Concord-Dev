@@ -19,6 +19,31 @@ environments, `docs/SECURITY.md` §8 for the threat model, and
   unqualified zero-loss: delivery is at-least-once + idempotent, and
   durability is PostgreSQL-local under the defined fault model.
 
+## 1.1 Public claim index (current evidence)
+
+This compact index is the public entry point for the claims most likely to be
+read without the full phase matrix. The report and evidence directory retain
+the complete context and limitations.
+
+| Public claim | Evidence class | Command | Artifact/result | Last verified SHA |
+|---|---|---|---|---|
+| The hardened release tag resolves to the audited implementation | SCAN | `git rev-parse --verify v1.0.0-hardened.10^{commit}` | `b711111431f15717c2a887f81404eabce71e1046` | `b711111431f15717c2a887f81404eabce71e1046` |
+| Repository provenance has no unallowlisted identical baseline files | SCAN | `bash scripts/security/provenance-check.sh` | 123 baseline files, 54 overlaps, 0 unallowlisted identical files | `1efdbfe049affc2da9b72798a4c2fbbea74ed03f` |
+| Provenance and scanner failure modes are fail-closed | TEST | `bash scripts/security/provenance-tests.sh && bash scripts/security/secret-scan-tests.sh` | Provenance 14/14; injected secret-scanner failure exits 2 | `1efdbfe049affc2da9b72798a4c2fbbea74ed03f` |
+| Gitless source archives build a valid native worker | TEST | `cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DCONCORD_BUILD_TESTS=ON && cmake --build build/native && ctest --test-dir build/native --output-on-failure --parallel 1` | CTest 3/3; archive version `concord-worker 1.0.0` | `b711111431f15717c2a887f81404eabce71e1046` |
+| Production npm dependencies have no known audit vulnerabilities | SCAN | `npm audit --omit=dev` | 0 Critical, 0 High, 0 Moderate, 0 Low | `1efdbfe049affc2da9b72798a4c2fbbea74ed03f` |
+| Release web and gateway images pass the enforced Trivy gate | SCAN | `gh run view 34751270511 --repo UtkarsHMer05/Concord-Dev` | Trivy web 0; gateway 0; release workflow success | `b711111431f15717c2a887f81404eabce71e1046` |
+| No repository or history secrets are reported by the scanner | SCAN | `bash scripts/security/secret-scan.sh --history` | Working tree, SBOMs, and full history clean | `1efdbfe049affc2da9b72798a4c2fbbea74ed03f` |
+| Local rendered-browser coverage exercises the required journeys | TEST | `npx playwright test tests/browser --project=chromium --project=firefox --project=webkit` | Chromium 12/12, Firefox retry 1/1, WebKit 1/1 | `b711111431f15717c2a887f81404eabce71e1046` |
+| Accessibility checks report no serious or critical violations | TEST | `npx playwright test tests/browser/a11y.spec.ts` | 5/5; no serious/critical axe violations | `b711111431f15717c2a887f81404eabce71e1046` |
+| Protected CI is green for non-browser required jobs | LIVE | `gh run view 34753859142 --repo UtkarsHMer05/Concord-Dev` | Web, Rust, WASM, security, native GCC, and native Clang succeeded | `1efdbfe049affc2da9b72798a4c2fbbea74ed03f` |
+| Protected browser CI is not yet green | LIVE | `gh run view 34753859142 --repo UtkarsHMer05/Concord-Dev` | Chromium, Firefox, and WebKit fail the explicit missing-Clerk-secret preflight before tests | `1efdbfe049affc2da9b72798a4c2fbbea74ed03f` |
+
+The `verifiedSha` values above identify the code or code-equivalent
+checkpoint that produced each result. The final report/evidence publication
+may be a documentation-only descendant; it does not retroactively change the
+implementation SHA named by a test result.
+
 ## 2. Correctness claims
 
 | Claim | Evidence class | Where |

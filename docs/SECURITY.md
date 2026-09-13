@@ -9,8 +9,8 @@ Last updated: 2026-09-13
 > distributed additions, §7 the Phase 5 storage-integrity additions, and
 > §8 the Phase 6 formal threat model (P6-M020), which supersedes nothing
 > below it but sits above it as the systematic map: every named threat is
-> traced to either an existing executable test (file/suite named) or a
-> planned Phase 6 test (marked `PLANNED → P6-Mxxx`). §9 records the
+> traced to either an existing executable test/scanner (file/suite named) or
+> an explicitly documented posture limitation. §9 records the
 > Phase 6 scanning tooling (P6-M024 secret scanning, P6-M025 supply-chain
 > scanning). §10 records the Phase 7 production security configuration
 > (P7-M020 sign-off: TLS/Clerk posture, required env, network exposure,
@@ -204,20 +204,20 @@ findings, zero HIGH/CRITICAL. All MEDIUMs are fixed and regression-pinned
 
 ---
 
-## 8. Phase 6 formal threat model (P6-M020, CURRENT as of 2026-09-09)
+## 8. Phase 6 formal threat model (P6-M020, CURRENT as of 2026-09-13)
 
 This section is the systematic map over everything §1–§7 state pointwise.
 Conventions:
 
 - **Boundary numbering (B1–B7)** is used only in this section.
 - **Mapping column** names the executable evidence. `rust/…` paths are
-  under `rust/sync-gateway/tests/`. A row mapped to an existing test is
-  enforced today; a `PLANNED → P6-Mxxx` row is a declared gap with a
-  named owner milestone (M021 IDOR/authorization matrix, M022 revocation,
-  M023 internal NATS/Redis trust, M017/M018 fuzzing). No threat row is
-  left unmapped — that is the acceptance criterion of this model.
+  under `rust/sync-gateway/tests/`. A row mapped to an existing test or
+  scanner is enforced today; posture-only rows name the boundary that still
+  needs an external deployment proof. No threat row is left unmapped — that
+  is the acceptance criterion of this model.
 - Severity = worst-case impact if the threat materialized *given the
-  control exists* (residual), or "exposure" where the control is planned.
+  control exists* (residual), or "exposure" where the control is absent or
+  limited.
 
 ### 8.1 Trust boundary diagram
 
@@ -297,10 +297,10 @@ actual control):
 | AT4 Compromised peer gateway / internal infra (NATS publisher, Redis writer, another gateway process) | Publish arbitrary broker events; write arbitrary Redis keys; read NATS streams | Cannot write PostgreSQL durable rows (no ingest path); cannot forge JWTs; every published event is re-validated (§6.1) |
 | AT5 Loopback network observer (dev machine local user/process) | Sniff loopback traffic (dev: plaintext ws/pg/nats); read docker-compose values | Not a production threat model — the loopback dev posture is documented, and production hardening (TLS everywhere, broker authn) is Phase 7 |
 
-### 8.3 Threat catalog (each row maps to a test or a planned milestone)
+### 8.3 Threat catalog (each row maps to executable evidence or a stated posture limitation)
 
-Boundary key: B1–B7 (§8.1). Existing-test rows are enforced today; rows
-ending in `PLANNED → P6-Mxxx` declare the gap and its owner milestone.
+Boundary key: B1–B7 (§8.1). Existing-test and scanner rows are enforced
+today; posture-only rows identify the external deployment proof that remains.
 
 #### B2/B3 — HTTP + WebSocket edge (unauthenticated and low-priv clients)
 
@@ -311,7 +311,7 @@ ending in `PLANNED → P6-Mxxx` declare the gap and its owner milestone.
 | T3 | Client-supplied identity/role claims honored (identity spoofing) | AT1/AT2 | Verified `sub` is the only principal source (§1.3) | `ws_integration::adversarial_forged_identity_claims_never_trusted` |
 | T4 | IDOR — guessed or cross-tenant `documentId` at join/read/write/snapshot/history/restore | AT2/AT3 | PostgreSQL join resolves effective role; no-access == nonexistent (`forbidden`); UUID shape gate | `ws_integration::join_no_access_is_forbidden_without_leak`; `phase5_history::revision_lifecycle_and_acl_matrix`, `::restore_requires_owner_and_anchors_the_target`; `phase5_restore_concurrency::restore_authorization_matrix_and_concurrent_edits`; `phase5_security::sec5_clean_cross_document_fetch_refused_uniformly`; `tests/authorization.test.ts` (product layer); full cross-role/cross-org gateway matrix `phase6_authz_matrix` (P6-M021, LIVE); web-side IDOR matrix `tests/db/idor-matrix.test.ts` (P6-M021, LIVE) |
 | T5 | Tenant cross-talk through fan-out (ops delivered to wrong room/connection) | AT4 | Route only to connections joined to that exact document id | `broker_integration::publish_and_cross_gateway_delivery`; wrong-document/forged event routing `phase6_internal_trust::nats_wrong_document_event_never_reaches_other_document_or_db` (P6-M023, LIVE) |
-| T6 | Malformed/oversized frames (header bombs, hostile binary layouts, truncated ops) | AT1/AT2 | Bounded decoders (8 MiB frame, 1024 ops/batch, 64 KiB/op, 32 KiB token), reject-before-allocate | `src/protocol/tests.rs` (`control_decode_rejects_hostile_shapes`, `control_decode_rejects_oversized_token`, `data_decode_rejects_hostile_inputs`, `data_encode_enforces_limits`); `ws_integration::malformed_frames_are_safe_errors`, `::adversarial_oversized_frame_is_rejected_and_closed`; continuous fuzzing of decoders `PLANNED → P6-M018` |
+| T6 | Malformed/oversized frames (header bombs, hostile binary layouts, truncated ops) | AT1/AT2 | Bounded decoders (8 MiB frame, 1024 ops/batch, 64 KiB/op, 32 KiB token), reject-before-allocate | `src/protocol/tests.rs` (`control_decode_rejects_hostile_shapes`, `control_decode_rejects_oversized_token`, `data_decode_rejects_hostile_inputs`, `data_encode_enforces_limits`); `ws_integration::malformed_frames_are_safe_errors`, `::adversarial_oversized_frame_is_rejected_and_closed`; `phase6-nightly-reliability.yml` `rust-fuzz` job runs 1,000,000 iterations per target |
 | T7 | Protocol-state abuse (frames out of order, second join, ops before READY) | AT1/AT2 | Connection state machine rejects illegal transitions (PROTOCOL §9.13) | `ws_integration::state_machine_rejects_out_of_order_frames` |
 | T8 | Op replay/duplication (resent batches double-apply or double-ACK) | AT2 | SQL-layer idempotency on op identities; deterministic ACK | `ws_integration::duplicate_resend_yields_single_durable_row_and_deterministic_ack`; `tests/realtime/e2e.test.ts` "duplicate resend across the network boundary"; `broker_integration::replayed_event_is_idempotent_at_every_layer` |
 | T9 | Stale permissions — role downgraded/revoked while a session is live | AT3/AT4 | Write authorization rechecked per batch inside the ingest transaction (live downgrade denied) | `tests/realtime/e2e.test.ts` "live downgrade"; multi-gateway/revocation propagation matrix `phase6_revocation` (P6-M022, LIVE: revoke ACL row mid-stream, revoke across two live gateways, org-membership removal, live VIEWER→EDITOR upgrade, no stale-cache window) |
@@ -342,9 +342,9 @@ ending in `PLANNED → P6-Mxxx` declare the gap and its owner milestone.
 
 | # | Threat | Attacker | Control | Mapping |
 |---|---|---|---|---|
-| T22 | Worker input injection (argv/shell interpolation, oversized stdin frames) | AT4 (compromised peer writing to the pipeline) | Fixed argv, no shell, bounded stdin/stdout/stderr, 256 MiB frame cap, wall-clock timeout, kill-on-drop (§7.4) | `rust/…/src/worker/mod.rs` framing limits + `phase5_pipeline` suite (worker invocation paths); adversarial worker-input fuzzing `PLANNED → P6-M017` |
+| T22 | Worker input injection (argv/shell interpolation, oversized stdin frames) | AT4 (compromised peer writing to the pipeline) | Fixed argv, no shell, bounded stdin/stdout/stderr, 256 MiB frame cap, wall-clock timeout, kill-on-drop (§7.4) | `rust/…/src/worker/mod.rs` framing limits + `phase5_pipeline` suite (worker invocation paths); `phase6-nightly-reliability.yml` `native-fuzz` job exercises `fuzz_worker_protocol` with 300,000 runs |
 | T23 | Malicious/buggy worker output persisted as truth | AT4/accidental | Build verification oracles: fresh-instance import + independent re-fold + M013 integrity matrix before finalize; only `finalized` rows served | `phase5_recovery::differential_verifier_proves_equivalence_and_reports_mismatch`, `::selection_prefers_newest_valid_and_falls_back_on_corruption`; `phase5_snapshots::stored_row_validates_end_to_end`, `::finalized_rows_are_immutable` |
-| T24 | Corrupted snapshot rows served to clients (row/payload swap, bitrot) | AT4/accidental | Full consumer-path validation chain: version → association → size → SHA-256 → digest shape → wrapper structure → metadata agreement (§7.1) | `phase5_snapshots::guards_reject_illegal_transitions`, `::create_attempt_rejects_metadata_mismatch_before_insert`, `::duplicate_document_boundary_attempt_is_rejected`; corruption corpus `PLANNED → P6-M017` |
+| T24 | Corrupted snapshot rows served to clients (row/payload swap, bitrot) | AT4/accidental | Full consumer-path validation chain: version → association → size → SHA-256 → digest shape → wrapper structure → metadata agreement (§7.1) | `phase5_snapshots::guards_reject_illegal_transitions`, `::create_attempt_rejects_metadata_mismatch_before_insert`, `::duplicate_document_boundary_attempt_is_rejected`; `phase6-nightly-reliability.yml` `native-fuzz` snapshot decoder plus `chaos` corrupt-snapshot scenario |
 
 #### Snapshot/history/restore ACLs (cross-boundary, per §7.2/§7.5)
 
@@ -382,15 +382,14 @@ that this model pins:
 
 ### 8.5 Coverage accounting
 
-Threat rows: 32. Every row is mapped to a control; **29 rows have an
-existing executable test or scanner**, while T6, T22, and T24 retain
-explicit planned extended-fuzz references. Their bounded decoder,
-worker-boundary, and snapshot regression suites still run in the normal
-gates. As of 2026-09-13, T29 and T30 are executable CI/release controls,
-not planned workflow work. Rows T2 and T31 are documented posture
-statements (T2: WS-session lifetime vs token lifetime — revocation
-behavior is owned by T9/P6-M022, now LIVE; T31: dev loopback posture with
-Phase 7 hardening).
+Threat rows: 32. Every row is mapped to a control; **all 32 rows have an
+existing executable test, scanner, or explicitly documented posture
+limitation**. T6, T22, and T24 now also name the nightly fuzz/chaos jobs that
+exercise the extended inputs; the normal bounded decoder, worker-boundary,
+and snapshot regression suites remain release gates. Rows T2 and T31 are
+documented posture statements (T2: WS-session lifetime vs token lifetime —
+revocation behavior is LIVE; T31: dev loopback posture with Phase 7
+hardening).
 
 ---
 

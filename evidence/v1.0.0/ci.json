@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "campaign": "CONCORD V1.0.0 final remediation",
+  "executableSha": "b711111431f15717c2a887f81404eabce71e1046",
+  "codeEquivalentCiSha": "1efdbfe049affc2da9b72798a4c2fbbea74ed03f",
+  "branch": "main",
+  "workflows": [
+    {
+      "name": "phase2-core",
+      "runId": 34753859132,
+      "conclusion": "success",
+      "jobs": ["native", "web"]
+    },
+    {
+      "name": "phase3-gateway",
+      "runId": 34753859135,
+      "conclusion": "success",
+      "jobs": ["rust", "web"]
+    },
+    {
+      "name": "phase4-distributed",
+      "runId": 34753859111,
+      "conclusion": "success",
+      "jobs": ["web", "distributed"]
+    },
+    {
+      "name": "phase5-recovery",
+      "runId": 34753859144,
+      "conclusion": "success",
+      "jobs": ["web", "recovery"]
+    },
+    {
+      "name": "codeql",
+      "runId": 34753859114,
+      "conclusion": "success",
+      "jobs": ["Analyze (cpp)", "Analyze (javascript-typescript)"]
+    }
+  ],
+  "distributedRerun": {
+    "workflow": "phase6-distributed",
+    "runId": 34753859093,
+    "attempts": [
+      {
+        "attempt": 1,
+        "jobId": 103714811748,
+        "conclusion": "failure",
+        "result": "TS realtime 15 passed, 6 failed; failover/readiness symptoms cascaded from the failed attempt"
+      },
+      {
+        "attempt": 2,
+        "jobId": 103715861068,
+        "conclusion": "success",
+        "result": "All 24 steps passed; TS realtime 21/21 across 3 files"
+      }
+    ]
+  },
+  "phase6Pr": {
+    "runId": 34753859142,
+    "passingJobs": [
+      "web",
+      "rust",
+      "wasm",
+      "security",
+      "native (g++)",
+      "native (clang++)"
+    ],
+    "browserJobs": [
+      {
+        "name": "browser (chromium)",
+        "conclusion": "failure",
+        "failedStep": "Require the disposable Clerk E2E instance configuration",
+        "reason": "CONCORD_E2E_CLERK_PUBLISHABLE_KEY and CONCORD_E2E_CLERK_SECRET_KEY are not configured"
+      },
+      {
+        "name": "browser (firefox)",
+        "conclusion": "failure",
+        "failedStep": "Require the disposable Clerk E2E instance configuration",
+        "reason": "CONCORD_E2E_CLERK_PUBLISHABLE_KEY and CONCORD_E2E_CLERK_SECRET_KEY are not configured"
+      },
+      {
+        "name": "browser (webkit)",
+        "conclusion": "failure",
+        "failedStep": "Require the disposable Clerk E2E instance configuration",
+        "reason": "CONCORD_E2E_CLERK_PUBLISHABLE_KEY and CONCORD_E2E_CLERK_SECRET_KEY are not configured"
+      }
+    ]
+  },
+  "release": {
+    "workflow": "phase6-release-artifacts",
+    "runId": 34751270511,
+    "conclusion": "success",
+    "tag": "v1.0.0-hardened.10",
+    "sha": "b711111431f15717c2a887f81404eabce71e1046"
+  }
+}

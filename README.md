@@ -202,8 +202,8 @@ is reported in [`docs/audits/V1_HARDENING_FINAL_REPORT.md`](docs/audits/V1_HARDE
 Deny-by-default server-side authorization with roles
 (OWNER / EDITOR / COMMENTER / VIEWER), re-checked on every batch and
 document read; read-denial is masked as not-found. A 32-row threat
-model maps every threat to a control; executable coverage and planned
-extended-fuzz references are listed in [`docs/SECURITY.md`](docs/SECURITY.md).
+model maps every threat to a control; executable coverage and the scheduled/
+manual extended-fuzz jobs are listed in [`docs/SECURITY.md`](docs/SECURITY.md).
 Clerk handles identity **only** —
 all authorization is enforced against Concord-owned data. The public
 surface ships a pinned CSP (including `wasm-unsafe-eval` — its
@@ -227,7 +227,7 @@ gates, and evidence in
 | 3 | Realtime transport: Rust WebSocket gateways, binary wire protocol, authN/authZ per batch, backpressure + graceful drain |
 | 4 | Distributed fanout: nginx LB over N gateways, NATS JetStream (msg-id dedup), Redis presence/rate limits; crash/storm/slow/lag E2E; 1→3 gateway scale-out, zero loss |
 | 5 | Snapshots, 98.6 % faster recovery, crash-safe compaction, restore-as-forward-ops, retention + audit hardening |
-| 6 | Proof phase: 32-row threat model mapped to controls with executable and planned-fuzz coverage recorded, sanitizers, 5 M fuzz execs, 27-scenario chaos, deterministic SBOMs, hardened images, OTel/Prometheus/Grafana live-proven |
+| 6 | Proof phase: 32-row threat model mapped to controls with executable and scheduled/manual extended-fuzz coverage recorded, sanitizers, 5 M historical fuzz execs, 27-scenario chaos, deterministic SBOMs, hardened images, OTel/Prometheus/Grafana live-proven |
 | 7 | Production polish + deployment preparation: browser-verified E2E on release gateway/worker builds, CSP/CSWSH fixes, and deployment runbooks; the exercised AWS stack is intentionally torn down |
 
 The pristine tutorial baseline is preserved at the git tag

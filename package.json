@@ -15,6 +15,7 @@
     "test:realtime": "vitest run --project realtime",
     "test:db": "vitest run --project db",
     "test:all": "npm run test && npm run test:db",
+    "test:coverage": "vitest run --project unit --coverage --coverage.reporter=text-summary --coverage.reporter=json-summary",
     "smoke": "node scripts/smoke.mjs",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose stop db",
@@ -77,6 +78,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
+    "@vitest/coverage-v8": "^5.0.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24",
     "@types/react": "^19",

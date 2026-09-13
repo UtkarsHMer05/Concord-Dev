@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "verifiedSha": "1efdbfe049affc2da9b72798a4c2fbbea74ed03f",
+  "newComparableMeasurement": false,
+  "structuralChecks": [
+    {
+      "claim": "Broker consumer metadata is TTL-cached off the per-message hot path",
+      "evidence": "Repository implementation and existing integration test"
+    },
+    {
+      "claim": "Compaction bytes are computed by one aggregate CTE inside the delete transaction",
+      "evidence": "Repository implementation and existing maintenance tests"
+    }
+  ],
+  "historicalMeasurements": [
+    {
+      "name": "ingest p50",
+      "value": "2.72 ms",
+      "classification": "historical; not measured by this remediation"
+    },
+    {
+      "name": "one-to-four gateway p95",
+      "value": "15.23 ms",
+      "classification": "historical; not measured by this remediation"
+    },
+    {
+      "name": "recovery",
+      "value": "98.4%",
+      "classification": "historical; not measured by this remediation"
+    },
+    {
+      "name": "chaos scenarios",
+      "value": "27/27",
+      "classification": "historical campaign result; not a new performance measurement"
+    }
+  ],
+  "limitation": "No new before/after latency or throughput delta is asserted; real-Chromium performance numbers are not inferred from Node-instrumented WASM measurements."
+}

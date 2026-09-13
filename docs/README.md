@@ -7,8 +7,8 @@ that matches your question. Documents are authoritative for their phase
 and code disagree, code wins and the doc must be fixed (the standing
 rule from [CONFIGURATION.md](CONFIGURATION.md)).
 
-Audits and machine-readable evidence live in [audits/](audits/)
-(below).
+Audits live in [audits/](audits/); the secret-free machine-readable v1
+evidence index lives in [../evidence/v1.0.0/](../evidence/v1.0.0/).
 
 ## Start here
 
@@ -47,7 +47,7 @@ Audits and machine-readable evidence live in [audits/](audits/)
 
 | Document | What it answers |
 |---|---|
-| [SECURITY.md](SECURITY.md) | The full security model: trust boundaries, RBAC, input hardening, the 32-row threat model (each threat mapped to an executable control or explicitly planned fuzz coverage), scanning tooling, production configuration |
+| [SECURITY.md](SECURITY.md) | The full security model: trust boundaries, RBAC, input hardening, the 32-row threat model (each threat mapped to executable evidence or an explicitly documented posture limitation), scanning tooling, production configuration |
 | [AUTHORIZATION.md](AUTHORIZATION.md) | The deny-by-default role model (OWNER/EDITOR/COMMENTER/VIEWER), live revocation, and IDOR masking |
 | [PROVENANCE.md](PROVENANCE.md) | What was retained, replaced, and independently built relative to the tutorial baseline — and the CI gate that enforces it |
 
@@ -57,6 +57,8 @@ Audits and machine-readable evidence live in [audits/](audits/)
 |---|---|
 | [TESTING.md](TESTING.md) | How every layer is tested, with the exact commands (web, native, sanitizers, fuzzing, Rust, chaos) |
 | [VERIFICATION.md](VERIFICATION.md) | The claim-to-evidence index: every engineering claim mapped to its test, scan, or measurement |
+| [COVERAGE.md](COVERAGE.md) | How to generate diagnostic TypeScript, native, and Rust coverage without turning unavailable providers into false results |
+| [TOP_TECH_REVIEW.md](TOP_TECH_REVIEW.md) | Factual review matrix across systems, AWS, product engineering, and native/toolchain lenses |
 | [BROWSER_SUPPORT.md](BROWSER_SUPPORT.md) | Which browsers can run the v1 web client, truthfully (incl. the embedded-WebView caveat) |
 
 ## Performance
@@ -89,4 +91,5 @@ Audits and machine-readable evidence live in [audits/](audits/)
 | [audits/V1_HARDENING_BASELINE.md](audits/V1_HARDENING_BASELINE.md) | The toolchain and gate results captured at the start of the v1 hardening pass (2026-09-12) |
 | [audits/V1_HARDENING_FINDINGS.md](audits/V1_HARDENING_FINDINGS.md) | The hardening finding ledger: severity, evidence, fix, and regression-test status per finding |
 | [audits/V1_HARDENING_FINAL_REPORT.md](audits/V1_HARDENING_FINAL_REPORT.md) | The final 22-section remediation, reproducibility, browser, provenance, CI, release, and residual-risk report |
+| [../evidence/v1.0.0/README.md](../evidence/v1.0.0/README.md) | Secret-free machine-readable CI, security, reproducibility, and performance evidence for v1.0.0 |
 | [audits/provenance-paths.tsv](audits/provenance-paths.tsv) | Machine-readable path inventory: baseline vs current git blob ids for every in-scope `src/`/`public/` path (regenerate via `python3 scripts/audit-provenance.py`) |
