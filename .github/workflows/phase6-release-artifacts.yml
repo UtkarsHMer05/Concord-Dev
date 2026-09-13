@@ -123,20 +123,51 @@ jobs:
       - name: Package worker artifact (tar)
         run: |
           mkdir -p release-artifacts
-          tar -czf release-artifacts/concord-worker-linux-amd64.tgz \
+          tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" \
+            --owner=0 --group=0 --numeric-owner \
+            -czf release-artifacts/concord-worker-linux-amd64.tgz \
             -C build/native/worker concord-worker
 
       # ---------------- WASM artifact ----------------
       - name: Build WASM (emscripten) + smoke + package
         run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git /tmp/emsdk
-          /tmp/emsdk/emsdk install latest
-          /tmp/emsdk/emsdk activate latest
+          EMSDK_VERSION=6.0.9
+          git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git /tmp/emsdk
+          /tmp/emsdk/emsdk install "$EMSDK_VERSION"
+          /tmp/emsdk/emsdk activate "$EMSDK_VERSION"
           source /tmp/emsdk/emsdk_env.sh
           npm ci
           npm run wasm:build
+          tracked_worker_sha="$(sha256sum public/crdt-worker.js | awk '{print $1}')"
+          npm run worker:bundle
+          generated_worker_sha="$(sha256sum public/crdt-worker.js | awk '{print $1}')"
+          test "$tracked_worker_sha" = "$generated_worker_sha" || {
+            echo "release: tracked public/crdt-worker.js is not reproducible from this source tree" >&2
+            exit 1
+          }
           node wasm/smoke.mjs
-          tar -czf release-artifacts/concord-wasm.tgz -C public wasm
+          tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" \
+            --owner=0 --group=0 --numeric-owner \
+            -czf release-artifacts/concord-wasm.tgz -C public wasm
+
+      # The generated WASM is intentionally git-ignored. Assemble a clean
+      # git-archive tree plus the just-built artifacts for the image build;
+      # this keeps the source tree clean while proving the image contains
+      # the exact WASM/worker output produced from the checked-out commit.
+      - name: Prepare clean image source tree with verified generated assets
+        run: |
+          image_source="$RUNNER_TEMP/concord-image-source-${GITHUB_RUN_ID}"
+          mkdir -p "$image_source"
+          git archive HEAD | tar -x -C "$image_source"
+          test ! -e "$image_source/.git"
+          test -f public/wasm/concord-crdt.js
+          test -f public/wasm/concord-crdt.wasm
+          test -f public/crdt-worker.js
+          mkdir -p "$image_source/public/wasm"
+          cp public/wasm/concord-crdt.js public/wasm/concord-crdt.wasm "$image_source/public/wasm/"
+          test -f "$image_source/public/wasm/concord-crdt.js"
+          test -f "$image_source/public/wasm/concord-crdt.wasm"
+          echo "CONCORD_SMOKE_TREE=$image_source" >> "$GITHUB_ENV"
 
       # ---------------- Hardened release images + smoke ----------------
       # smoke-images.sh: builds BOTH images from `git archive HEAD` (clean

@@ -37,6 +37,10 @@ if [ -n "${CONCORD_SMOKE_TREE:-}" ]; then
     echo "error: CONCORD_SMOKE_TREE not a directory: $CONCORD_SMOKE_TREE" >&2
     exit 2
   fi
+  if [ -e "$CONCORD_SMOKE_TREE/.git" ]; then
+    echo "error: CONCORD_SMOKE_TREE must be a clean source export without .git" >&2
+    exit 2
+  fi
   cp -R "$CONCORD_SMOKE_TREE/." "$WORK"
   note_export() { printf '  provided tree: %s\n' "$CONCORD_SMOKE_TREE"; }
 else
@@ -44,6 +48,12 @@ else
   note_export() { printf '  clean tree: %s (%s files)\n' "$(git rev-parse --short HEAD)" "$(git ls-tree -r HEAD --name-only | wc -l | tr -d ' ')"; }
 fi
 note_export
+
+if [ ! -f "$WORK/public/wasm/concord-crdt.js" ] || [ ! -f "$WORK/public/wasm/concord-crdt.wasm" ]; then
+  echo "error: clean image source tree is missing generated public/wasm assets" >&2
+  echo "       run npm run wasm:build, then pass a git-archive export plus public/wasm via CONCORD_SMOKE_TREE" >&2
+  exit 2
+fi
 
 PASS=()
 FAIL=()
