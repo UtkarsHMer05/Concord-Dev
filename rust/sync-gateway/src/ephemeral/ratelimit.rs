@@ -30,7 +30,8 @@ pub struct RateLimitPolicy {
 
 /// Standard scopes (P4-M023: connects, write ops, malformed frames,
 /// reconnect abuse; P5-M045: snapshot fetch — a full-payload read +
-/// hash + base64 serve per frame).
+/// hash + base64 serve per frame). Every default scope is wired at the
+/// WebSocket frame layer; an inactive policy must not remain in this map.
 pub const SCOPE_CONNECT: &str = "connect";
 pub const SCOPE_WRITE_OPS: &str = "write";
 pub const SCOPE_MALFORMED: &str = "malformed";
@@ -215,4 +216,42 @@ fn record_rate_limit_hit(scope: &str) {
         .map(|(_, labels)| *labels)
         .unwrap_or(OTHER);
     crate::observability::metrics::incr_labeled("concord_rate_limit_hits_total", labels);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn default_write_and_malformed_scopes_are_enforced() {
+        let policies = default_policies();
+        assert_eq!(policies.len(), 4, "all configured scopes are active");
+        assert!(policies.contains_key(SCOPE_CONNECT));
+        assert!(policies.contains_key(SCOPE_WRITE_OPS));
+        assert!(policies.contains_key(SCOPE_MALFORMED));
+        assert!(policies.contains_key(SCOPE_SNAPSHOT_FETCH));
+
+        let limiter = RateLimiter::new(None, policies);
+        for _ in 0..2_000 {
+            assert_eq!(
+                limiter.check(SCOPE_WRITE_OPS, "connection-write").await,
+                RateLimitOutcome::Allowed
+            );
+        }
+        assert_eq!(
+            limiter.check(SCOPE_WRITE_OPS, "connection-write").await,
+            RateLimitOutcome::Limited
+        );
+
+        for _ in 0..50 {
+            assert_eq!(
+                limiter.check(SCOPE_MALFORMED, "connection-malformed").await,
+                RateLimitOutcome::Allowed
+            );
+        }
+        assert_eq!(
+            limiter.check(SCOPE_MALFORMED, "connection-malformed").await,
+            RateLimitOutcome::Limited
+        );
+    }
 }

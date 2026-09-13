@@ -85,10 +85,10 @@ fn install_capturing_subscriber() {
     // calls are no-ops. Events from ALL tests land in LOG_CAPTURE.
     let _ = tracing_subscriber::fmt()
         .with_writer(SharedWriter)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
+        // This capture is an assertion harness, not an operator log stream:
+        // keep the INFO milestones visible even when the parent shell exports
+        // a production-oriented RUST_LOG=warn.
+        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
         .with_target(false)
         .try_init();
 }

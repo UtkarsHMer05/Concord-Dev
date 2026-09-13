@@ -370,7 +370,15 @@ async fn connection_loop(
                     }
                     Ok(Message::Binary(bytes)) => {
                         Metrics::global().inbound_frames_total.fetch_add(1, Ordering::Relaxed);
-                        handle_binary(conn, &bytes, registry, repo, draining, bus, gateway_id).await?;
+                        let binary_context = BinaryContext {
+                            registry,
+                            repo,
+                            draining,
+                            bus,
+                            gateway_id,
+                            rate_limiter,
+                        };
+                        handle_binary(conn, &bytes, &binary_context).await?;
                     }
                     Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {
                         // WebSocket-level keepalive: axum replies automatically.
@@ -446,6 +454,22 @@ async fn handle_text(
                 &["control"],
             );
             tracing::debug!(connection_id = %conn.id, ?e, "control frame rejected");
+            if !conn_allows_scope(
+                conn,
+                rate_limiter,
+                crate::ephemeral::ratelimit::SCOPE_MALFORMED,
+                MALFORMED_RATE_LABEL,
+            )
+            .await
+            {
+                let _ = send_error(
+                    conn,
+                    ProtocolError::RateLimited,
+                    "malformed frames rate limited",
+                    None,
+                );
+                return Err(FlowError::Close);
+            }
             let fatal = send_error(conn, code, "frame rejected", None);
             return if fatal { Err(FlowError::Close) } else { Ok(()) };
         }
@@ -922,6 +946,32 @@ async fn conn_allows_snapshot_read(
     }
 }
 
+/// Apply a bounded per-connection frame budget. The caller supplies only a
+/// fixed scope/label pair from this module; the limiter itself also guards
+/// the Prometheus label against arbitrary values. Rate exhaustion closes the
+/// session so a hostile client cannot continue consuming parser/DB work.
+async fn conn_allows_scope(
+    conn: &Conn,
+    rate_limiter: &Arc<crate::ephemeral::ratelimit::RateLimiter>,
+    scope: &str,
+    labels: &'static [&'static str],
+) -> bool {
+    match rate_limiter.check(scope, &conn.id.to_string()).await {
+        RateLimitOutcome::Allowed => true,
+        RateLimitOutcome::Limited => {
+            crate::telemetry::Metrics::global()
+                .rate_limited_total
+                .fetch_add(1, Ordering::Relaxed);
+            crate::observability::metrics::incr_labeled("concord_rate_limit_hits_total", labels);
+            tracing::info!(connection_id = %conn.id, scope, "frame rate limited");
+            false
+        }
+    }
+}
+
+const MALFORMED_RATE_LABEL: &[&str] = &["malformed"];
+const WRITE_RATE_LABEL: &[&str] = &["write"];
+
 /// Standard base64 (RFC 4648, with padding) — dependency-free: the
 /// payload rides a JSON text frame, so raw bytes must be encoded.
 fn base64_encode(bytes: &[u8]) -> String {
@@ -1026,16 +1076,29 @@ async fn stream_catchup(
     }
 }
 
+struct BinaryContext<'a> {
+    registry: &'a Arc<SessionRegistry>,
+    repo: &'a Arc<GatewayRepo>,
+    draining: &'a Arc<AtomicBool>,
+    bus: &'a Arc<dyn EventPublisher>,
+    gateway_id: u64,
+    rate_limiter: &'a Arc<crate::ephemeral::ratelimit::RateLimiter>,
+}
+
 /// Handles one inbound BINARY (data) frame (P3-M027 ingestion).
 async fn handle_binary(
     conn: &mut Conn,
     bytes: &[u8],
-    registry: &Arc<SessionRegistry>,
-    repo: &Arc<GatewayRepo>,
-    draining: &Arc<AtomicBool>,
-    bus: &Arc<dyn EventPublisher>,
-    gateway_id: u64,
+    context: &BinaryContext<'_>,
 ) -> Result<(), FlowError> {
+    let BinaryContext {
+        registry,
+        repo,
+        draining,
+        bus,
+        gateway_id,
+        rate_limiter,
+    } = context;
     if !conn.state.can_send_client_ops() {
         // Illegal in every state except READY (includes Draining).
         Metrics::global()
@@ -1104,10 +1167,44 @@ async fn handle_binary(
                 "concord_ops_rejected_total",
                 &[crate::telemetry::reject_reason::MALFORMED],
             );
+            if !conn_allows_scope(
+                conn,
+                rate_limiter,
+                crate::ephemeral::ratelimit::SCOPE_MALFORMED,
+                MALFORMED_RATE_LABEL,
+            )
+            .await
+            {
+                let _ = send_error(
+                    conn,
+                    ProtocolError::RateLimited,
+                    "malformed frames rate limited",
+                    None,
+                );
+                return Err(FlowError::Close);
+            }
             let fatal = send_error(conn, code, "operation batch rejected", None);
             return if fatal { Err(FlowError::Close) } else { Ok(()) };
         }
     };
+
+    // Count validated client operations, not bytes or parser attempts. The
+    // budget is per connection, while connect admission limits reconnect
+    // churn by resolved client IP. A batch is all-or-nothing: if any op
+    // would exceed the budget, no part of it reaches the database.
+    for _ in 0..ops.ops.len().max(1) {
+        if !conn_allows_scope(
+            conn,
+            rate_limiter,
+            crate::ephemeral::ratelimit::SCOPE_WRITE_OPS,
+            WRITE_RATE_LABEL,
+        )
+        .await
+        {
+            let _ = send_error(conn, ProtocolError::RateLimited, "write rate limited", None);
+            return Err(FlowError::Close);
+        }
+    }
 
     let Some(user) = conn.user else { return Ok(()) };
     let Some(document) = conn.document else {
@@ -1129,7 +1226,7 @@ async fn handle_binary(
     // through authz → persist → ack → publish → fanout. Fields carry only
     // ids/latencies/outcomes — never content or tokens.
     let correlation_id =
-        crate::observability::correlation::batch_correlation_id(gateway_id, ops.batch_id);
+        crate::observability::correlation::batch_correlation_id(*gateway_id, ops.batch_id);
     let ingress_started = Instant::now();
     // P6-M009: ingress span. EnteredSpan is !Send so the guard cannot be
     // held across the ingest await; enter/exit brackets the async work
@@ -1141,6 +1238,12 @@ async fn handle_binary(
     );
     let _ingress_guard = ingress_span.enter();
 
+    tracing::info!(
+        correlation_id = %correlation_id,
+        outcome = "ingress",
+        op_count = ops.ops.len(),
+        "operation batch received"
+    );
     let started = std::time::Instant::now();
     let result = repo.ingest_batch(user, document, &envelopes).await;
     Metrics::global().record_db_write_latency(started.elapsed().as_micros() as u64);
