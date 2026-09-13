@@ -59,7 +59,7 @@ const TABLE_EXTENSIONS = [Table, TableRow, TableHeader, TableCell];
 
 /** Page surface styling for the editable element (the "sheet" look). */
 const EDITOR_SHEET_CLASS =
-  "focus:outline-none print:border-0 bg-white border border-[#C7C7C7] flex flex-col min-h-[1054px] w-[816px] pt-10 pr-14 pb-10 cursor-text";
+  "focus:outline-2 focus:outline-solid focus:outline-offset-2 focus:outline-blue-600 print:border-0 bg-white border border-[#C7C7C7] flex flex-col min-h-[1054px] w-[816px] pt-10 pr-14 pb-10 cursor-text";
 
 /**
  * Every editor lifecycle hook TipTap offers funnels into the same store
@@ -115,6 +115,10 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
     onContentError: publishEditorToStore(setEditor),
     editorProps: {
       attributes: {
+        // Keep the document surface in the keyboard tab order. Contenteditable
+        // elements are not consistently tabbable across browser engines when
+        // their editor wrapper is mounted dynamically, so this is explicit.
+        tabindex: "0",
         // Ruler-controlled margins land as sheet padding (page settings are
         // client-local, not document content).
         style: `padding-left: ${settings.leftMargin}px; padding-right: ${settings.rightMargin}px;`,
@@ -191,7 +195,11 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
   });
 
   return (
-    <div className="size-full overflow-x-auto bg-[#F9FBFD] px-4 print:p-0 print:bg-white print:overflow-visible">
+    <div
+      className="size-full overflow-x-auto bg-[#F9FBFD] px-4 print:p-0 print:bg-white print:overflow-visible"
+      data-concord-bridge-mode={bridgeMode}
+      data-concord-editor-ready={bridgeMode === "crdt" ? "true" : "false"}
+    >
       <Ruler />
       {/* Fixed 816px sheet, horizontally centered; the outer container
           scrolls on viewports narrower than the page. */}

@@ -35,8 +35,21 @@ interface DbStores {
 }
 
 const OUTBOX_DB = "concord-sync";
-const OUTBOX_VERSION = 1;
+const OUTBOX_VERSION = 2;
 const STORE = "outbox";
+
+// Date.now() is useful for preserving a mostly chronological resend order,
+// but it is not unique: a single fast typing burst can generate several ops
+// in one millisecond, and separate tabs can share the same clock value.
+// Sequence is an ordering hint, not an identity, so ties are legal and are
+// resolved by the stable operation id in unackedOps().
+let lastIssuedSequence = 0;
+
+function nextSequence(): number {
+  const now = Date.now();
+  lastIssuedSequence = Math.max(now, lastIssuedSequence + 1);
+  return lastIssuedSequence;
+}
 
 function openOutbox(): Promise<DbStores> {
   return new Promise((resolve, reject) => {
@@ -46,7 +59,16 @@ function openOutbox(): Promise<DbStores> {
       if (!db.objectStoreNames.contains(STORE)) {
         const store = db.createObjectStore(STORE, { keyPath: "id" });
         store.createIndex("state", "state", { unique: false });
-        store.createIndex("seq", "seq", { unique: true });
+        store.createIndex("seq", "seq", { unique: false });
+      } else {
+        // Version 1 incorrectly made the timestamp ordering hint unique.
+        // Rebuild that index during the versioned upgrade so existing
+        // browsers are repaired without deleting the durable outbox.
+        const store = request.transaction!.objectStore(STORE);
+        if (store.indexNames.contains("seq")) {
+          store.deleteIndex("seq");
+        }
+        store.createIndex("seq", "seq", { unique: false });
       }
     };
     request.onsuccess = () => resolve({ db: request.result });
@@ -87,7 +109,7 @@ export class PendingOpStore {
       id: `${this.documentId}:${id}` as OpIdentityString,
       op,
       state: "pending",
-      seq: Date.now(),
+      seq: nextSequence(),
       savedAt: Date.now(),
     };
     await this.request(this.tx("readwrite").put(record));
@@ -98,7 +120,7 @@ export class PendingOpStore {
     const all = await this.request<PendingOpRecord[]>(this.tx("readonly").getAll());
     return all
       .filter((r) => r.id.startsWith(`${this.documentId}:`) && r.state !== "durably_acked")
-      .sort((a, b) => a.seq - b.seq);
+      .sort((a, b) => a.seq - b.seq || a.id.localeCompare(b.id));
   }
 
   /** Marks ops as sent (still durable; a crash before ACK resends them). */

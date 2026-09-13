@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const middlewareChain: Array<(req: unknown) => unknown> = [];
 const mocked = vi.hoisted(() => ({
   clerkMiddleware: vi.fn(
-    (handler: (auth: unknown, req: unknown) => unknown, _options?: unknown) => {
+    (handler: (auth: unknown, req: unknown) => unknown, options?: unknown) => {
+      void options;
       const wrapped = (req: unknown) => handler(undefined, req);
       middlewareChain.push(wrapped);
       return wrapped;

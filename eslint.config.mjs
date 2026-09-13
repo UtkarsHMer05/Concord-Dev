@@ -5,7 +5,16 @@ const eslintConfig = [
   ...coreWebVitals,
   ...typescript,
   {
-    ignores: [".next/**", "node_modules/**", "wasm/dist/**", "public/wasm/**", "build/**"],
+    ignores: [
+      ".next/**",
+      "test-results/**",
+      ".kilo/**",
+      "node_modules/**",
+      "wasm/dist/**",
+      "public/wasm/**",
+      "public/crdt-worker.js",
+      "build/**",
+    ],
   },
 ];
 

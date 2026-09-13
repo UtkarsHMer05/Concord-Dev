@@ -322,7 +322,8 @@ describe("renderRemote watchdog (P7-M033 production regression)", () => {
         await core.handle({ id: 1, kind: "init", documentId: "watchdog-doc", replicaId: "11" });
         const delegate = new CoreBackedClient(core, "watchdog-doc");
         // A client whose visibleJson HANGS on demand — models the
-        // never-settling worker RPC observed live on production (the
+        // never-settling worker RPC observed during a historical
+        // production-shaped exercise (the
         // coalescer absorbed every later render into one that never
         // returned; the editor froze for the rest of the session).
         let hangNext = false;

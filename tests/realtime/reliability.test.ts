@@ -20,11 +20,12 @@
  *
  * MODEL note — tabs and the engine (honest):
  *   src/app/documents/[documentId]/editor.tsx wires ONE editor + ONE
- *   worker client per page today (Phase 1 provider + Phase 2 worker
- *   bridge); SyncSession is a library runtime (src/lib/sync), not yet
- *   mounted by the page — Phase 3's e2e suite and this file drive it
- *   directly, which is the established convention. A second BROWSER TAB
- *   therefore models as: a SECOND SyncTransport for the same user+doc
+ *   worker client per page (Phase 1 provider + Phase 2 worker bridge)
+ *   and mounts SyncSession via useSyncSession() — the PAGE runs the
+ *   same session runtime this suite drives. What this Node-driven suite
+ *   does NOT exercise is a rendered browser around it; that is the
+ *   Playwright browser E2E layer (tests/browser/), which loads the real
+ *   page in Chromium. Here, a second BROWSER TAB therefore models as: a SECOND SyncTransport for the same user+doc
  *   with its own engine instance (each tab owns one worker + engine;
  *   IndexedDB is per-origin, but the pending-store seam is injected, so
  *   two tabs share NOTHING by default — which is the app's real shape:
@@ -240,7 +241,8 @@ class FakeEngine {
     return this.counter.toString();
   }
 
-  onLocalOps(_handler: (ops: Uint8Array[]) => void): () => void {
+  onLocalOps(handler: (ops: Uint8Array[]) => void): () => void {
+    void handler;
     return () => {};
   }
 
@@ -380,7 +382,7 @@ function makeClient(
       },
       onJoinAccepted: () => transport.requestSync("0"),
       onPeerOps: (ops) => void eng.applyRemote(ops),
-      onSyncBatch: (ops, cursor, _more) => {
+      onSyncBatch: (ops, cursor) => {
         void eng.applyRemote(ops);
         transport.requestSync(cursor.toString());
       },
@@ -408,16 +410,6 @@ function makeClient(
     }
   }
   return { engine: eng, transport, ackedIds, statuses, errors, store };
-}
-
-/** A full SyncSession (session semantics) — cursor + store + resync port. */
-interface SessionClient {
-  engine: SessionEngine;
-  session: SyncSession;
-  store: MemPendingStore;
-  cursor: string;
-  statuses: string[];
-  errors: string[];
 }
 
 /** Fake engine implementing the ResyncEnginePort (importSnapshot + unacked). */
@@ -477,32 +469,6 @@ class SessionEngine extends FakeEngine {
   async unackedOps(): Promise<Uint8Array[]> {
     return this.unacked.slice();
   }
-}
-
-function makeSession(
-  port: number,
-  clerkId: string,
-  documentId: string,
-  engine: SessionEngine,
-  startCursor = "0",
-): SessionClient {
-  const store = new MemPendingStore(documentId);
-  let cursor = startCursor;
-  const statuses: string[] = [];
-  const errors: string[] = [];
-  const session = new SyncSession({
-    documentId,
-    gatewayUrl: `ws://127.0.0.1:${port}/api/v1/sync`,
-    getToken: () => signToken(clerkId),
-    engine,
-    getCursor: () => cursor,
-    setCursor: (c) => {
-      cursor = c;
-    },
-    store: store as unknown as PendingOpStore,
-    onStatus: (s) => void statuses.push(s),
-  });
-  return { engine, session, store, cursor, statuses, errors };
 }
 
 async function untilReady(client: { transport: SyncTransport; statuses: string[] }, timeoutMs = 20_000): Promise<void> {
@@ -957,7 +923,6 @@ describe("M035 matrix · 5: transport drops mid-ACK; server already persisted so
       ops.push(op);
       void client.store.addOpPending(op);
     }
-    const unacked = await client.store.unackedOps();
 
     // ANOTHER PATH committed half of them directly (simulate: rows are
     // durably in PostgreSQL as if the first 3 acks had landed — the exact
@@ -1470,4 +1435,3 @@ describe("M035 matrix · 9: reconnect storm containment", () => {
     expect(joinsFinal).toBe(16); // 15 cycles + the final connect
   }, 120_000);
 });
-

@@ -11,7 +11,6 @@ import {
   organizationsRepository,
 } from "../../src/server/repositories/organizations";
 import { auditRepository } from "../../src/server/repositories/audit";
-import { documentsRepository } from "../../src/server/repositories/documents";
 import { getTestPool, truncateAll } from "./helpers";
 
 /**

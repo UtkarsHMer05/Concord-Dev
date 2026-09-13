@@ -52,7 +52,7 @@ const databaseAvailable: Promise<boolean> = (async () => {
 
 /** Signs RS256 JWTs with the E2E key (node crypto). */
 async function signToken(sub: string): Promise<string> {
-  const { createSign, createHash } = await import("node:crypto");
+  const { createSign } = await import("node:crypto");
   const der = readFileSync(KEY_DER);
 
   // PKCS8 DER → manual JWS: header.payload signed with RS256.
@@ -301,7 +301,7 @@ function makeClient(port: number, clerkId: string, existing?: FakeEngine, docume
       },
       onJoinAccepted: () => transport.requestSync("0"),
       onPeerOps: (ops) => void engine.applyRemote(ops),
-      onSyncBatch: (ops, cursor, _more) => {
+      onSyncBatch: (ops, cursor) => {
         void engine.applyRemote(ops);
         transport.requestSync(cursor.toString());
       },
@@ -484,7 +484,7 @@ describe("role enforcement across live connections (M037)", () => {
 
   it("live downgrade: owner is removed while connected → next write denied (recheck per batch)", async () => {
     if (!harness) return;
-    const { sql, documentId, ownerClerk, commenterClerk } = harness;
+    const { sql, commenterClerk } = harness;
 
     // Fresh document owned by a temp user so the main doc stays intact.
     const tempOwner = `user_e2e_down_${Date.now()}`;
@@ -494,11 +494,7 @@ describe("role enforcement across live connections (M037)", () => {
       [ownerId],
     )).rows[0].id;
 
-    const client = makeClient(harness.port, ownerClerk);
-    // Join the temp doc as its OWNER... wait — ownerClerk is a different user.
-    // Use the temp owner identity instead.
-    const tempClient = makeClient(harness.port, tempOwner);
-    // Override the join target for this test via direct transport calls.
+    // Join the temp doc as its owner using direct transport calls.
     const statuses: string[] = [];
     const errors: string[] = [];
     const t = new SyncTransport({
@@ -541,7 +537,6 @@ describe("role enforcement across live connections (M037)", () => {
     expect(got2).toBe(false);
 
     t.close();
-    client.transport.close();
     // Cleanup.
     await sql.query("DELETE FROM crdt_operations WHERE document_id = $1", [tempDoc]);
     await sql.query("DELETE FROM documents WHERE id = $1", [tempDoc]);
