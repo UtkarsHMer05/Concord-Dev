@@ -241,8 +241,23 @@ jobs:
       # byte-identical to the antonio-original-baseline tutorial tree
       # unless allowlisted with a verified permissive upstream license
       # (the shadcn/ui primitives). Also bans known baseline assets.
+      # Fail-closed contract (SA-PROV1 fix): a missing/invalid baseline
+      # tag, a zero-file baseline, or an internal git failure exits 2 and
+      # fails this job — the gate can no longer pass by scanning nothing.
       - name: Provenance check (baseline identity gate)
         run: bash scripts/security/provenance-check.sh
+      # Provenance regression tests (SA-PROV1): pin the fail-closed
+      # contract from every side — missing/invalid tag, zero-file
+      # baseline, unallowlisted identical file, allowlist branch, and a
+      # nonzero checked-path count — so the false-green cannot regress.
+      - name: Provenance regression tests
+        run: bash scripts/security/provenance-tests.sh
+      # Findings-ledger validation: duplicate IDs, status vocabulary,
+      # severity format, required columns, and no OPEN repository-
+      # actionable Critical/High — the audit ledger stays internally
+      # consistent or the PR fails.
+      - name: Findings ledger validation
+        run: bash scripts/security/validate-findings.sh
       # cargo-deny (hardening F6): advisories + license policy + source
       # restrictions over the Cargo tree. Installed if absent — a missing
       # binary must NOT silently pass.
