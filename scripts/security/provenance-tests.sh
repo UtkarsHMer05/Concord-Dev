@@ -139,7 +139,9 @@ git -C "$R" tag baseline-tag
 # Make the baseline tag point at a commit with an EMPTY tree: create an
 # orphan commit with no files.
 empty_tree="$(git hash-object -t tree /dev/null)"
-orphan="$(git -C "$R" commit-tree "$empty_tree" -m empty)"
+orphan="$(cd "$R" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t \
+  GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+  git commit-tree "$empty_tree" -m empty)"
 git -C "$R" tag -f baseline-tag "$orphan" >/dev/null
 ( cd "$R" && bash scripts/security/provenance-check.sh baseline-tag >"$WORK/case7.log" 2>&1 ); expect "7 zero-file baseline -> FAIL(2) refuse zero scan" 2 $?
 
