@@ -49,7 +49,12 @@ function makeRequest(headers: Record<string, string> = {}) {
 
 async function invokeMiddleware(requestEnv: Record<string, string>) {
   for (const [k, v] of Object.entries(requestEnv)) {
-    if (k.startsWith("NEXT_PUBLIC_") || k === "NODE_ENV") {
+    if (
+      k.startsWith("NEXT_PUBLIC_") ||
+      k === "NODE_ENV" ||
+      k === "CONCORD_APP_ORIGIN" ||
+      k === "CONCORD_REQUIRE_TLS"
+    ) {
       vi.stubEnv(k, v);
     }
   }
@@ -65,6 +70,7 @@ async function invokeMiddleware(requestEnv: Record<string, string>) {
 describe("Clerk ingress claim policy", () => {
   it("passes the exact cloud app origin to Clerk and includes API and frontend routes", async () => {
     vi.stubEnv("CONCORD_APP_ORIGIN", "https://concord.example");
+    vi.stubEnv("CONCORD_REQUIRE_TLS", "0");
     const { config } = await import("../src/proxy");
     expect(mocked.clerkMiddleware).toHaveBeenCalledWith(
       expect.any(Function),
@@ -82,6 +88,7 @@ describe("Clerk ingress claim policy", () => {
 
   it("keeps the local no-origin configuration compatible", async () => {
     vi.stubEnv("CONCORD_APP_ORIGIN", "");
+    vi.stubEnv("CONCORD_REQUIRE_TLS", "0");
     await import("../src/proxy");
     expect(mocked.clerkMiddleware).toHaveBeenCalledWith(
       expect.any(Function),
@@ -93,9 +100,13 @@ describe("Clerk ingress claim policy", () => {
 describe("Content-Security-Policy contract (nonce-based)", () => {
   it("generates a per-request nonce and sets it on request and response headers", async () => {
     const first = await invokeMiddleware({
+      CONCORD_REQUIRE_TLS: "0",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL: "",
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZnVuLWJsb3dmaXNoLTU3OTguY2xlcmsuYWNjb3VudHMuZGV2",
     });
     const second = await invokeMiddleware({
+      CONCORD_REQUIRE_TLS: "0",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL: "",
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZnVuLWJsb3dmaXNoLTU3OTguY2xlcmsuYWNjb3VudHMuZGV2",
     });
 
@@ -117,6 +128,8 @@ describe("Content-Security-Policy contract (nonce-based)", () => {
   it("never allows unsafe-inline/unsafe-eval/open https: scripts in production", async () => {
     const res = await invokeMiddleware({
       NODE_ENV: "production",
+      CONCORD_REQUIRE_TLS: "0",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL: "wss://sync.example:8443/api/v1/sync",
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZnVuLWJsb3dmaXNoLTU3OTguY2xlcmsuYWNjb3VudHMuZGV2",
     });
     const csp = res.headers.get("content-security-policy") ?? "";
@@ -133,15 +146,21 @@ describe("Content-Security-Policy contract (nonce-based)", () => {
   it("keeps dev-only relaxations out of production shape", async () => {
     const dev = await invokeMiddleware({
       NODE_ENV: "development",
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZnVuLWJsb3dmaXNoLTU3OTguY2xlcmsuYWNjb3VudHMuZGV2",
+      CONCORD_REQUIRE_TLS: "0",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL: "ws://127.0.0.1:8890/api/v1/sync",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
     });
     const devCsp = dev.headers.get("content-security-policy") ?? "";
     expect(/script-src [^;]+/.exec(devCsp)?.[0]).toContain("'unsafe-eval'");
     expect(devCsp).not.toContain("upgrade-insecure-requests");
+    expect(devCsp).toContain("connect-src 'self' ws://127.0.0.1:8890");
+    expect(dev.headers.get("strict-transport-security")).toBeNull();
   });
 
   it("pins the dangerous directives closed", async () => {
     const res = await invokeMiddleware({
+      CONCORD_REQUIRE_TLS: "0",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL: "",
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZnVuLWJsb3dmaXNoLTU3OTguY2xlcmsuYWNjb3VudHMuZGV2",
     });
     const csp = res.headers.get("content-security-policy") ?? "";
@@ -154,6 +173,8 @@ describe("Content-Security-Policy contract (nonce-based)", () => {
   it("allows exactly the origins the product needs", async () => {
     const res = await invokeMiddleware({
       NODE_ENV: "production",
+      CONCORD_REQUIRE_TLS: "0",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL: "wss://sync.example:8443/api/v1/sync",
       // Real-format dev key: pk_<env>_<base64url(instance origin)>, the
       // instance origin decoding to fun-blowfish-5798.clerk.accounts.dev.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
@@ -162,8 +183,13 @@ describe("Content-Security-Policy contract (nonce-based)", () => {
     const csp = res.headers.get("content-security-policy") ?? "";
     // Sync gateway WebSocket + Clerk frontend API only.
     expect(csp).toContain(
-      "connect-src 'self' https://fun-blowfish-5798.clerk.accounts.dev ws: wss:",
+      "connect-src 'self' https://fun-blowfish-5798.clerk.accounts.dev wss://sync.example:8443",
     );
+    const connectSrc = /connect-src ([^;]+)/.exec(csp)?.[1] ?? "";
+    expect(connectSrc.split(/\s+/)).not.toContain("ws:");
+    expect(connectSrc.split(/\s+/)).not.toContain("wss:");
+    expect(connectSrc).not.toContain("ws://untrusted.example");
+    expect(connectSrc).not.toContain("wss://untrusted.example");
     // No Stripe/maps/telemetry endpoints (Clerk's defaults carry them).
     expect(csp).not.toContain("stripe.com");
     expect(csp).not.toContain("maps.googleapis.com");
@@ -178,10 +204,133 @@ describe("Content-Security-Policy contract (nonce-based)", () => {
   it("degrades connect-src to 'self' when no publishable key is set", async () => {
     const res = await invokeMiddleware({
       NODE_ENV: "production",
+      CONCORD_REQUIRE_TLS: "0",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL: "wss://sync.example/api/v1/sync",
       // Explicitly absent: a previously stubbed key must not leak in.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
     });
     const csp = res.headers.get("content-security-policy") ?? "";
-    expect(csp).toContain("connect-src 'self' ws: wss:");
+    expect(csp).toContain("connect-src 'self' wss://sync.example");
+  });
+
+  it("does not widen connect-src when the gateway URL is absent", async () => {
+    const res = await invokeMiddleware({
+      NODE_ENV: "production",
+      CONCORD_REQUIRE_TLS: "0",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL: "",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
+    });
+    const connectSrc =
+      /connect-src ([^;]+)/.exec(
+        res.headers.get("content-security-policy") ?? "",
+      )?.[1] ?? "";
+    expect(connectSrc).toBe("'self'");
+    expect(connectSrc.split(/\s+/)).not.toContain("ws:");
+    expect(connectSrc.split(/\s+/)).not.toContain("wss:");
+  });
+
+  it("derives the exact WSS origin and emits HSTS in secure production", async () => {
+    const res = await invokeMiddleware({
+      NODE_ENV: "production",
+      CONCORD_REQUIRE_TLS: "1",
+      CONCORD_APP_ORIGIN: "https://concord.example",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL:
+        "wss://sync.example:8443/api/v1/sync?transport=websocket",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
+    });
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("connect-src 'self' wss://sync.example:8443");
+    const connectSrc = /connect-src ([^;]+)/.exec(csp)?.[1] ?? "";
+    expect(connectSrc.split(/\s+/)).not.toContain("ws:");
+    expect(connectSrc.split(/\s+/)).not.toContain("wss:");
+    expect(res.headers.get("strict-transport-security")).toBe(
+      "max-age=31536000; includeSubDomains",
+    );
+    expect(res.headers.get("strict-transport-security")).not.toContain(
+      "preload",
+    );
+  });
+
+  it("does not emit HSTS when the explicit TLS mode is off", async () => {
+    const res = await invokeMiddleware({
+      NODE_ENV: "production",
+      CONCORD_REQUIRE_TLS: "0",
+      CONCORD_APP_ORIGIN: "http://concord.example",
+      NEXT_PUBLIC_SYNC_GATEWAY_URL: "ws://127.0.0.1:8890/api/v1/sync",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
+    });
+    expect(res.headers.get("strict-transport-security")).toBeNull();
+    expect(res.headers.get("content-security-policy")).toContain(
+      "connect-src 'self' ws://127.0.0.1:8890",
+    );
+  });
+
+  it("rejects an HTTP app origin when explicit TLS mode is enabled", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("CONCORD_REQUIRE_TLS", "1");
+    vi.stubEnv("CONCORD_APP_ORIGIN", "http://concord.example");
+    vi.stubEnv(
+      "NEXT_PUBLIC_SYNC_GATEWAY_URL",
+      "wss://sync.example/api/v1/sync",
+    );
+    await expect(import("../src/proxy")).rejects.toThrow(
+      "CONCORD_APP_ORIGIN",
+    );
+  });
+
+  it.each([
+    ["missing", ""],
+    ["malformed", "not a URL"],
+    ["unsupported protocol", "https://sync.example/api/v1/sync"],
+    ["insecure protocol", "ws://sync.example:8890/api/v1/sync"],
+    ["credentials", "wss://user:pass@sync.example/api/v1/sync"],
+  ])(
+    "rejects %s gateway URLs when explicit TLS mode is enabled",
+    async (_name, gatewayUrl) => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("CONCORD_REQUIRE_TLS", "1");
+      vi.stubEnv("CONCORD_APP_ORIGIN", "https://concord.example");
+      vi.stubEnv("NEXT_PUBLIC_SYNC_GATEWAY_URL", gatewayUrl);
+      await expect(import("../src/proxy")).rejects.toThrow(
+        "NEXT_PUBLIC_SYNC_GATEWAY_URL",
+      );
+    },
+  );
+
+  it("rejects malformed app origins even when TLS mode is off", async () => {
+    vi.stubEnv("CONCORD_APP_ORIGIN", "https://concord.example/path");
+    vi.stubEnv("CONCORD_REQUIRE_TLS", "0");
+    await expect(import("../src/proxy")).rejects.toThrow(
+      "CONCORD_APP_ORIGIN",
+    );
+  });
+});
+
+describe("HSTS Next.js route-header contract", () => {
+  async function configuredHeaders() {
+    const { default: nextConfig } = await import("../next.config");
+    return (await nextConfig.headers?.()) ?? [];
+  }
+
+  it("adds HSTS to static route headers only in secure production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("CONCORD_REQUIRE_TLS", "1");
+    const headers = await configuredHeaders();
+    expect(headers[0]?.headers).toContainEqual({
+      key: "Strict-Transport-Security",
+      value: "max-age=31536000; includeSubDomains",
+    });
+    expect(headers[0]?.headers).not.toContainEqual(
+      expect.objectContaining({ value: expect.stringContaining("preload") }),
+    );
+  });
+
+  it("does not add HSTS to route headers when TLS mode is off", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("CONCORD_REQUIRE_TLS", "0");
+    const headers = await configuredHeaders();
+    expect(headers[0]?.headers).not.toContainEqual(
+      expect.objectContaining({ key: "Strict-Transport-Security" }),
+    );
   });
 });

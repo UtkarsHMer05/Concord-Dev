@@ -1,6 +1,16 @@
 import path from "node:path";
 import type { NextConfig } from "next";
 
+// HSTS is deliberately opt-in. The repository still supports a documented
+// plaintext local/staging mode, so an unconditional header would pin a
+// browser to HTTPS before that deployment has a certificate. The matching
+// runtime check in src/proxy.ts validates the exact HTTPS origin and WSS
+// gateway when this production flag is enabled.
+const secureProduction =
+  process.env.NODE_ENV === "production" &&
+  process.env.CONCORD_REQUIRE_TLS === "1";
+const HSTS_VALUE = "max-age=31536000; includeSubDomains";
+
 const nextConfig: NextConfig = {
   // Standalone output: the P6-M027 release image runs `node server.js`
   // from the minimal standalone tree (no node_modules copy of build
@@ -29,6 +39,9 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+          ...(secureProduction
+            ? [{ key: "Strict-Transport-Security", value: HSTS_VALUE }]
+            : []),
         ],
       },
     ];

@@ -626,6 +626,18 @@ NEXT_PUBLIC_SYNC_GATEWAY_URL=ws://<ALB-DNS-NAME>:8890/api/v1/sync
                                                 # wss://<host>:8443/... with TLS
 ```
 
+**Explicit HTTPS/WSS production contract:** set
+`CONCORD_REQUIRE_TLS=1`, `CONCORD_APP_ORIGIN=https://<owned-domain>`, and
+`NEXT_PUBLIC_SYNC_GATEWAY_URL=wss://<sync-host>[:port]/api/v1/sync` together.
+The web proxy derives the CSP `connect-src` entry from the gateway URL's
+exact scheme/host/port and fails closed for a missing, malformed, or plain
+`ws://` value in this mode. It also requires the app origin to be an exact
+HTTPS origin. `Strict-Transport-Security: max-age=31536000;
+includeSubDomains` is emitted only when `NODE_ENV=production` and this flag is
+`1`; it intentionally does not include `preload`. With the flag unset or `0`,
+local development may use an exact `ws://` endpoint and an HTTP app origin,
+but the CSP never widens to blanket `ws:`/`wss:` sources.
+
 **Clerk claim migration before the next cloud bundle:** Concord's browser
 currently calls `getToken()` without a template, so this is a **session
 token**, not a separately generated JWT template. In the matching Clerk
@@ -703,11 +715,13 @@ Public exposure currently needs:
   `default-src 'self'`; `script-src 'self' 'nonce-<per-request>'
   'strict-dynamic' 'wasm-unsafe-eval'` (dev adds React's debug
   `'unsafe-eval'`); `worker-src 'self' blob:`; `child-src 'self'
-  blob:`; `connect-src 'self' <clerk-frontend-api> ws: wss:`;
+  blob:`; `connect-src 'self' <clerk-frontend-api> <sync-gateway-origin>`;
   `img-src 'self' data: blob: https://img.clerk.com`; `object-src
   'none'`; `base-uri 'self'`; `form-action 'self'`;
   `frame-ancestors 'none'`; plus `upgrade-insecure-requests` in
-  production. Nosniff, X-Frame-Options DENY, Referrer-Policy, and
+  production. `connect-src` contains the exact origin derived from
+  `NEXT_PUBLIC_SYNC_GATEWAY_URL`; production never uses blanket `ws:` or
+  `wss:` scheme sources. Nosniff, X-Frame-Options DENY, Referrer-Policy, and
   Permissions-Policy still ship on every response via
   `next.config.ts`. Script `'unsafe-inline'` is GONE: Next 16 stamps
   the nonce onto all framework/page scripts (parsed from the request

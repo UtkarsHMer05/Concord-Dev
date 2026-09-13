@@ -7,10 +7,41 @@ import { NextResponse } from "next/server";
 // An exact origin is supplied by the cloud bundle. Keep local development
 // compatible with its own Clerk instance until a local origin is configured.
 // ---------------------------------------------------------------------------
-const appOrigin = process.env.CONCORD_APP_ORIGIN;
-if (appOrigin && new URL(appOrigin).origin !== appOrigin) {
+function parseTlsRequirement(value: string | undefined): boolean {
+  if (value === undefined || value === "") return false;
+  if (value === "1") return true;
+  if (value === "0") return false;
+  throw new Error("CONCORD_REQUIRE_TLS must be exactly 0 or 1 when set");
+}
+
+function parseAppOrigin(value: string | undefined): string | null {
+  if (value === undefined || value === "") return null;
+  try {
+    const parsed = new URL(value);
+    if (
+      !["http:", "https:"].includes(parsed.protocol) ||
+      parsed.origin !== value ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      throw new Error("not an exact HTTP(S) origin");
+    }
+    return parsed.origin;
+  } catch {
+    throw new Error(
+      "CONCORD_APP_ORIGIN must be an exact http(s) origin without credentials, a path, query, or fragment",
+    );
+  }
+}
+
+const requireTls = parseTlsRequirement(process.env.CONCORD_REQUIRE_TLS);
+const appOrigin = parseAppOrigin(process.env.CONCORD_APP_ORIGIN);
+
+if (requireTls && (!appOrigin || !appOrigin.startsWith("https://"))) {
   throw new Error(
-    "CONCORD_APP_ORIGIN must be an exact origin without a path or trailing slash",
+    "CONCORD_APP_ORIGIN must be an exact HTTPS origin when CONCORD_REQUIRE_TLS=1",
   );
 }
 
@@ -25,14 +56,68 @@ if (appOrigin && new URL(appOrigin).origin !== appOrigin) {
 
 /** Dev-instance domains serve Clerk avatars; production serves from self. */
 const CLERK_DEV_IMG = "https://img.clerk.com";
+const HSTS_VALUE = "max-age=31536000; includeSubDomains";
+
+/**
+ * CSP accepts a WebSocket origin, not the endpoint path. Keep the endpoint
+ * path in the public client configuration while deriving only its exact
+ * scheme/host/port here. A malformed value is never silently widened to
+ * `ws:`/`wss:`; TLS mode additionally requires a secure WebSocket.
+ */
+function syncGatewayCspSource(
+  value: string | undefined,
+  tlsRequired: boolean,
+): string | null {
+  const raw = value?.trim() ?? "";
+  if (!raw) {
+    if (tlsRequired) {
+      throw new Error(
+        "NEXT_PUBLIC_SYNC_GATEWAY_URL must be a ws(s) URL when CONCORD_REQUIRE_TLS=1",
+      );
+    }
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(
+      "NEXT_PUBLIC_SYNC_GATEWAY_URL must be a valid ws:// or wss:// URL",
+    );
+  }
+
+  if (
+    !["ws:", "wss:"].includes(parsed.protocol) ||
+    parsed.origin === "null" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.hash
+  ) {
+    throw new Error(
+      "NEXT_PUBLIC_SYNC_GATEWAY_URL must use ws:// or wss:// without credentials or a fragment",
+    );
+  }
+  if (tlsRequired && parsed.protocol !== "wss:") {
+    throw new Error(
+      "NEXT_PUBLIC_SYNC_GATEWAY_URL must use wss:// when CONCORD_REQUIRE_TLS=1",
+    );
+  }
+
+  return parsed.origin;
+}
+
+const syncGatewaySource = syncGatewayCspSource(
+  process.env.NEXT_PUBLIC_SYNC_GATEWAY_URL,
+  requireTls,
+);
 
 function buildCsp(nonce: string, clerkFrontendApi: string | null): string {
   const isDev = process.env.NODE_ENV === "development";
   const connectSrc = [
     "'self'",
     ...(clerkFrontendApi ? [clerkFrontendApi] : []),
-    "ws:",
-    "wss:",
+    ...(syncGatewaySource ? [syncGatewaySource] : []),
   ];
   // A cookieless Clerk development instance loads its browser bundle from
   // the instance origin. That origin is explicitly allowed only in dev;
@@ -67,7 +152,7 @@ function buildCsp(nonce: string, clerkFrontendApi: string | null): string {
 /**
  * Extract the Clerk frontend API origin from a Clerk v6 publishable key.
  * Malformed or legacy keys return null; the policy then permits only the
- * same-origin plus the explicitly configured WebSocket schemes.
+ * same-origin plus the explicitly configured sync gateway origin.
  */
 function clerkFrontendApiFromKey(key: string | undefined): string | null {
   if (!key) return null;
@@ -104,6 +189,12 @@ export default clerkMiddleware(
       "Permissions-Policy",
       "camera=(), microphone=(), geolocation=()",
     );
+    // HSTS is opt-in because local development and the documented plaintext
+    // staging mode still use http:// and ws://. It is emitted only when the
+    // explicit TLS contract is enabled for a production server.
+    if (process.env.NODE_ENV === "production" && requireTls) {
+      response.headers.set("Strict-Transport-Security", HSTS_VALUE);
+    }
     return response;
   },
   {
