@@ -202,12 +202,12 @@ than hidden.
 
 | Gate | Environment | Command/workflow | Count/result | Status |
 |---|---|---|---|---|
-| Web | macOS local at a04fe1c; Ubuntu CI at 2b7232c | npm run typecheck; npm run lint; npm run test; npm run db:test:prepare; npm run test:db; npm run build; npm run test:realtime; phase6-pr-ci run 34752929757 | 180 unit, 69 DB, 21 realtime; CI web success | PASS |
-| Native GCC | macOS local; Ubuntu CI at 2b7232c | scripts/verify-all.sh --strict; phase6-pr-ci native (g++) | Release build, CTest 3/3; CI success | PASS |
-| Native Clang | macOS local; Ubuntu CI at 2b7232c | scripts/verify-all.sh --strict; phase6-pr-ci native (clang++) | Release build, CTest 3/3; CI success | PASS |
-| Rust | macOS local at a04fe1c; Ubuntu CI at 2b7232c | (cd rust && cargo fmt --check && cargo clippy && cargo test -- --test-threads=1); phase6-pr-ci rust | 253 passed, 0 failed, 1 ignored across 35 suites; CI success | PASS |
-| WASM | macOS local; Ubuntu CI at 2b7232c | scripts/verify-wasm.sh; phase6-pr-ci wasm | Emscripten 6.0.9, 30 tests; CI success | PASS |
-| Browser | macOS local; protected GitHub CI at 2b7232c | Playwright Chromium/Firefox/WebKit; phase6-pr-ci run 34752929757 | Local Chromium 12/12, Firefox retry 1/1, WebKit 1/1; CI browser preflights fail on missing Clerk secrets | PARTIAL |
+| Web | macOS local at a04fe1c; Ubuntu CI at 7d30a3a | npm run typecheck; npm run lint; npm run test; npm run db:test:prepare; npm run test:db; npm run build; npm run test:realtime; phase6-pr-ci run 34753585842 | 180 unit, 69 DB, 21 realtime; CI web success | PASS |
+| Native GCC | macOS local; Ubuntu CI at 7d30a3a | scripts/verify-all.sh --strict; phase6-pr-ci native (g++) | Release build, CTest 3/3; CI success | PASS |
+| Native Clang | macOS local; Ubuntu CI at 7d30a3a | scripts/verify-all.sh --strict; phase6-pr-ci native (clang++) | Release build, CTest 3/3; CI success | PASS |
+| Rust | macOS local at a04fe1c; Ubuntu CI at 7d30a3a | (cd rust && cargo fmt --check && cargo clippy && cargo test -- --test-threads=1); phase6-pr-ci rust | 253 passed, 0 failed, 1 ignored across 35 suites; CI success | PASS |
+| WASM | macOS local; Ubuntu CI at 7d30a3a | scripts/verify-wasm.sh; phase6-pr-ci wasm | Emscripten 6.0.9, 30 tests; CI success | PASS |
+| Browser | macOS local; protected GitHub CI at 7d30a3a | Playwright Chromium/Firefox/WebKit; phase6-pr-ci run 34753585842 | Local Chromium 12/12, Firefox retry 1/1, WebKit 1/1; CI browser preflights fail on missing Clerk secrets | PARTIAL |
 | Accessibility | macOS local | Playwright tests/browser/a11y.spec.ts with axe-core/playwright | 5/5; no serious/critical violations | PASS |
 | Provenance | macOS local and GitHub security job | scripts/security/provenance-check.sh; scripts/security/provenance-tests.sh | 123 baseline files, 54 overlaps, 0 unallowlisted; 14 regression assertions | PASS |
 | Secrets | macOS local and GitHub security job | scripts/security/secret-scan.sh --history; secret-scan-tests.sh | Working tree, SBOMs, and full history clean; injected failure exits 2 | PASS |
@@ -246,7 +246,7 @@ Local results:
   not hidden behind a screenshot or trace. No screenshot/trace is used as
   positive evidence.
 
-Final GitHub run 34751269064 has browser (chromium), browser (firefox), and
+Final GitHub run 34753585842 has browser (chromium), browser (firefox), and
 browser (webkit) failures. Each fails in the named step Require the
 disposable Clerk E2E instance configuration because
 CONCORD_E2E_CLERK_PUBLISHABLE_KEY and CONCORD_E2E_CLERK_SECRET_KEY are empty.
@@ -317,29 +317,29 @@ claimed. The owner must complete that GitHub Settings action.
 
 The final executable implementation SHA is
 b711111431f15717c2a887f81404eabce71e1046. The subsequent report-publication
-checkpoint SHA 2b7232c7740ef4e037f9e95b8b6601fbd2f8231f changes only audit
+checkpoint SHA 7d30a3a5c20c74b4062ff1c019068bb67ba39d5f changes only audit
 documentation; its required CI runs repeated the executable gates. The
 following are the completed workflow/job results on that final code/report
 checkpoint:
 
 | Workflow | Run | Result |
 |---|---:|---|
-| phase2-core | 34752929783 | success |
-| phase3-gateway | 34752929732 | success |
-| phase4-distributed | 34752929760 | success |
-| phase5-recovery | 34752929878 | success |
-| phase6-distributed | 34752929834 | success |
-| codeql / Analyze (cpp) | 34752929781 | success |
-| codeql / Analyze (javascript-typescript) | 34752929781 | success |
-| phase6-pr-ci web | 34752929757 | success |
-| phase6-pr-ci rust | 34752929757 | success |
-| phase6-pr-ci wasm | 34752929757 | success |
-| phase6-pr-ci security | 34752929757 | success |
-| phase6-pr-ci native (g++) | 34752929757 | success |
-| phase6-pr-ci native (clang++) | 34752929757 | success |
-| phase6-pr-ci browser (chromium) | 34752929757 | failure: missing Clerk secret |
-| phase6-pr-ci browser (firefox) | 34752929757 | failure: missing Clerk secret |
-| phase6-pr-ci browser (webkit) | 34752929757 | failure: missing Clerk secret |
+| phase2-core | 34753585797 | success |
+| phase3-gateway | 34753585819 | success |
+| phase4-distributed | 34753585830 | success |
+| phase5-recovery | 34753585792 | success |
+| phase6-distributed | 34753585811 | success |
+| codeql / Analyze (cpp) | 34753585821 | success |
+| codeql / Analyze (javascript-typescript) | 34753585821 | success |
+| phase6-pr-ci web | 34753585842 | success |
+| phase6-pr-ci rust | 34753585842 | success |
+| phase6-pr-ci wasm | 34753585842 | success |
+| phase6-pr-ci security | 34753585842 | success |
+| phase6-pr-ci native (g++) | 34753585842 | success |
+| phase6-pr-ci native (clang++) | 34753585842 | success |
+| phase6-pr-ci browser (chromium) | 34753585842 | failure: missing Clerk secret |
+| phase6-pr-ci browser (firefox) | 34753585842 | failure: missing Clerk secret |
+| phase6-pr-ci browser (webkit) | 34753585842 | failure: missing Clerk secret |
 | phase6-release-artifacts on b711111 | 34751270511 | success |
 
 The protected main branch requires strict status checks for web, rust, wasm,
@@ -460,18 +460,20 @@ order, are:
 
 19. 2b7232c docs(audit): publish initial final remediation campaign report
 
-This final report-format correction is one additional docs-only commit after
-2b7232c. The exact final main SHA and total commit count are recorded in the
-final campaign handoff; the resulting campaign total is 20 commits after the
-start SHA.
+20. 7d30a3a docs(audit): align final report with master format
+
+This final evidence-reference correction is one additional docs-only commit
+after 7d30a3a. The exact final main SHA and total commit count are recorded in
+the final campaign handoff; the resulting campaign total is 21 commits after
+the start SHA.
 
 ## 20. Final repository state
 
 The final branch is main, pushed to origin, with a clean worktree after
 report publication. The audited implementation is
 b711111431f15717c2a887f81404eabce71e1046. The last completed CI evidence
-checkpoint before this final report-format correction was
-2b7232c7740ef4e037f9e95b8b6601fbd2f8231f; this report is a docs-only
+checkpoint before this final evidence-reference correction was
+7d30a3a5c20c74b4062ff1c019068bb67ba39d5f; this report is a docs-only
 descendant and does not change executable code.
 
 The immutable v1.0.0-hardened.10 tag and GitHub release are present. The
