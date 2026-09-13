@@ -175,6 +175,30 @@ jobs:
           test -f "$image_source/public/wasm/concord-crdt.wasm"
           echo "CONCORD_SMOKE_TREE=$image_source" >> "$GITHUB_ENV"
 
+      # The gateway intentionally fail-fast exits without Postgres. Provide a
+      # disposable, digest-pinned database on the runner so the image smoke
+      # proves the real startup/migration/health path on Linux as well as on
+      # macOS Docker Desktop. The smoke helper adds the host-gateway mapping.
+      - name: Start disposable PostgreSQL for image smoke
+        run: |
+          docker run -d --name concord-release-smoke-db \
+            --health-cmd='pg_isready -U concord -d concord_test' \
+            --health-interval=1s --health-timeout=5s --health-retries=30 \
+            -e POSTGRES_USER=concord \
+            -e POSTGRES_PASSWORD=concord_local_dev \
+            -e POSTGRES_DB=concord_test \
+            -p 127.0.0.1:5433:5432 \
+            postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+          for attempt in $(seq 1 60); do
+            health="$(docker inspect --format '{{.State.Health.Status}}' concord-release-smoke-db)"
+            if [ "$health" = healthy ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs concord-release-smoke-db
+          exit 1
+
       # ---------------- Hardened release images + smoke ----------------
       # smoke-images.sh: builds BOTH images from `git archive HEAD` (clean
       # committed tree — in-flight working-tree edits cannot leak into the
@@ -182,6 +206,12 @@ jobs:
       # (HTTP up + uid 1000), then reports PASS/FAIL per image.
       - name: Build + smoke release images (clean git-archive tree)
         run: scripts/release/smoke-images.sh
+        env:
+          CONCORD_SMOKE_DATABASE_URL: postgres://concord:concord_local_dev@host.docker.internal:5433/concord_test
+          CONCORD_SMOKE_HOST_GATEWAY: "1"
+      - name: Stop disposable PostgreSQL smoke service
+        if: always()
+        run: docker rm -f concord-release-smoke-db >/dev/null 2>&1 || true
       # Export the exact images the smoke verified under fixed local tags.
       # The release ref is metadata, not a shell argument; keeping it out of
       # docker tag/save also prevents a hostile tag name from becoming a

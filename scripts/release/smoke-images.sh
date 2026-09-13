@@ -64,12 +64,17 @@ smoke_gateway() {
   local tag=concord-gateway:smoke
   note "building gateway image…"
   docker build -q -f docker/gateway.Dockerfile -t "$tag" "$WORK" >/dev/null
-  note "starting gateway (loopback, dummy DB URL → it must still boot + serve health)…"
+  note "starting gateway (loopback, configured smoke DB → it must boot + serve health)…"
   local cid=""
+  local -a host_args=()
+  if [ "${CONCORD_SMOKE_HOST_GATEWAY:-0}" = "1" ]; then
+    host_args+=(--add-host=host.docker.internal:host-gateway)
+  fi
   if ! cid=$(docker run -d \
+    "${host_args[@]}" \
     -e GATEWAY_BIND_HOST=0.0.0.0 \
     -e GATEWAY_BIND_PORT=8791 \
-    -e GATEWAY_DATABASE_URL=postgres://concord:concord_local_dev@host.docker.internal:5433/concord_test \
+    -e GATEWAY_DATABASE_URL="${CONCORD_SMOKE_DATABASE_URL:-postgres://concord:concord_local_dev@host.docker.internal:5433/concord_test}" \
     -e GATEWAY_CLERK_ISSUER=https://fun-blowfish-5798.clerk.accounts.dev \
     -p 127.0.0.1:18791:8791 "$tag"); then
     note "gateway: docker run failed — FAIL"
@@ -88,7 +93,7 @@ smoke_gateway() {
   # bus + no redis), the documented posture for a packaging smoke. No
   # client traffic is sent.
   local live=1
-  for _ in $(seq 1 20); do
+  for _ in $(seq 1 40); do
     if curl -sf "http://127.0.0.1:18791/api/v1/health/live" >/dev/null 2>&1; then live=0; break; fi
     sleep 0.5
   done
@@ -108,6 +113,7 @@ smoke_gateway() {
     drain_ms=$(( (t1 - t0) / 1000000 ))
     exit_code=$(docker inspect "$cid" --format '{{.State.ExitCode}}' 2>/dev/null || echo -1)
   else
+    docker logs "$cid" >&2 || true
     docker rm -f "$cid" >/dev/null 2>&1 || true
   fi
   docker rm -f "$cid" >/dev/null 2>&1 || true
