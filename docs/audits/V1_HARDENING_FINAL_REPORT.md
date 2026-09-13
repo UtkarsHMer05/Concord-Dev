@@ -5,9 +5,23 @@ provenance, security, release, and documentation campaign.
 
 Campaign start SHA: 4ce066f0120d94ecdb8b1a6684f3666f9bac05ff.
 
-Final audited implementation SHA: b711111431f15717c2a887f81404eabce71e1046.
+Ending implementation SHA: b711111431f15717c2a887f81404eabce71e1046.
+
+Final audited implementation SHA: b711111431f15717c2a887f81404eabce71e1046
+(the report publication commits are docs-only).
 
 Final audited tag: v1.0.0-hardened.10.
+
+Branch: main.
+
+GitHub release state: v1.0.0-hardened.10 is published, non-draft, and
+non-prerelease.
+
+Toolchains recorded in the final release manifest: Node v24.20.0, npm
+11.19.0, cargo 1.98.1, CMake 4.4.2, and Linux C++ compiler
+13.3.0. Local portability verification additionally used GCC 15.2.0 and
+Apple Clang 21.0.0.21000101. Browser verification used Playwright 1.63.0
+and axe-core/playwright 4.13.0.
 
 The report publication is a docs-only descendant of the audited
 implementation SHA. The exact final main SHA is recorded by git and in the
@@ -60,48 +74,34 @@ release.
 
 ## 3. Changes made
 
-| Area | Implemented result | Evidence |
-|---|---|---|
-| Provenance and licensing | Fail-closed baseline/tag/path validation; original replacements; root MIT license; NOTICE and SBOM attribution | Provenance scan: 54 overlapping paths, 0 unallowlisted identical; 14 provenance regression assertions |
-| Secret scanning | Tracked-file and history scanning now returns an error on internal scanner failure rather than a false clean result | Injected-failure regression requires exit 2; normal tree and history scans are clean |
-| Gateway authentication | JWKS singleflight/cooldown/negative-cache/TTL and bounded fetch behavior; strict optional audience/party policy; reserved REST/SYSC replica rejection | Rust auth and ingest suites; cloud bundle refuses the legacy convex audience |
-| Gateway limits | Trusted-proxy CIDR and right-to-left X-Forwarded-For handling; configured write, malformed-control, binary, validated-operation, and fetch budgets wired to frame ingress | Rust limiter and WebSocket integration tests |
-| Web security | Per-request CSP nonce and strict-dynamic policy; exact Clerk authorized-party configuration; production configuration validation | Nine effective-header assertions and live dev-server nonce checks |
-| Browser and accessibility | Real Playwright Chromium journey coverage plus Firefox/WebKit smoke coverage, auth isolation, reconnect, realtime, failure/offline paths, console checks, and axe checks | Local Chromium 12/12, Firefox retry 1/1, WebKit 1/1, accessibility 5/5 |
-| Native and WASM | Direct standard-library includes, root CTest wiring, cwd-independent corpus lookup, gitless worker version handling, exact Emscripten toolchain | GCC and Apple Clang CTest 3/3; Emscripten 6.0.9, 30 WASM tests |
-| CI and supply chain | SHA-pinned third-party actions, least privilege, no persisted credentials, Dependabot ecosystems, CodeQL, cargo-deny, digest-pinned compose images, enforced scan gate | Final CodeQL and phase workflows green; required browser jobs fail only at missing-secret preflight |
-| Release artifacts | Clean archive build, generated assets, disposable PostgreSQL migration, Linux image gateway boot, exported image tags, SBOMs, traceability manifest, checksums, Trivy gate | Release run 34751270511; protocol version 1 manifest and all SHA256SUMS entries verify |
-| Runtime image | Removed unused npm, npx, and Corepack payloads from the web runtime after release Trivy identified four newly failing High findings in npm's bundled dependencies | Final web image Trivy report has zero vulnerabilities |
-| Documentation and audit | Reconciled stale claims, exact finding statuses, owner-only boundaries, browser labels, provenance evidence, and final report structure | 21-row schema-v2 ledger and this 22-section report |
+| Area | Files changed | Root cause | Implementation | Regression test/evidence | Commit SHA |
+|---|---|---|---|---|---|
+| Provenance/tags/licensing | scripts/security/provenance-check.sh, scripts/security/provenance-tests.sh, docs/PROVENANCE.md, LICENSE, NOTICE, release workflows | Missing/invalid baseline metadata could produce a clean zero-path scan; tutorial-derived material and tag state were not defensible | Validated commit/tag enumeration, zero-file/zero-overlap rejection, authentic remote baseline and hardened tags, original replacements, MIT/NOTICE/SBOM alignment | 14 provenance assertions; final scan 123 baseline files, 54 overlaps, 0 unallowlisted matches; remote tag verification | 2c212b7; 9f1f418; 8107592 |
+| Native/CMake/WASM | cpp/worker/main.cpp, cpp/CMakeLists.txt, .github/actions/build-wasm/action.yml, scripts/verify-all.sh | Empty defined git SHA malformed gitless version output; portability and toolchain gates needed continuous coverage | Non-empty SHA embedding, stable archive version, direct includes, root CTest/cwd-independent paths, exact emsdk pin | Git checkout/archive/forced-empty version cases; GCC/Clang CTest 3/3; Emscripten 6.0.9 and 30 tests | 7aeaa88; 9f1f418 |
+| Browser E2E | playwright.config.ts, scripts/browser-e2e-setup.mjs, tests/browser/{helpers,journey,smoke}.ts, src/proxy.ts | No rendered-browser coverage of the production web/gateway/Clerk path | Real Playwright Chromium journey plus Firefox/WebKit smoke, disposable Clerk/database/services, fail-closed prerequisites | Chromium 12/12; Firefox retry 1/1; WebKit 1/1; reconnect, realtime, auth isolation, network-failure, console checks | 48fe966; 44e0150 |
+| Accessibility | tests/browser/a11y.spec.ts, package.json, package-lock.json | No automated representative-page accessibility gate | axe-core/playwright scans, keyboard/focus probe, named-button and landmark checks without global rule suppression | Five accessibility tests; no serious/critical violations | 48fe966 |
+| Gateway/auth/security | rust/sync-gateway/src/ephemeral/ratelimit.rs, rust/sync-gateway/src/ws/mod.rs, src/proxy.ts, tests/proxy-claim-policy.test.ts, tests/browser/journey.spec.ts | Auth refresh, audience/party, trusted-proxy, CSP, and configured frame-limit paths were incomplete or under-tested | JWKS hardening, strict claim policy, reserved-ID rejection, trusted XFF parsing, nonce CSP, all configured WS budgets | Rust auth/WS suites, nine CSP assertions, browser isolation/reconnect, full serial Rust workspace | c51fff5; 48fe966; 9f1f418; 44e0150 |
+| CI/strict verification | .github/workflows/*.yml, scripts/verify-all.sh, scripts/security/scan-gate.sh, scripts/security/secret-scan*.sh | Floating/weak workflow gates and swallowed prerequisite/scanner failures could false-green | SHA-pinned actions, least privilege, explicit strict mode, fail-closed scanners, enforced release scan policy | Final CI matrix, secret fail-closed injection test, security/provenance/ledger gates | 2c212b7; 7aeaa88; 9f1f418 |
+| Supply chain/dependencies | .github/dependabot.yml, scripts/security/dep-scan.sh, scripts/sbom/web.cdx.json, Dockerfiles, docker-compose.yml | Dependency claims, container scans, image tags, and release security posture were inconsistent | npm/Cargo/actions/Docker Dependabot coverage, digest pins, SBOM refresh, exact dev-only policy, release Trivy enforcement | npm/cargo/cargo-deny scans; final web/gateway Trivy reports zero; unaccepted dependency findings 0 | 2c212b7; 9f1f418; b711111 |
+| Release/reproducibility | .github/workflows/phase6-release-artifacts.yml, scripts/release/smoke-images.sh, scripts/release/write-manifest.mjs, release source inputs | Release metadata, image tags, DB reachability, migrations, shell command, and image smoke assumptions failed in successive candidates | Clean archive build, DB migration, image gateway boot, exported tags, manifest/checksums/SBOMs, immutable candidate tags | Release run 34751270511 passed; protocolVersion 1 manifest; all SHA256SUMS entries verify | 611cbb1; d2b705a; 32a1090; 305b6eb; a04fe1c; 1e1f819; af3df5e; e7bf71b; 0ae5943 |
+| Runtime image hardening | docker/web.Dockerfile | Final Trivy gate found four High vulnerabilities in unused npm runtime tooling | Removed npm, npx, and Corepack from the Node runtime while retaining direct Node execution | Final web image Trivy report: zero vulnerabilities; local runtime probe confirms Node works and package-manager payloads are absent | b711111 |
+| Documentation/truth ledger | README.md, docs/**, .env.example, CHANGELOG.md, CONTRIBUTING.md, docs/audits/V1_HARDENING_FINDINGS.md | Stale counts, terminology, deployment claims, duplicate IDs, and owner-state descriptions overstated completion | Evidence-based wording, schema-v2 unique ledger, explicit owner actions and residual risks | validate-findings: 21 unique findings, no OPEN Critical/High; report structure verified | 9640f28; 9f1f418 |
 
 ## 4. Findings discovered during this campaign
 
 The campaign reproduced and closed the following additional or previously
-under-specified defects:
+under-specified defects. The IDs below are the corresponding ledger entries
+where the defect is independently tracked; release-candidate failures are
+grouped under the existing release/container gate rows.
 
-1. The provenance gate could receive an empty path stream when a baseline tag
-   was absent and still exit successfully. It now requires a tag resolving to
-   a commit, rejects zero-file and zero-overlap scans, and propagates internal
-   git failures.
-2. An empty but defined CONCORD_GIT_SHA produced a gitless worker version with
-   an empty parenthesized suffix. The build now embeds only a non-empty SHA and
-   tests checkout, archive, and forced-empty forms.
-3. The secret scanner could treat an internal awk or grep failure as a clean
-   scan. Internal errors are now actionable exit-2 failures and have an
-   injected-failure regression.
-4. WebSocket write, malformed-control, binary, and validated-operation paths
-   did not all consume the configured frame budgets. All four scopes are now
-   enforced at ingress while fetch budgeting remains intact.
-5. The release workflow initially had several real reproducibility and smoke
-   defects: annotated-tag metadata, absent image tags, loopback-only database
-   binding, shell comments inside a continued docker command, missing schema
-   migrations, and incorrect manifest image references. Each was fixed and
-   rerun on a new immutable tag.
-6. The enforced release Trivy gate then found four new High vulnerabilities in
-   unused npm tooling bundled in the web runtime: brace-expansion
-   CVE-2026-14257 and CVE-2026-69152, ip-address CVE-2026-69192, and tar
-   CVE-2026-73566. Removing npm, npx, and Corepack from the runtime image
-   eliminated the findings without adding an allowlist exception.
+| ID | Severity | Area | Root cause | Fix | Regression test | Final status |
+|---|---|---|---|---|---|---|
+| SA-PROV1 | Critical | provenance gate | Missing baseline/tag enumeration could feed an empty scan to a successful loop | Require a commit-resolving tag, materialize enumeration, reject zero-file/zero-overlap cases, propagate git failures | scripts/security/provenance-tests.sh, 14 assertions; final scan 54 overlaps | CLOSED |
+| SA-NATV1 | High | native release | An empty but defined CONCORD_GIT_SHA generated malformed gitless version output | Embed only a non-empty SHA and keep archive output as plain concord-worker 1.0.0 | Checkout, source archive, and forced-empty version tests; worker suite | CLOSED |
+| SA-SEC-001 | High | security tooling | Tracked-file awk/grep failures could be swallowed as a clean secret scan | Return actionable exit 2 for internal scanner failures | Injected tracked-file failure in scripts/security/secret-scan-tests.sh | CLOSED |
+| HARD-RATE-001 | Medium | gateway limits | Configured write/malformed/binary/validated-operation budgets were not all consumed at frame ingress | Wire all four scopes through the WebSocket ingress paths | Limiter scope regression and WebSocket integration suites | CLOSED |
+| HARD-CI-002 | High | release gate | Release candidates exposed metadata, image-tag, DB binding/migration, shell-continuation, and manifest-reference assumptions that were not exercised together | Correct the workflow and rerun immutable candidates through clean archive image smoke | Final release run 34751270511 passed every release step | CLOSED |
+| HARD-IMG-001 | Medium | container security | Runtime image shipped unused npm/npx/Corepack dependency payloads; Trivy then surfaced four new High findings | Remove unused package-manager payloads from the web runtime; do not allowlist fixed findings | Final web/gateway Trivy reports: 0 vulnerabilities | CLOSED |
 
 ## 5. Previous audit findings reconciliation
 
@@ -153,24 +153,40 @@ and the provenance gate now agree.
 
 ## 7. Clean-room reproducibility
 
-The following clean-room checks were completed during the campaign:
+### Fresh clone
 
-- A fresh clone at v1.0.0-hardened.9 (0ae594385966f3b43a5730b7c911efe95a86d7f4)
-  contained no .env.local, installed 567 npm packages with npm ci, passed
-  native CTest 3/3, built the Next production application, and reported
-  concord-worker 1.0.0 (0ae5943).
-- A source archive from the same tag contained no .git, .env.local,
-  node_modules, build, or rust/target directories. It passed native CTest
-  3/3, npm ci with 567 packages, and the Next production build. Its gitless
-  worker version was the expected plain concord-worker 1.0.0 form.
-- The final release workflow rebuilt from a clean git archive at
-  v1.0.0-hardened.10, applied the web schema migrations to disposable
-  PostgreSQL, booted the gateway and web images, exercised the native worker,
-  generated the WASM package, produced SBOMs, and uploaded checksummed
-  artifacts. The only code delta from the earlier clean-room checks to the
-  final image was runtime removal of unused npm tooling; the final image
-  itself is covered by the successful release run and zero-vulnerability
-  Trivy reports.
+The clean clone was created in /tmp/concord-final-clone.LQbOUX/repo, with no
+pre-existing node_modules, build products, Rust target, or local environment
+file. The recorded procedure cloned the repository, checked out the
+immutable v1.0.0-hardened.9 tag, ran npm ci, configured and built the native
+worker, ran CTest, and ran the Next production build. It installed 567
+packages, passed CTest 3/3, and reported:
+
+    concord-worker 1.0.0 (0ae5943)
+
+The documented bootstrap path is Option B: a reviewer copies
+.env.example to .env.local and supplies the explicitly documented local test
+values before starting service-dependent gates. No credentials are committed.
+The final GitHub CI runs on the report SHA independently repeated the web,
+Rust, WASM, native, security, and distributed gates; the browser jobs
+correctly require the missing Clerk values instead of silently skipping.
+
+### Source archive without .git
+
+The source archive was extracted in /tmp/concord-final-archive.hc4BkM and
+contained no .git, .env.local, node_modules, build, or rust/target
+directories. The recorded procedure ran native CMake configure/build and
+CTest, npm ci, and the Next production build. CTest passed 3/3 and npm ci
+installed 567 packages. The archive worker version was:
+
+    concord-worker 1.0.0
+
+This proves the empty-SHA bug is absent without injecting Git metadata. The
+final release workflow then rebuilt from a clean git archive at
+v1.0.0-hardened.10, applied web migrations to disposable PostgreSQL, booted
+the gateway and web images, exercised the native worker, generated WASM,
+produced SBOMs, and uploaded checksummed artifacts. The final image is
+covered by release run 34751270511 and zero-vulnerability Trivy reports.
 
 ## 8. Verification results
 
@@ -184,19 +200,19 @@ Firefox page.goto error in the first full matrix; the immediate standalone
 Firefox retry passed 1/1 in 38.7 seconds. This transient was recorded rather
 than hidden.
 
-| Gate | Result |
-|---|---|
-| Web typecheck, lint, unit, database, build, and realtime | PASS; 180 web unit tests, 69 database tests, 21 realtime tests |
-| Native GCC | PASS; Release build and CTest 3/3 |
-| Native Apple Clang | PASS; Release build and CTest 3/3 |
-| Rust | PASS; fmt and clippy clean, 253 passed, 0 failed, 1 ignored across 35 suites |
-| WASM | PASS; Emscripten 6.0.9 and 30 tests |
-| Browser local | Chromium 12/12; Firefox standalone retry 1/1; WebKit 1/1 |
-| Accessibility | PASS; 5 Playwright/axe checks |
-| Provenance | PASS; 0 unallowlisted identical files and 0 banned assets |
-| Secrets | PASS; working tree and full git history clean |
-| Dependency/security | PASS; production npm audit 0, cargo audit 0, cargo-deny pass, unaccepted dependency findings 0 |
-| Release workflow | PASS; GitHub run 34751270511 |
+| Gate | Environment | Command/workflow | Count/result | Status |
+|---|---|---|---|---|
+| Web | macOS local at a04fe1c; Ubuntu CI at 2b7232c | npm run typecheck; npm run lint; npm run test; npm run db:test:prepare; npm run test:db; npm run build; npm run test:realtime; phase6-pr-ci run 34752929757 | 180 unit, 69 DB, 21 realtime; CI web success | PASS |
+| Native GCC | macOS local; Ubuntu CI at 2b7232c | scripts/verify-all.sh --strict; phase6-pr-ci native (g++) | Release build, CTest 3/3; CI success | PASS |
+| Native Clang | macOS local; Ubuntu CI at 2b7232c | scripts/verify-all.sh --strict; phase6-pr-ci native (clang++) | Release build, CTest 3/3; CI success | PASS |
+| Rust | macOS local at a04fe1c; Ubuntu CI at 2b7232c | (cd rust && cargo fmt --check && cargo clippy && cargo test -- --test-threads=1); phase6-pr-ci rust | 253 passed, 0 failed, 1 ignored across 35 suites; CI success | PASS |
+| WASM | macOS local; Ubuntu CI at 2b7232c | scripts/verify-wasm.sh; phase6-pr-ci wasm | Emscripten 6.0.9, 30 tests; CI success | PASS |
+| Browser | macOS local; protected GitHub CI at 2b7232c | Playwright Chromium/Firefox/WebKit; phase6-pr-ci run 34752929757 | Local Chromium 12/12, Firefox retry 1/1, WebKit 1/1; CI browser preflights fail on missing Clerk secrets | PARTIAL |
+| Accessibility | macOS local | Playwright tests/browser/a11y.spec.ts with axe-core/playwright | 5/5; no serious/critical violations | PASS |
+| Provenance | macOS local and GitHub security job | scripts/security/provenance-check.sh; scripts/security/provenance-tests.sh | 123 baseline files, 54 overlaps, 0 unallowlisted; 14 regression assertions | PASS |
+| Secrets | macOS local and GitHub security job | scripts/security/secret-scan.sh --history; secret-scan-tests.sh | Working tree, SBOMs, and full history clean; injected failure exits 2 | PASS |
+| Dependency/security | macOS local and GitHub security job | npm audit; cargo audit; cargo deny; scripts/security/dep-scan.sh | Production npm 0; cargo audit 0; unaccepted dependency findings 0 | PASS |
+| Release | Ubuntu GitHub Actions | phase6-release-artifacts run 34751270511 | Clean archive/image smoke, SBOMs, checksums, manifest, Trivy web/gateway 0 | PASS |
 
 The local full run occurred before the final release-only image hardening
 commit. The final implementation SHA was then verified by GitHub web, Rust,
@@ -212,14 +228,23 @@ Redis, native worker, and WASM. It covers the A/B/C/D journey, E/F/G/H
 journey, realtime, reconnect, auth isolation, console hygiene, and
 offline/failure behavior. Accessibility is a separate five-test suite.
 
+Versions: Playwright 1.63.0 and axe-core/playwright 4.13.0.
+
 Local results:
 
 - Chromium: 12/12, including the full journey and accessibility suite.
 - Firefox: the full matrix had one transient navigation error; an immediate
   standalone Firefox smoke retry passed 1/1.
 - WebKit: 1/1.
+- Realtime browser scenario: two browser contexts edit through the real
+  gateway and converge without duplicate operations.
+- Reconnect scenario: a disconnected client resumes, catches up, and
+  converges after reconnect.
 - No unexpected fatal application console errors were accepted by the browser
   tests.
+- The transient Firefox navigation failure is recorded as a failure-and-retry,
+  not hidden behind a screenshot or trace. No screenshot/trace is used as
+  positive evidence.
 
 Final GitHub run 34751269064 has browser (chromium), browser (firefox), and
 browser (webkit) failures. Each fails in the named step Require the
@@ -231,10 +256,16 @@ uploaded or printed.
 
 ## 10. Accessibility verification
 
+Tool: Playwright 1.63.0 with @axe-core/playwright 4.13.0. The checked pages
+were landing/sign-in, authenticated home/documents, and the document editor;
+the same suite also checked dialogs/forms/navigation through named controls,
+landmarks, keyboard tab order, and visible focus.
+
 The accessibility suite passed five Playwright checks with axe-core. No
-serious or critical violations were reported. The suite exercises the
-primary application surfaces, keyboard/focus behavior, labels and roles, and
-the authenticated/disconnected states available to the local fixture.
+serious or critical violations were reported. No axe rule was globally
+disabled. The fixes were the editor/home accessibility and focus/name
+regressions covered by tests/browser/a11y.spec.ts; no remaining serious or
+critical limitation is accepted.
 
 The Impeccable frontend detector returned an empty issue list for
 src/app/documents/[documentId]/editor.tsx. This is supporting visual
@@ -284,27 +315,32 @@ claimed. The owner must complete that GitHub Settings action.
 
 ## 13. CI results on final GitHub SHA
 
-The final implementation SHA b711111431f15717c2a887f81404eabce71e1046 had
-the following completed workflow results:
+The final executable implementation SHA is
+b711111431f15717c2a887f81404eabce71e1046. The subsequent report-publication
+checkpoint SHA 2b7232c7740ef4e037f9e95b8b6601fbd2f8231f changes only audit
+documentation; its required CI runs repeated the executable gates. The
+following are the completed workflow/job results on that final code/report
+checkpoint:
 
 | Workflow | Run | Result |
 |---|---:|---|
-| phase2-core | 34751269098 | success |
-| phase3-gateway | 34751269140 | success |
-| phase4-distributed | 34751269222 | success |
-| phase5-recovery | 34751269163 | success |
-| phase6-distributed | 34751269141 | success |
-| codeql | 34751269080 | success |
-| phase6-release-artifacts | 34751270511 | success |
-| phase6-pr-ci web | 34751269064 | success |
-| phase6-pr-ci rust | 34751269064 | success |
-| phase6-pr-ci wasm | 34751269064 | success |
-| phase6-pr-ci security | 34751269064 | success |
-| phase6-pr-ci native (g++) | 34751269064 | success |
-| phase6-pr-ci native (clang++) | 34751269064 | success |
-| phase6-pr-ci browser (chromium) | 34751269064 | failure: missing Clerk secret |
-| phase6-pr-ci browser (firefox) | 34751269064 | failure: missing Clerk secret |
-| phase6-pr-ci browser (webkit) | 34751269064 | failure: missing Clerk secret |
+| phase2-core | 34752929783 | success |
+| phase3-gateway | 34752929732 | success |
+| phase4-distributed | 34752929760 | success |
+| phase5-recovery | 34752929878 | success |
+| phase6-distributed | 34752929834 | success |
+| codeql / Analyze (cpp) | 34752929781 | success |
+| codeql / Analyze (javascript-typescript) | 34752929781 | success |
+| phase6-pr-ci web | 34752929757 | success |
+| phase6-pr-ci rust | 34752929757 | success |
+| phase6-pr-ci wasm | 34752929757 | success |
+| phase6-pr-ci security | 34752929757 | success |
+| phase6-pr-ci native (g++) | 34752929757 | success |
+| phase6-pr-ci native (clang++) | 34752929757 | success |
+| phase6-pr-ci browser (chromium) | 34752929757 | failure: missing Clerk secret |
+| phase6-pr-ci browser (firefox) | 34752929757 | failure: missing Clerk secret |
+| phase6-pr-ci browser (webkit) | 34752929757 | failure: missing Clerk secret |
+| phase6-release-artifacts on b711111 | 34751270511 | success |
 
 The protected main branch requires strict status checks for web, rust, wasm,
 security, native (g++), native (clang++), browser (chromium), browser
@@ -370,25 +406,14 @@ Medium findings; 18 are CLOSED and 3 are OWNER ACTION.
 
 ## 17. Remaining owner-only actions
 
-1. Add the disposable Clerk repository secrets
-   CONCORD_E2E_CLERK_PUBLISHABLE_KEY and CONCORD_E2E_CLERK_SECRET_KEY, plus
-   CONCORD_E2E_CLERK_ISSUER if required, then rerun the three required
-   browser jobs. Use a dedicated disposable Clerk instance; do not commit or
-   paste credentials.
-2. In the Clerk dashboard, migrate the default session-token audience off
-   convex. Set the cloud GATEWAY_CLERK_AUDIENCE and CONCORD_APP_ORIGIN
-   values, then perform one authorized cloud E2E verification. The gateway
-   and release bundle fail closed while the legacy audience remains.
-3. Verify the live hosted origin against authorizedParties after deployment.
-   Invalid or missing CONCORD_APP_ORIGIN is rejected by the repository.
-4. Configure the production trusted-proxy CIDRs and verify the
-   right-to-left X-Forwarded-For chain end to end.
-5. If production is redeployed, recreate the AWS/domain/TLS/IAM environment
-   from the reproducible deployment scripts. The previous AWS stack is
-   intentionally torn down and no live cloud deployment is claimed.
-6. In GitHub Settings, enable Dependabot vulnerability alerts and automated
-   security fixes, then verify the settings in the GitHub security UI. The
-   remote API attempt was unsuccessful and is not represented as enabled.
+| Action | Why the agent could not perform it | Exact owner steps | Current fail-closed behavior | Risk until completed |
+|---|---|---|---|---|
+| Configure disposable Clerk CI secrets | The repository has no authorized Clerk credentials and secrets must not be invented or exposed | Add CONCORD_E2E_CLERK_PUBLISHABLE_KEY and CONCORD_E2E_CLERK_SECRET_KEY as repository secrets, add CONCORD_E2E_CLERK_ISSUER if needed, then rerun the three browser jobs using a disposable instance | Each browser job exits before tests when either required secret is empty | Required browser contexts remain red; browser CI cannot certify the remote environment |
+| Migrate Clerk audience | This requires a Clerk dashboard/account mutation outside the repository | Change the default session-token template audience from convex to a Concord audience; set cloud GATEWAY_CLERK_AUDIENCE and CONCORD_APP_ORIGIN; run authorized cloud E2E | Cloud bundle rejects the legacy audience and strict claim tests reject wrong/missing audience/party | Cloud authentication cannot be certified and unsafe stale tokens are refused |
+| Verify live authorizedParties | The hosted deployment and real origin are external and no live cloud stack is present | Deploy the web app, confirm its exact HTTPS origin, set CONCORD_APP_ORIGIN, and exercise a real authorized request | Invalid/missing origin fails configuration validation; mocked policy tests cover local branches | Hosted-origin authorization remains unverified |
+| Wire production trusted-proxy CIDRs | Production load-balancer topology is external and AWS is torn down | Set the actual proxy CIDRs in the production environment and run direct, trusted-XFF, malformed, IPv4, IPv6, and spoofing checks | X-Forwarded-For is honored only from configured trusted CIDRs; otherwise the direct peer is used | Client identity/rate-limit behavior in the real topology remains unverified |
+| Recreate AWS/domain/TLS/IAM deployment if needed | No cloud account mutation was requested or safely available, and the prior stack is intentionally torn down | Use the repository deployment scripts with scoped IAM, domain/TLS, logging, and the documented AWS credential hygiene; verify health and auth | Repository deployment configuration is hardened, but no live stack is claimed | Production availability, TLS, and infrastructure behavior remain untested |
+| Enable Dependabot alerts/fixes | GitHub API attempts returned HTTP 502/500; settings require repository administration | Enable vulnerability alerts and automated security fixes in GitHub Settings, then verify the Security UI and keep the existing npm/Cargo/actions/Docker config | Dependabot configuration is present; no false enabled claim is made | Automatic alerting/fixes are not confirmed at the account level |
 
 ## 18. Residual risks / known limitations
 
@@ -411,7 +436,8 @@ Medium findings; 18 are CLOSED and 3 are OWNER ACTION.
 
 ## 19. Commit list
 
-The 18 remediation commits after the campaign start SHA, in order, are:
+The 18 implementation/remediation commits after the campaign start SHA, in
+order, are:
 
 1. 2c212b7 fix(security): harden dependency and scan gates
 2. c51fff5 fix(gateway): enforce configured WebSocket frame budgets
@@ -432,16 +458,21 @@ The 18 remediation commits after the campaign start SHA, in order, are:
 17. 0ae5943 fix(release): migrate disposable database before smoke
 18. b711111 fix(security): remove npm tooling from web runtime
 
-This report is published by one additional docs-only commit immediately
-following b711111. The exact final main SHA and total commit count are
-recorded in the final campaign handoff.
+19. 2b7232c docs(audit): publish initial final remediation campaign report
+
+This final report-format correction is one additional docs-only commit after
+2b7232c. The exact final main SHA and total commit count are recorded in the
+final campaign handoff; the resulting campaign total is 20 commits after the
+start SHA.
 
 ## 20. Final repository state
 
 The final branch is main, pushed to origin, with a clean worktree after
 report publication. The audited implementation is
-b711111431f15717c2a887f81404eabce71e1046, and the report publication is its
-docs-only descendant.
+b711111431f15717c2a887f81404eabce71e1046. The last completed CI evidence
+checkpoint before this final report-format correction was
+2b7232c7740ef4e037f9e95b8b6601fbd2f8231f; this report is a docs-only
+descendant and does not change executable code.
 
 The immutable v1.0.0-hardened.10 tag and GitHub release are present. The
 historical concord-v1.0.0 tag remains unchanged. Main branch protection is
