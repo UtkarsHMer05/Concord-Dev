@@ -2,6 +2,7 @@
 
 Status: Authoritative · Every major engineering claim maps to executable
 evidence. Claims are stated precisely; TARGET vs MEASURED is always marked.
+Last updated: 2026-09-13
 
 This document is the claim-to-evidence index. See `docs/TESTING.md` for how
 to run suites, `docs/BENCHMARKS.md` for measured numbers and their
@@ -42,8 +43,8 @@ environments, `docs/SECURITY.md` §8 for the threat model, and
 | Corrupted snapshots are rejected, never finalized atop | TEST | `phase5_snapshots` integrity matrix (17 tests) + `chaos_worker` CH-WORKER-CORRUPT-SNAPSHOT |
 | Gateway failover / reconnect / catch-up | TEST | `multi_gateway` 9 scenarios + `chaos_gateway` CH-GW-FORCE-RECONNECT + `tests/realtime/reliability.test.ts` (failover, pending-ACK refresh, resync) |
 | Batch atomicity (all-or-nothing) | TEST | `chaos_postgres` CH-PG-TXN-ABORT (pg_terminate_backend mid-batch; never partial) |
-| Browser lifecycle reliability (offline, reload, multi-tab, storm) | TEST | `tests/realtime/reliability.test.ts` 10 scenarios through the real release binary; realtime project 18/18 twice |
-| Maintenance jobs execute in a deployed gateway | LIVE | `GATEWAY_WORKER_BINARY` scheduler wiring — live-proven: claimed job → executed → snapshot FINALIZED; graceful drain on SIGTERM |
+| Browser lifecycle reliability (offline, reload, multi-tab, storm) | TEST | `tests/realtime/reliability.test.ts` 10 scenarios through the real release binary; rendered Playwright Chromium journey separately covers browser persistence, two contexts, and reconnect |
+| Maintenance jobs execute in the release gateway | TEST/LIVE-LOCAL | `GATEWAY_WORKER_BINARY` scheduler wiring — locally proven: claimed job → executed → snapshot FINALIZED; graceful drain on SIGTERM; no AWS environment is currently running |
 
 ## 4. Security claims
 
@@ -54,9 +55,9 @@ environments, `docs/SECURITY.md` §8 for the threat model, and
 | Live permission revocation immediate at next batch, all gateways, no TTL cache | TEST | `phase6_revocation.rs` A–E (both-gateway enforcement; upgrade live; 12 interleaved rounds single legal outcome) — policy in `docs/AUTHORIZATION.md` §8 |
 | Internal broker/Redis cannot fabricate or leak cross-tenant | TEST | `phase6_internal_trust.rs` 10 tests — full hostile menu → 0 durable rows |
 | No secrets in repo or history | SCAN | `scripts/security/secret-scan.sh` — tree + full `git log -p --all` history clean; positive control 10/10 detected with redaction |
-| Dependency posture classified, criticals triaged | SCAN | `scripts/security/dep-scan.sh` — npm 0C/0H (4M accepted, documented); cargo-audit 0; container criticals = base-image OS packages, documented acceptance + remediation path |
-| SBOM for release candidates | SCAN | `scripts/sbom/*.cdx.json` — deterministic regeneration (CycloneDX; web 251 components, rust 331 crates, native hand-authored) |
-| Hardened release images (multi-stage, pinned, non-root) | LIVE | `scripts/release/smoke-images.sh` PASS 2/2 (gateway uid 10001, web uid 1000; health checks; clean-tree builds) |
+| Dependency posture classified, criticals triaged | SCAN | `scripts/security/dep-scan.sh` — npm production 0C/0H/0M/0L; full tree 0C/0H/4M/0L in the documented dev chain; cargo-audit 0; container findings remain raw and policy-classified |
+| SBOM for release candidates | SCAN | `scripts/sbom/*.cdx.json` — deterministic regeneration (CycloneDX; component counts are recorded from the current lockfiles in the final report, not copied from an earlier phase) |
+| Hardened release images (multi-stage, pinned, non-root) | LIVE-LOCAL | `scripts/release/smoke-images.sh` — clean-tree builds, health checks, and non-root UID assertions; the script prints the exact image-check total |
 | Logs/traces carry no secrets or token fragments | TEST | Observability log-hygiene test (token_head leak removed P6-M010) |
 
 ## 5. Observability claims
@@ -90,15 +91,18 @@ discipline. Numbers below are the Phase 6 campaign results (MEASURED).
   campaign measured, stated per workload.
 - Real-Chromium main-thread numbers (WASM measurements are
   Node-instrumented proxies, explicitly marked).
-- Production deployment readiness (Phase 7 scope; images are built and
-  smoke-tested locally only).
+- A currently running AWS production environment. The release-shaped images
+  and deployment runbooks are built and smoke-tested locally; AWS
+  reprovisioning, DNS/TLS, and live proxy topology remain owner actions.
 
 ## 8. Reproducing the proof gate
 
-The full Phase 6 proof gate (M049) is the composition of:
+The full proof gate is the composition of:
 `scripts/verify-native.sh Release` + sanitizer trees + `campaign.sh`;
 `cargo fmt/clippy/test` matrix incl. all integration + chaos suites
 (serialized); web typecheck/lint/build + unit/realtime/db suites;
 `scripts/chaos/run-suite.sh all`; secret/dependency scans; SBOM +
-`smoke-images.sh`; benchmark campaigns via `scripts/bench/` harnesses.
-CI equivalents: `.github/workflows/phase6-*.yml`.
+`smoke-images.sh`; benchmark campaigns via `scripts/bench/` harnesses;
+and `scripts/verify-all.sh --strict` for the final no-silent-skip audit.
+CI equivalents are `.github/workflows/phase6-*.yml`; CodeQL is a separate
+security workflow and is not claimed as a local substitute.

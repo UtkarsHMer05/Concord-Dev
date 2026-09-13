@@ -1,19 +1,20 @@
 # Concord — Architecture
 
-Status: Authoritative (Concord v1 — final release; see README)
+Status: Authoritative (Concord v1 — final release-ready tree; see README)
 Version: 2.0
-Last updated: 2026-09-10
+Last updated: 2026-09-13
 
 This document distinguishes architecture states at all times:
 
 - **CURRENT** — what exists and runs today (Sections 0–4: the shipped v1
-  plane, deployed to production in Phase 7).
+  plane, verified locally; the historical AWS deployment is intentionally
+  torn down).
 - **PRIOR / HISTORICAL** — the superseded states kept for context
   (Sections 1–3), each labeled with the phase that superseded it.
 
-The former TARGET section (§4) described the planned end state; as of the
-Phase 7 final release it is implemented and shipped — its "planned"
-labeling is retired, and any future direction beyond v1 lives in
+The former TARGET section (§4) described the planned end state; the v1
+implementation is now present and verified by local/release gates. Its
+"planned" labeling is retired, while any future direction beyond v1 lives in
 [ROADMAP.md](ROADMAP.md), never presented as existing.
 
 ---
@@ -349,11 +350,13 @@ JSON content envelope, debounced Convex saves. Superseded by Phase 1.
 
 ---
 
-## 4. CURRENT — Concord v1 shipped architecture (implemented, deployed)
+## 4. CURRENT — Concord v1 architecture (implemented, release-verified)
 
-The former TARGET view below is now the shipped and deployed v1
-architecture (Phase 7 final release; production deployment documented in
-[DEPLOYMENT.md](DEPLOYMENT.md)). It superseded Sections 1–2.
+The former TARGET view below is now the implemented v1 architecture. It is
+verified through local Docker/release gates and browser E2E; the AWS topology
+in [DEPLOYMENT.md](DEPLOYMENT.md) is a deployable runbook and historical
+exercise, not an assertion that a live AWS environment exists today. It
+superseded Sections 1–2.
 
 ```mermaid
 flowchart TD
@@ -446,14 +449,15 @@ backpressure model).
 - Redis data may vanish; presence/metrics degrade; documents are unaffected.
 - Clients may be offline for arbitrary periods; convergence on reconnect.
 
-### 3.8 Deployment (v1 — shipped)
+### 3.8 Deployment posture (v1 — deployable, AWS owner action)
 
 Local development is Docker Compose (PostgreSQL, Redis, NATS, and the
-observability stack). Production runs on AWS EC2 (Graviton) behind an ALB
-with per-environment compose stacks, ECR immutable images, SSM secret
-injection, staging-first migrations, and measured graceful drain —
-designed and executed in Phase 7 (DEC-050; [DEPLOYMENT.md](DEPLOYMENT.md),
-[OPERATIONS.md](OPERATIONS.md)).
+observability stack). A production-shaped AWS EC2 (Graviton) deployment
+behind an ALB, with per-environment compose stacks, immutable images, SSM
+secret injection, staging-first migrations, and graceful drain, was designed
+and exercised in Phase 7 (DEC-050; [DEPLOYMENT.md](DEPLOYMENT.md),
+[OPERATIONS.md](OPERATIONS.md)). No AWS environment is currently running;
+reprovisioning it remains an owner action.
 
 ---
 
@@ -470,7 +474,7 @@ designed and executed in Phase 7 (DEC-050; [DEPLOYMENT.md](DEPLOYMENT.md),
 
 ## 6. Reading guide
 
-- Shipped v1 behavior: Sections 0, 0b, and 4 (CURRENT — the deployed
+- Shipped v1 behavior: Sections 0, 0b, and 4 (CURRENT — the implemented
   architecture and its language/trust/delivery/deployment contracts).
 - Superseded states kept for context: Sections 1–3 (each is labeled with
   the phase that superseded it).

@@ -41,8 +41,8 @@ An identical blob proves byte identity; a changed blob does not prove
 independent authorship — the per-file review below covers that.
 
 Current state after the hardening pass (regenerate the TSV for live
-counts): baseline 158 in-scope paths → **10 identical (all allowlisted
-shadcn output), 36 changed, 55 new, 58 removed**.
+counts): baseline 104 in-scope paths → **10 identical (all allowlisted
+shadcn output), 36 changed, 55 new, 58 removed** (101 current paths).
 
 ### Resolved categories
 

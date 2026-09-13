@@ -24,7 +24,9 @@
   <strong>Live demo →
   <a href="https://concord-dev.vercel.app">concord-dev.vercel.app</a></strong><br />
   Sign in with an email code, create a document, start typing.
-  Everything you type is CRDT-merged and durable.
+  Edits are CRDT-merged and persist locally across reloads; when a
+  sync gateway is reachable, server durability follows the
+  PostgreSQL commit-before-ACK contract.
 </p>
 
 ---
@@ -166,12 +168,17 @@ document, **50.1 %** of durable bytes remain.
 | Durable-ACK ingest, 25-op batch | p50 31.45 → **2.72 ms** (−91.4 %) after replacing per-op INSERT round trips with one multi-row `unnest` INSERT; throughput 771 → **8 685 ops/s** (11.3×). Profiler-driven; replay digests identical before/after. |
 | Scale-out, 1 → 4 gateways (200 ops/s open-loop) | ack p95 13.19 → **15.23 ms**, **zero loss, 0.000 % errors** — a gateway costs ~2 ms |
 | Snapshot+tail recovery | **98.4 % faster** than full replay (65.2 → 0.96 s p50; 100 k history / 1 k tail; 5 runs) |
-| Correctness campaigns | **181/181 scenarios**, 0 divergent replicas, 0 lost durable-ACKed ops |
+| Recorded correctness campaigns | **181/181 scenarios** on the cited Phase 6/7 campaign commits; 0 divergent replicas, 0 lost durable-ACKed ops |
 | Fuzzing | **5 M executions, 0 crashes** (every fixed crash pinned by a corpus regression) |
 | Node-instrumented WASM/worker proxy | typing 0.003 ms/op; 5 k-op fanout batch 227 ms; runtime bundle 180 KB (not real-browser latency) |
 
 Environments, run counts, denominators, and reproduction commands for
 every number: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+
+The performance and chaos figures above are recorded historical campaigns
+with their source commits in `docs/BENCHMARKS.md`; the final remediation pass
+does not claim a new before/after performance delta. Fresh hardening evidence
+is reported in [`docs/audits/V1_HARDENING_FINAL_REPORT.md`](docs/audits/V1_HARDENING_FINAL_REPORT.md).
 
 ## Proving it: the verification campaign
 
@@ -179,32 +186,36 @@ every number: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
   redelivery / lag / storage loss, Redis loss, Postgres outage, worker
   faults, compound scenarios — **27/27 green, 0 acknowledged-op loss**.
 - **Graceful drain:** SIGTERM → stop accepting sessions → finish
-  in-flight durable writes → close, measured ~2.2–3 s; a production
-  rolling gateway restart was verified live with both client sessions
-  intact.
+  in-flight durable writes → close, measured ~2.2–3 s; a rolling gateway
+  restart was verified during the historical production-shaped exercise
+  with both client sessions intact.
 - **Sanitizers:** ASan + UBSan and TSan green across the native matrix.
-- **Test suites:** 62 web unit (incl. bridge seed-path and adapter
-  regressions), native 64 + worker 51, WASM parity 26 + smoke,
-  63 database (isolated `concord_test` DB, migrations replayed from
-  empty on every run), 16 protocol/WS, 236 Rust gateway tests.
+- **Test suites:** the current counts are generated from the final verification
+  run rather than copied from an earlier phase report. The reproducible
+  commands cover web unit/DB/realtime projects, native core/worker CTest,
+  WASM parity, the full Rust workspace, and the rendered-browser matrix; the
+  exact final counts are recorded in the hardening report.
 
 ## Security
 
 Deny-by-default server-side authorization with roles
 (OWNER / EDITOR / COMMENTER / VIEWER), re-checked on every batch and
 document read; read-denial is masked as not-found. A 32-row threat
-model maps every threat to a test. Clerk handles identity **only** —
+model maps every threat to a control; executable coverage and planned
+extended-fuzz references are listed in [`docs/SECURITY.md`](docs/SECURITY.md).
+Clerk handles identity **only** —
 all authorization is enforced against Concord-owned data. The public
 surface ships a pinned CSP (including `wasm-unsafe-eval` — its
-omission was caught live on production, silently disabling the WASM
-engine in WebKit), hardened headers, rate limits, and strict
+omission was caught during a historical production-shaped exercise,
+silently disabling the WASM engine in WebKit), hardened headers, rate
+limits, and strict
 frame/size budgets. Permission changes and revocations land in an
 append-only audit table. Details: [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## How it was built
 
-The project was executed as eight engineered phases, each ending at a
-tagged, gated release (milestone IDs, gates, and evidence in
+The engineering history is organized as eight gated phases (milestone IDs,
+gates, and evidence in
 `.agent/`-linked docs and commit history):
 
 | Phase | What shipped |
@@ -216,7 +227,7 @@ tagged, gated release (milestone IDs, gates, and evidence in
 | 4 | Distributed fanout: nginx LB over N gateways, NATS JetStream (msg-id dedup), Redis presence/rate limits; crash/storm/slow/lag E2E; 1→3 gateway scale-out, zero loss |
 | 5 | Snapshots, 98.6 % faster recovery, crash-safe compaction, restore-as-forward-ops, retention + audit hardening |
 | 6 | Proof phase: 32-row threat model fully mapped to tests, sanitizers, 5 M fuzz execs, 27-scenario chaos, deterministic SBOMs, hardened images, OTel/Prometheus/Grafana live-proven |
-| 7 | Production polish + deployment: browser-verified E2E on the release build, CSP/CSWSH live fixes, every benchmark reproduced at the final tree |
+| 7 | Production polish + deployment preparation: browser-verified E2E on release gateway/worker builds, CSP/CSWSH fixes, and deployment runbooks; the exercised AWS stack is intentionally torn down |
 
 The pristine tutorial baseline is preserved at the git tag
 `antonio-original-baseline` (see Provenance below).
@@ -243,7 +254,10 @@ npm run typecheck && npm run lint && npm test   # web suites
 npm run test:realtime                          # real gateways over real WS
 ./scripts/verify-native.sh Release              # C++ core 64 + worker 51
 ./scripts/verify-wasm.sh                       # WASM parity 26 + smoke
-cd rust/sync-gateway && cargo test -- --test-threads=1   # 236 tests
+cd rust && cargo test --workspace -- --test-threads=1 # Rust workspace
+npm run test:browser                            # Chromium browser journey + axe
+npm run test:browser:smoke:firefox              # Firefox browser smoke
+npm run test:browser:smoke:webkit               # WebKit browser smoke
 ```
 
 ## Repository layout
@@ -282,9 +296,10 @@ PostgreSQL.
 
 Not running on the demo URL: the **multi-user realtime fanout path**
 (Rust gateways + nginx + NATS + Redis). That stack is built, tested,
-and deployable — it ran live on AWS as a 10-service compose stack and
-was verified by browser E2E on the release build; hosting was torn
-down to keep the ongoing cost at zero. The client detects the missing
+and deployable — an AWS 10-service compose deployment was exercised
+historically and then torn down to keep ongoing cost at zero. The current
+repository validates the path locally with real gateways and browser E2E;
+the client detects the missing
 gateway and stays in local-first mode truthfully (no fake
 "collaborating" states) — the same degradation any offline session
 uses by design.
@@ -298,9 +313,11 @@ Remaining v1 limitations, stated plainly:
   surfaced loudly in the UI, never silent.
 - History/restore UI is out of the v1 boundary (the revision/restore
   machinery exists and is tested at the protocol layer).
-- Embedded-WebView browsers can need one event or a reload to
-  converge the live fanout visually (data path verified sound;
-  standard browsers pass 21/21; a render watchdog bounds the path).
+- Embedded-WebView browsers are not independently verified in this pass and
+  can need one event or a reload to converge live fanout visually. The current
+  rendered-browser evidence is Chromium full journey 12/12, Firefox smoke
+  1/1, and WebKit smoke 1/1; the data path is separately covered by realtime
+  transport E2E.
 
 ## Provenance and attribution
 

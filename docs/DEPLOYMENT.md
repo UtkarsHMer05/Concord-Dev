@@ -3,6 +3,11 @@
 Status: Authoritative (Phase 7) · Implements DEC-050 · Staging-first rule
 per `docs/MIGRATIONS.md` and `docs/OPERATIONS.md`.
 
+The AWS topology below is a deployable owner runbook and records the
+historical Phase 7 exercise. No AWS environment is running in the current
+repository state; DNS, TLS, cloud credentials, and the live deployment are
+owner actions.
+
 One compose stack per environment; staging and production are separate
 EC2 instances with identical shape. Replica counts are deliberately
 small and truthful — this is not an HA deployment (see §4).

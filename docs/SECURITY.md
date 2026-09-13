@@ -3,7 +3,7 @@
 Status: Authoritative (Phase 6 threat model current; Phase 4 §1–6 and
 Phase 5 §7 remain in force as described below)
 Version: 2.1
-Last updated: 2026-09-09
+Last updated: 2026-09-13
 
 > **Document structure.** §1–§5 record the Phase 3 posture, §6 the Phase 4
 > distributed additions, §7 the Phase 5 storage-integrity additions, and
@@ -14,7 +14,9 @@ Last updated: 2026-09-09
 > Phase 6 scanning tooling (P6-M024 secret scanning, P6-M025 supply-chain
 > scanning). §10 records the Phase 7 production security configuration
 > (P7-M020 sign-off: TLS/Clerk posture, required env, network exposure,
-> rate limits, CSP posture, runtime secrets, IAM recommendations).
+> rate limits, CSP posture, runtime secrets, IAM recommendations). The AWS
+> topology is a deployable owner runbook and historical exercise; no AWS
+> environment is running in the current repository state.
 
 ## 1. Trust boundaries (CURRENT)
 
@@ -69,10 +71,12 @@ Last updated: 2026-09-09
 
 ## 5. Known accepted limitations
 
-- `rate_limited` is enforced for the connect upgrade and all snapshot
-  read paths (the `fetch` scope); the `write`/`malformed` scopes remain
-  policy-defined but not yet enforced at the frame layer (documented
-  target for the Phase 6 edge work).
+- `rate_limited` is enforced for the connect upgrade, malformed control and
+  client-operation frames, validated client operations, and all snapshot
+  read paths (the `fetch` scope). The write budget is counted per validated
+  operation and the malformed budget per rejected frame, both per connection;
+  exhaustion closes that session. Reconnect admission remains bounded by the
+  connect scope per resolved client IP.
 - SIGKILL skips the drain notice (by design; durability is never at risk
   since ACK requires PostgreSQL commit).
 - FileJwks (`GATEWAY_JWKS_FILE`) is an explicit dev/E2E-only source;
@@ -115,11 +119,13 @@ server-side checks.
 ### 6.4 Rate limiting + abuse
 Fixed-window budgets per (scope, principal) shared through Redis when
 available (connect 240/min/resolved-IP default — GATEWAY_RATE_CONNECT_PER_MIN
-override; writes 2000/min; malformed 50/min; snapshot reads 30/min per
-connection — the `fetch` scope covering `fetch_snapshot` and the
-`sync_request` resync decision). Gateway-hopping cannot evade the global
-budget (cross-instance test). Local fallback keeps per-gateway bounds
-during Redis outages (accepted N× residual, bounded).
+override; validated writes 2000/min/connection; malformed frames 50/min/
+connection; snapshot reads 30/min/connection via the `fetch` scope covering
+`fetch_snapshot` and the `sync_request` resync decision). Gateway-hopping
+cannot evade the global connect budget (cross-instance test); per-session
+write/read/malformed budgets reset only with a new connection. Local fallback
+keeps per-gateway bounds during Redis outages (accepted N× residual,
+bounded).
 
 ### 6.5 Findings (all documented, none high-severity)
 F4-1 local-fallback N× budgets during Redis outage (accepted; DEC-033).
@@ -354,8 +360,8 @@ ending in `PLANNED → P6-Mxxx` declare the gap and its owner milestone.
 
 | # | Threat | Attacker | Control | Mapping |
 |---|---|---|---|---|
-| T29 | Secret leakage into git history, logs, docs, or client bundle (`NEXT_PUBLIC_`) | any (opsec) | Multi-pattern secret scanner over tree + full git history with redacted reporting (§9.1) | `scripts/security/secret-scan.sh` (this phase, P6-M024); CI wiring `PLANNED → P6-M043/M045` (workflows owned by SA-CI6) |
-| T30 | Vulnerable dependencies (npm prod/dev, Rust crates, container base images) | supply chain | Per-ecosystem audit scripts with severity classification and exact scanner versions (§9.2) | `scripts/security/dep-scan.sh` (this phase, P6-M025); SBOMs generated + committed as the release-candidate inventory (P6-M026, LIVE): `scripts/sbom/{web,rust-gateway,native-worker}.cdx.json`, reproducible via `scripts/security/sbom.sh` (deterministic: byte-identical regeneration proven); image hardening `PLANNED → P6-M027` |
+| T29 | Secret leakage into git history, logs, docs, or client bundle (`NEXT_PUBLIC_`) | any (opsec) | Multi-pattern secret scanner over tree + full git history with redacted reporting (§9.1) | `scripts/security/secret-scan.sh` (tree + full history); `.github/workflows/phase6-pr-ci.yml` security job runs the gate on every PR |
+| T30 | Vulnerable dependencies (npm prod/dev, Rust crates, container base images) | supply chain | Per-ecosystem audit scripts with severity classification and exact scanner versions (§9.2) | `scripts/security/dep-scan.sh` (source audit in PR CI); `scripts/sbom/` inventory via `scripts/security/sbom.sh`; release images are scanned by Trivy and enforced by `scripts/security/scan-gate.sh` in `.github/workflows/phase6-release-artifacts.yml` |
 | T31 | Dev-loopback exposure (compose ports, plaintext ws/pg in dev) | AT5 | All compose services bind 127.0.0.1 only; documented non-production credentials; `.env*` gitignored | `docker-compose.yml` (loopback binds are reviewable config); posture documented §8.1; production TLS/broker-authn is Phase 7 (ROADMAP) |
 | T32 | C/C++ third-party supply chain | supply chain | The CRDT core and worker vendor no third-party libraries (CMake confirms header-only stdlib usage; no fetch/find_package of externals) | Verified in P6-M025 review — see `scripts/security/dep-scan.sh` header note and the CMake audit trail in `cpp/CMakeLists.txt` |
 
@@ -377,17 +383,15 @@ that this model pins:
 
 ### 8.5 Coverage accounting
 
-Threat rows: 32. Mapped to existing executable tests: **32** (as of
-P6-M021/M022/M023, 2026-09-09: the four Phase 6 authorization/trust
-milestones landed — T4, T5, T9, T10 residual note, T11, T12, T13, T20
-now carry their `phase6_*` suite mappings, LIVE).
-`PLANNED → P6-Mxxx` gaps remaining: T6 (P6-M018), T22 (P6-M017),
-T24 (P6-M017), T29 (P6-M043/M045), T30 (P6-M026 SBOM — generated,
-`scripts/sbom/`, reproducible via `scripts/security/sbom.sh`; remaining
-planning covers P6-M027 image hardening). Rows T2 and T31 are
-documented posture statements (T2: WS-session lifetime vs token
-lifetime — revocation behavior is owned by T9/P6-M022, now LIVE; T31:
-dev loopback posture with Phase 7 hardening).
+Threat rows: 32. Every row is mapped to a control; **29 rows have an
+existing executable test or scanner**, while T6, T22, and T24 retain
+explicit planned extended-fuzz references. Their bounded decoder,
+worker-boundary, and snapshot regression suites still run in the normal
+gates. As of 2026-09-13, T29 and T30 are executable CI/release controls,
+not planned workflow work. Rows T2 and T31 are documented posture
+statements (T2: WS-session lifetime vs token lifetime — revocation
+behavior is owned by T9/P6-M022, now LIVE; T31: dev loopback posture with
+Phase 7 hardening).
 
 ---
 
@@ -422,19 +426,21 @@ wholesale file exclusion):
   credential.
 
 Run it as `bash scripts/security/secret-scan.sh` (see `--help` for the
-history-bounded mode). CI wiring is deferred to the Phase 6 CI milestones
-(P6-M043/M045).
+history-bounded mode). PR CI runs the tree scan; the strict local verifier
+runs both tree and history modes.
 
 ### 9.2 Dependency / supply-chain scanning (P6-M025)
 
 `scripts/security/dep-scan.sh` aggregates, classifies, and reports per
-ecosystem, with the exact scanner versions in every run. Exit policy:
-non-zero only for critical/high findings not covered by a documented
-acceptance; medium/low are reported for triage.
+ecosystem, with the exact scanner versions in every run. Raw findings stay
+visible. Exit status 1 means an unaccepted critical/high finding; exit status
+2 means a scanner/tool failure. A dated residual-risk policy may classify a
+specific finding as accepted, but cannot hide it.
 
 - **npm** (`npm audit --omit=dev` + `npm audit` + `npm ls` critical
-  paths): 0 critical / 0 high / 4 moderate / 0 low, production and full
-  tree identical. All four moderates are the one known chain:
+  paths): 0 critical / 0 high / 0 moderate / 0 low in production. The full
+  development tree has 0 critical / 0 high / 4 moderate / 0 low in the one
+  known chain:
   drizzle-kit → @esbuild-kit/esm-loader → @esbuild-kit/core-utils →
   esbuild 0.18.20 (GHSA-67mh-4wv8-2f99, esbuild ≤0.24.2 dev-server
   request-forgery advisory). ACCEPTED (documented, not hidden): Concord
@@ -444,15 +450,14 @@ acceptance; medium/low are reported for triage.
   `npm audit fix --force` would downgrade drizzle-kit to a breaking
   version — not taken (schema-tooling regression risk outweighs an
   unreachable dev-server advisory). Residual risk: moderate, dev-only,
-  unreachable vector. Note drizzle-kit is currently declared in
-  `dependencies` (not devDependencies) — moving it is a package.json
-  change deferred to the CI/wiring milestone owner; the scanner
-  classifies the chain honestly regardless.
+  unreachable vector. `drizzle-kit` is classified as a development-only CLI
+  in `devDependencies`, so the production install/audit omits this chain.
 - **Rust** (`cargo audit 0.22.2` over Cargo.lock; installed this phase
   via `cargo install cargo-audit --locked`): 0 critical / 0 high /
   0 medium / 0 low — no RustSec advisories against the locked crate set.
-- **Containers** (`docker scout v1.24.0` over the four pinned dev
-  images; all loopback-bound per docker-compose.yml):
+- **Containers** (`docker scout v1.24.0` over the three pinned local
+  development images plus the digest-pinned, inactive cloud nginx edge
+  image):
 
   | Image | Critical | High | Medium | Low | Top critical/high packages |
   |---|---:|---:|---:|---:|---|
@@ -461,22 +466,26 @@ acceptance; medium/low are reported for triage.
   | redis:8.8.2-alpine (redis 8.8.2, alpine 3.23.5) | 2 | 10 | 2 | 0 | alpine base(12), openssl(9), util-linux(3) |
   | nginx:1.29-alpine (nginx 1.29.8, alpine 3.23.4) | 8 | 35 | 24 | 8 | alpine base(43), openssl(18), curl(18), util-linux(3) |
 
-  ACCEPTED for Phase 6 (documented residual): zero of the critical/high
+  ACCEPTED for Phase 6 under the exact-image policy (owner: Concord release
+  owner; review by 2026-10-13; documented residual): zero of the critical/high
   findings are in the database/server applications themselves
   (postgresql, nats-server, redis-server, nginx packages are clean);
   every critical/high sits in base-image OS packages (openssl, curl,
   util-linux, musl) or in the images' embedded Go toolchain artifacts.
-  These images are dev-only, loopback-bound (`127.0.0.1` port maps),
-  never exposed to unauthenticated networks in this phase's posture
-  (§8.1 B5/B6; attacker AT5 only), and the upstream tags are the current
+  The three local images are dev-only and loopback-bound (`127.0.0.1` port
+  maps); the nginx edge image is only a digest-pinned inactive cloud-stack
+  dependency and is not deployed by this repository state. None is exposed
+  to an unauthenticated network in the exercised local posture (§8.1 B5/B6;
+  attacker AT5 only), and the upstream tags are the current
   stable pins (upgrades probed: postgres 18.x is the newest tag family
   with identical counts; nats 2.12-alpine reduces criticals to 3 but is
   a feature-release jump not validated against the Phase 4/5 suites).
   Remediation of base-image packages is release-image work: P6-M027
   (harden images) and Phase 7 productionization own the rebuild-on-
-  patched-base pass with gateway test-matrix validation. The scanner
-  fails the run on these counts by design — the acceptance lives in
-  this document, not in a hidden flag.
+  patched-base pass with gateway test-matrix validation. The scanner emits
+  the raw counts and marks them accepted only when the exact image is still
+  present in the named compose file and the review date has not expired;
+  release images have no equivalent allowlist.
 - **C/C++**: no third-party C or C++ dependencies exist (verified
   against `cpp/CMakeLists.txt`, `cpp/crdt/CMakeLists.txt`,
   `cpp/worker/CMakeLists.txt`: C++20 standard library only; no
@@ -484,11 +493,12 @@ acceptance; medium/low are reported for triage.
   vendored sources), so the native audit surface is the toolchain
   itself, covered by the P6-M016/M017 sanitizer and fuzz matrices.
 
-Scan-of-record (2026-09-09): npm 11.19.0 / node v24.20.0; cargo-audit
+Scan-of-record (2026-09-13): npm 11.19.0 / node v24.20.0; cargo-audit
 0.22.2 (cargo 1.98.1); docker scout v1.24.0 (docker 29.7.2). Re-run any
 time with `bash scripts/security/dep-scan.sh` (`--json` for
-machine-readable). CI wiring is deferred to the Phase 6 CI milestones
-(P6-M043/M045).
+machine-readable). PR CI runs the source audit with an explicit
+`--skip-containers` record; the release workflow runs mandatory Trivy plus
+`scripts/security/scan-gate.sh` against the exact release images.
 
 ### 9.3 SBOMs (P6-M026)
 
@@ -499,10 +509,10 @@ byte-for-byte from the same lockfiles:
 
 - **web.cdx.json** — the Next.js app via npm 11's built-in `npm sbom
   --sbom-format cyclonedx --omit dev --package-lock-only` (production
-  tree, 251 components). Determinism: the random `serialNumber` and
+  tree, 194 components in the current lockfile). Determinism: the random `serialNumber` and
   `metadata.timestamp` are normalized to fixed values by the script
   (documented inside the SBOM's own metadata properties).
-- **rust-gateway.cdx.json** — 331 crates parsed from `rust/Cargo.lock`
+- **rust-gateway.cdx.json** — 327 crates parsed from `rust/Cargo.lock`
   by the script itself (name/version from the lockfile; licenses
   best-effort resolved OFFLINE from the local cargo registry cache —
   crates without a cached Cargo.toml carry no license: honest absence,
@@ -516,7 +526,8 @@ byte-for-byte from the same lockfiles:
   ZERO third-party dependencies per the P6-M025 CMake audit), listing
   the components plus the build toolchains (clang 21.0.0, cmake 4.2.1,
   ninja 1.13.2, emcc 6.0.9-git — captured via `--version` at
-  generation, mirroring `scripts/bench/capture-env.mjs`). The WASM
+  generation, mirroring `scripts/bench/capture-env.mjs`; 7 components in
+  this generation). The WASM
   component is included with build metadata noting the Emscripten
   toolchain and identical source.
 
@@ -529,13 +540,14 @@ any time with `bash scripts/security/sbom.sh` (`web` / `rust` /
 
 ---
 
-## 10. Production security configuration (P7-M020, CURRENT as of 2026-09-09)
+## 10. Production security configuration (P7-M020; required posture, reviewed 2026-09-13)
 
 This section is the security sign-off record for the Phase 7 staging/
-production deployment (DEC-050 topology: ALB → web :3000 + nginx :8890
-→ 3 gateways; PG/NATS/Redis private; Prometheus/Grafana loopback).
-It states the REQUIRED configuration, the honest posture where v1 falls
-short, and who owns each item.
+production topology (DEC-050: ALB → web :3000 + nginx :8890 → 3
+gateways; PG/NATS/Redis private; Prometheus/Grafana loopback). It states
+the required configuration and the honest current posture. The topology
+was exercised historically and is reproducible from the runbooks, but no
+AWS stack is currently running.
 
 ### 10.1 TLS / WSS posture (DEC-050) — BLOCKER documented
 
@@ -657,7 +669,7 @@ is, auth MUST be enabled — see OPERATIONS.md tunnel note).
 
 ### 10.4 Rate limits for public internet (recommended values)
 
-Defaults (`connect 240/min/IP`, `write 2000/min`, `malformed 50/min`,
+Defaults (`connect 240/min/IP`, `write 2000/min/conn`, `malformed 50/min/conn`,
 `fetch 30/min/conn`) are tuned for LOCAL dev. The gateway now supports
 `GATEWAY_TRUSTED_PROXY_CIDRS`: it ignores forwarded headers from other
 peers and walks the trusted chain from right to left, using the first
@@ -669,8 +681,8 @@ Public exposure currently needs:
 
 - `GATEWAY_RATE_CONNECT_PER_MIN=60` — 240 is too generous as a GLOBAL
   bucket; 60/min shared ≈ 1 reconnect-storm of 20 tabs × 3 gateways.
-- Keep `write 2000/min` and `fetch 30/min/conn` (per-connection or
-  per-user scopes — safe under LB).
+- Keep `write 2000/min/conn`, `malformed 50/min/conn`, and
+  `fetch 30/min/conn`; these are session scopes and are safe under an LB.
 - `GATEWAY_MAX_FRAME_SIZE=8388608` (8 MiB) stays: it is the protocol
   cap validated against snapshot-serve size (SEC5-3), per-frame, not
   per-bucket.

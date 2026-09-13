@@ -1,8 +1,8 @@
 # Concord — Testing
 
 Status: Authoritative
-Version: 1.3 (Phase 4)
-Last updated: 2026-09-07
+Version: 1.4 (V1 hardening)
+Last updated: 2026-09-13
 
 This document records how every layer of Concord is tested, with exact
 commands. All commands run from the repository root.
@@ -16,7 +16,7 @@ commands. All commands run from the repository root.
 | Node.js | 24.20.0 (`.nvmrc`) | via nvm; `nvm use` |
 | npm | 11.19.0 | |
 | Apple clang | 21.0.0 | native C++ builds (arm64) |
-| CMake | 4.4.3 | minimum required: 3.24 |
+| CMake | 4.2.1 (verification host) | minimum required: 3.24 |
 | Ninja | 1.13.2 | |
 | Emscripten | 6.0.9 | WASM build of the same core |
 | Python | 3.12.8 | codegen/scripting only |
@@ -166,6 +166,81 @@ cmake --build build/native
 ./build/native/crdt/tests/golden_gen > cpp/crdt/tests/golden/phase2.json
 ```
 
+## Rendered-browser E2E and accessibility
+
+The Playwright suite in `tests/browser/` is the rendered-browser layer. It is
+separate from the Node/Vitest realtime transport E2E suite: these tests open
+the real Next.js page in a real browser, use the real Clerk frontend and
+handshake, boot `public/crdt-worker.js`, exercise the editor, and use the
+Rust gateway over a real WebSocket.
+
+Prerequisites:
+
+```bash
+docker compose up -d db nats redis
+(cd rust && cargo build --release)
+cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCONCORD_WARNINGS_AS_ERRORS=ON
+cmake --build build/native --target concord-worker
+npm run wasm:build
+npm run worker:bundle
+```
+
+The browser setup loads `.env.local` when present. It requires a disposable
+Clerk development-instance `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
+`CLERK_SECRET_KEY`; these values are never committed. `globalSetup` creates
+throwaway E2E users and an organization through the Clerk Backend API, then
+mints short-lived sign-in tickets. The browser consumes each ticket through
+Clerk's public client API, so the resulting session is a real Clerk session
+and the gateway verifies the real issuer/JWKS path. This avoids a mailbox and
+personal-account dependency without fabricating production claims. The
+provisioned records are deleted by Playwright teardown.
+
+Commands:
+
+```bash
+npm run test:browser                 # Chromium journey + axe accessibility
+npm run test:browser:smoke:firefox   # Firefox load/auth/editor smoke
+npm run test:browser:smoke:webkit    # WebKit load/auth/editor smoke
+```
+
+The Chromium journey covers load, authentication, document creation, editor
+rendering, WASM worker fetch, typing, local persistence across reload,
+two-context fanout/convergence, offline/reconnect, authorization isolation,
+console errors, and network-failure behavior. The axe suite checks serious
+and critical WCAG violations, accessible names, landmarks, labels, and
+visible keyboard focus; no axe rules are globally disabled. Playwright stores
+traces/screenshots only on failure. Firefox and WebKit intentionally run the
+short smoke path; they are not claimed to pass the full realtime journey.
+
+CI runs the three browser lanes in `.github/workflows/phase6-pr-ci.yml`.
+The required repository secrets are `CONCORD_E2E_CLERK_PUBLISHABLE_KEY` and
+`CONCORD_E2E_CLERK_SECRET_KEY`; `CONCORD_E2E_CLERK_ISSUER` is optional when it
+can be derived from the publishable key. An unset secret fails the CI lane
+explicitly.
+
+## Strict release verification and traceability
+
+Developer mode may report a missing optional prerequisite as `SKIP`. The
+release/audit command is fail-closed:
+
+```bash
+bash scripts/verify-all.sh --strict
+```
+
+It runs each selected web, DB/realtime, GCC/Clang native, Rust, WASM,
+Chromium/Firefox/WebKit, provenance, and security gate independently and
+prints `PASS`, `FAIL`, `SKIP`, and `required SKIP` totals. Release acceptance
+is `FAIL: 0` and `required SKIP: 0`; a missing required service/tool is never
+converted into a green parent gate.
+
+The release workflow writes `release-manifest.json` before `SHA256SUMS` using
+`scripts/release/write-manifest.mjs`. The manifest records the checked-out
+commit and tag, release/protocol versions, hashes and sizes for artifacts and
+SBOMs, reproducibility timestamp when `SOURCE_DATE_EPOCH` is set, container
+image IDs where available, and toolchain versions. `SHA256SUMS` then covers
+the manifest and every other produced file.
+
 ## 7. Full Phase 2 gate (one command each)
 
 ```bash
@@ -194,17 +269,17 @@ workloads stay local per §4–§5.
 ### Commands (from the repository root)
 
 ```bash
-# Rust unit + protocol golden fixtures (41 tests)
+# Rust unit + protocol golden fixtures
 cd rust && cargo test --lib
 
 # DB integration: migrations, op-log idempotency, authz matrix,
 # catch-up pagination (9 tests; serialized — shared concord_test DB)
 cargo test --test db_integration -- --test-threads=1
 
-# WebSocket integration + security suites (15 tests incl. adversarial)
+# WebSocket integration + security suites
 cargo test --test ws_integration -- --test-threads=1
 
-# Web: typecheck + unit incl. TS golden parity (98 tests)
+# Web: typecheck + unit incl. TS golden parity
 npm run typecheck && npx vitest run --project unit
 
 # Realtime E2E: REAL gateway binary, two clients, offline/reconnect,
@@ -374,12 +449,13 @@ decode layers (5 targets; 250k smoke + 1M extended execs per target).
 
 ### Web
 
-- `tests/db/idor-matrix.test.ts` (6): role×surface read/save/list/ACL/
-  delete/audit with masked denials (DB project 69/69 total).
-- `tests/realtime/reliability.test.ts` (10): multi-user, multi-tab,
+- `tests/db/idor-matrix.test.ts`: role×surface read/save/list/ACL/delete/
+  audit with masked denials (the DB project count is printed by Vitest).
+- `tests/realtime/reliability.test.ts`: multi-user, multi-tab,
   offline+reload, gateway failover, pending-ACK refresh, stale-client
   resync (large + zero tail), mid-session revocation, worker-restart
-  equivalent path, reconnect storm (realtime project 18/18 incl. e2e 8).
+  equivalent path, and reconnect storm; the current count is printed by
+  the realtime project rather than frozen in this historical index.
 
 ### Security tooling
 
@@ -387,9 +463,10 @@ decode layers (5 targets; 250k smoke + 1M extended execs per target).
   tree + full git history; values redacted; 16 justified allowlist entries.
   Lead-verified clean (exit 0) on both modes; positive control 10/10.
 - `scripts/security/dep-scan.sh [--json]`: npm/cargo-audit/docker-scout
-  aggregate. NOTE: exits 1 BY DESIGN while the dev-only container
-  base-image criticals are open — documented acceptance + remediation
-  path in SECURITY.md §9.2 (not a hidden failure).
+  aggregate. Production npm and Rust are clean; the full npm development
+  tree and loopback-only compose image findings are reported and classified
+  under the dated residual policy in SECURITY.md §9.2. The command exits
+  non-zero only for an unaccepted critical/high finding or a scanner error.
 - `scripts/security/sbom.sh` → `scripts/sbom/*.cdx.json` (deterministic
   CycloneDX; byte-identical regeneration).
 
@@ -397,7 +474,8 @@ decode layers (5 targets; 250k smoke + 1M extended execs per target).
 
 `scripts/release/smoke-images.sh`: builds gateway + web images from a
 `git archive HEAD` clean tree (multi-stage, pinned bases, non-root
-uid 10001/1000), boots them, asserts health + non-root uids. PASS 2/2.
+uid 10001/1000), boots them, asserts health + non-root uids. The script
+prints the exact image-check total for the run.
 
 ### Serialization rules (CI-relevant)
 

@@ -280,14 +280,15 @@ dropped (the one full-campaign anomaly — a load-generator client-exit
 at gw1-c10-d1 — shipped zero unacked ops and is root-caused in the
 campaign notes).
 
-## Phase 7 — final-release reruns (MEASURED, 2026-09-10, commit eee94b9)
+## Phase 7 — final-release reruns (historical measured campaign, 2026-09-10, commit eee94b9)
 
-The Phase 7 master prompt requires final benchmark numbers re-measured on
-the exact shipped release build (not reused from earlier commits). All
-three campaigns below ran on the clean `eee94b9` tree — the release that
-is deployed to production — with the same environments, run counts, and
-discipline as Phase 6. Raw artifacts under the private benchmark runs
-directory (`SA-PERF7-*` reports).
+The Phase 7 master prompt required final benchmark numbers re-measured on
+the exact release-candidate build (not reused from earlier commits). All
+three campaigns below ran on the clean `eee94b9` tree with the same
+environments, run counts, and discipline as Phase 6. The AWS deployment
+was a historical exercise and is intentionally torn down; these numbers
+are not a claim about a currently running production service. Raw artifacts
+are under the private benchmark runs directory (`SA-PERF7-*` reports).
 
 ### Throughput / scaling (P7-M037, headline cells, 8 cells × 3 runs)
 

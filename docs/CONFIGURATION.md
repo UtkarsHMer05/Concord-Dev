@@ -61,14 +61,20 @@ time (`--env-file`/orchestrator env). Never bake real values into an image.
 
 ## Sync gateway (`GATEWAY_*`)
 
-### Required — gateway refuses to start without these (exit 2)
+### Required gateway settings — gateway refuses to start without these (exit 2)
 
 | Variable | Kind | Notes |
 |---|---|---|
 | `GATEWAY_DATABASE_URL` | secret | Durable op log. Unreachable DB → exit 3 during startup. |
 | `GATEWAY_CLERK_ISSUER` | public | `https://<instance>.clerk.accounts.dev` (dev) or the production issuer domain. Must match the Clerk instance that signs client JWTs — a mismatch fails verification (auth rejected). |
-| `GATEWAY_CLERK_AUDIENCE` | public | Optional in local development for existing test tokens. When set, the signed session token must contain this exact `aud` (a string or a member of an array); missing/wrong claims are rejected. New cloud bundles require a verified Concord-specific audience before publishing. |
-| `GATEWAY_CLERK_AUTHORIZED_PARTY` | public | Optional in local development. When set, the signed token's `azp` must match this exact app origin; missing/wrong claims are rejected. The cloud bundle sets it to its ALB app origin. |
+
+### Optional claim policies — required by the hosted deployment contract
+
+`GATEWAY_CLERK_AUDIENCE` and `GATEWAY_CLERK_AUTHORIZED_PARTY` are optional
+for local development and existing test tokens. When set, the signed token
+must carry the exact matching claim; missing or wrong values are rejected.
+The hosted/cloud bundle must set both to the values configured in the Clerk
+instance before it is published.
 
 The web middleware accepts `CONCORD_APP_ORIGIN` as an exact origin (scheme,
 host, optional port; no path or trailing slash). When configured, Clerk

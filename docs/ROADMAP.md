@@ -184,6 +184,11 @@ DEC-031..034, docs/OPERATIONS.md, docs/SECURITY.md §6.
 
 ## Phase 7 — Product polish, productionization, deployment, final metrics
 
+The Phase 7 deployment topology and smoke path were exercised historically
+and are preserved as reproducible runbooks. The AWS stack is intentionally
+torn down in the current repository state, so a live deployment remains an
+owner action rather than a current product claim.
+
 - **Objective:** Turn the verified system into a polished deployable product.
 - **Major deliverables:** UX polish, accessibility, responsive/browser
   compatibility; documentation; staging → production; production Docker
@@ -196,8 +201,9 @@ DEC-031..034, docs/OPERATIONS.md, docs/SECURITY.md §6.
 - **Prerequisites:** Phase 6 gate.
 - **Forbidden:** Claiming unmeasured performance; skipping the licensing
   audit.
-- **Completion gate:** Deployed, observable, documented product with
-  reproducible final metrics and clean provenance.
+- **Completion gate:** Deployable, observable, documented product with
+  reproducible final metrics and clean provenance; a live cloud deployment
+  remains an owner-operated step.
 
 ---
 

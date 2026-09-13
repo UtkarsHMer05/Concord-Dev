@@ -20,9 +20,10 @@ involved: Liveblocks and Convex were removed deliberately in Phases 0–1
 (smoke tests assert their old endpoints 404), and the tutorial baseline
 this project started from is preserved and audited at the immutable git
 tag `antonio-original-baseline` ([PROVENANCE.md](PROVENANCE.md)). The
-system was built in eight gated phases (2026-09-06 → 2026-09-11) and
-shipped as `concord-v1.0.0` after a production deployment on AWS; the
-web tier now runs live at
+system was built in eight gated phases (2026-09-06 → 2026-09-11), with the
+canonical `concord-v1.0.0` tag preserved for the v1 release. The AWS
+10-service deployment was exercised historically and is intentionally torn
+down now; the web tier still runs live at
 [concord-dev.vercel.app](https://concord-dev.vercel.app).
 
 ## Why a CRDT — and why built, not adopted
@@ -150,7 +151,7 @@ found and pinned by a regression test:
 
 A fifth worth mentioning: the production CSP omission of
 `wasm-unsafe-eval` silently disabled the WASM engine in WebKit — caught
-live on production and fixed with a pinned CSP plus a worker-init
+during a historical production-shaped exercise and fixed with a pinned CSP plus a worker-init
 fail-fast (P7-M033; README "Security" section). The hardening pass then
 went further and replaced the script `'unsafe-inline'` allow with a
 per-request nonce CSP generated in middleware
@@ -160,9 +161,11 @@ the regression suite pins the effective header.
 
 ## Measured performance (with methodology labels)
 
-Every number below is MEASURED under a recorded environment and run
-count — [BENCHMARKS.md](BENCHMARKS.md) carries the methodology and
-reproduction commands; the labels matter and are never blurred:
+Every number below is MEASURED under a recorded environment and run count —
+[BENCHMARKS.md](BENCHMARKS.md) carries the methodology and reproduction
+commands. These are historical phase-campaign measurements, not a new
+performance delta claimed by the final hardening pass; the labels matter and
+are never blurred:
 
 | Measurement | Result | Methodology label |
 |---|---|---|
@@ -179,10 +182,11 @@ Stated plainly, with pointers (also README "What the live demo runs"):
 
 - **The demo URL runs local-first CRDT mode only.** The multi-user
   realtime fanout path (Rust gateways + nginx + NATS + Redis) is built,
-  tested, and deployable — it ran live on AWS as a 10-service compose
-  stack and was browser-E2E-verified — but hosting was torn down to keep
-  ongoing cost at zero. The client detects the missing gateway and
-  degrades truthfully (no fake "collaborating" states).
+  tested locally, and deployable. It was exercised historically on AWS as a
+  10-service compose stack, then torn down to keep ongoing cost at zero. The
+  current repository's rendered-browser evidence is Chromium full journey
+  12/12, Firefox smoke 1/1, and WebKit smoke 1/1. The client detects the
+  missing gateway and degrades truthfully (no fake "collaborating" states).
 - **Collaborative subset**: text, headings, basic formatting. Content
   outside the subset degrades that session to whole-document save,
   surfaced loudly in the UI, never silently.
@@ -190,10 +194,9 @@ Stated plainly, with pointers (also README "What the live demo runs"):
   horizontally; the data tier does not (yet).
 - **TLS requires a user-owned domain** (the no-cert mode opens the ALB
   sync port publicly instead — [SECURITY.md](SECURITY.md) §10).
-- **Embedded-WebView browsers** can need one event or a reload to
-  converge live fanout visually (data path verified sound; standard
-  browsers pass 21/21; a render watchdog bounds the path) —
-  [BROWSER_SUPPORT.md](BROWSER_SUPPORT.md).
+- **Embedded-WebView browsers** are not independently verified in this pass
+  and can need one event or a reload to converge live fanout visually. The
+  rendered-browser matrix is documented in [BROWSER_SUPPORT.md](BROWSER_SUPPORT.md).
 - History/restore UI is out of the v1 boundary (the revision/restore
   machinery exists and is protocol-tested — [HISTORY.md](HISTORY.md)).
 - No exactly-once delivery is claimed anywhere: at-least-once +

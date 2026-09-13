@@ -47,7 +47,7 @@ Audits and machine-readable evidence live in [audits/](audits/)
 
 | Document | What it answers |
 |---|---|
-| [SECURITY.md](SECURITY.md) | The full security model: trust boundaries, RBAC, input hardening, the 32-row threat model (every threat mapped to a test), scanning tooling, production configuration |
+| [SECURITY.md](SECURITY.md) | The full security model: trust boundaries, RBAC, input hardening, the 32-row threat model (each threat mapped to an executable control or explicitly planned fuzz coverage), scanning tooling, production configuration |
 | [AUTHORIZATION.md](AUTHORIZATION.md) | The deny-by-default role model (OWNER/EDITOR/COMMENTER/VIEWER), live revocation, and IDOR masking |
 | [PROVENANCE.md](PROVENANCE.md) | What was retained, replaced, and independently built relative to the tutorial baseline — and the CI gate that enforces it |
 

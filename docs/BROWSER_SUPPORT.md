@@ -1,15 +1,14 @@
 # Concord — Browser Support Matrix (v1)
 
-Status: Authoritative (Phase 7, M011)
-Last updated: 2026-09-09
+Status: Authoritative (Phase 7, M011 + final hardening browser gate)
+Last updated: 2026-09-13
 
 This document states, truthfully, which browsers can run the Concord v1 web
 client and why. It is derived from a static API audit of the shipped client
 code (`src/lib/crdt/**`, `src/lib/sync/**`, `src/app/**`, `src/components/**`)
 and a feature scan of the compiled WebAssembly module (`public/wasm/concord-crdt.wasm`,
-disassembled with binaryen `wasm-dis`). It is an API-level audit; interactive
-browser validation (Safari WebKit, Chrome, Firefox) is performed separately by
-the release lead with GUI tooling (M036) and will amend this matrix.
+disassembled with binaryen `wasm-dis`). The rendered-browser gate is now also
+recorded below; native Safari remains a separate, unexecuted platform.
 
 ---
 
@@ -55,9 +54,9 @@ with the following matrix:
 
 | Browser | Status | Notes |
 |---|---|---|
-| Chrome/Chromium (last 2 majors) | **Supported** (primary dev target) | WASM smoke + full unit/realtime harnesses run on Node/Chromium-adjacent toolchains; interactive validation by the release lead (M036) |
-| Safari on macOS (16.4+) | **Supported** | All required APIs present since Safari 15; WASM BigInt stable in 16.x; the shipped worker is a classic blob worker (no module-worker requirement). Local WebKit validation was performed in the Phase 7 production E2E (the CSP 'wasm-unsafe-eval' finding was a live WebKit behavior) |
-| Firefox (last 2 majors) | **Supported (API-level)** | Bulk-memory + WASM BigInt satisfied (Firefox 78+); the shipped classic blob worker lifts the old module-worker Firefox-114 floor. Interactive verification pending; no known incompatibilities in the API audit |
+| Chrome/Chromium (last 2 majors) | **Supported** (primary dev target) | Playwright Chromium full rendered journey + accessibility gate: 12/12 passed; the Node/Vitest realtime suite remains a separate transport-level layer |
+| Safari on macOS (16.4+) | **Supported by API/WebKit smoke; native Safari not verified** | Required APIs are present; Playwright WebKit load/auth/editor smoke passed 1/1. WebKit is not a claim about the Safari application, extensions, or iOS behavior |
+| Firefox (last 2 majors) | **Supported by API/Firefox smoke** | Bulk-memory + WASM BigInt satisfied; Playwright Firefox load/auth/editor smoke passed 1/1; the full realtime journey is Chromium-only |
 | Safari 15.x | Partial (untested) | APIs exist (bulk-memory, BigInt, classic workers); not covered by the interactive validation matrix — treated as unsupported for v1 claims |
 | Edge/Opera (Chromium) | Expected to work (Chromium engine); not separately tested | |
 | iOS/iPadOS Safari | Not verified for v1 (desktop-first product; see PRD §25a.C.5) | Responsive chrome is in place but the 816px document page is desktop-first |
@@ -92,10 +91,11 @@ with the following matrix:
   embedded WebViews; the classic importScripts form is CSP-clean and the one
   that shipped.) This requires the `/wasm/*` assets and `/crdt-worker.js` to
   be served with the app (deployment runbook dependency).
-- **WebKit note (live-found, P7-M033):** WebAssembly compilation is
+- **WebKit note (live-found during the historical production-shaped
+  exercise, P7-M033):** WebAssembly compilation is
   script-src-gated in WebKit — the CSP must carry `'wasm-unsafe-eval'` or the
-  worker's engine init rejects with a CompileError (observed live on
-  production; fixed with the narrow directive).
+  worker's engine init rejects with a CompileError (fixed with the narrow
+  directive).
 - The WASM module is built with `-sENVIRONMENT=web,worker` — it deliberately
   does not run in Node except through the explicit-instantiation smoke test
   (`wasm/smoke.mjs`).
@@ -110,5 +110,9 @@ with the following matrix:
   `concord-crdt.wasm` (bulk-memory sites counted; SIMD/atomics/reference
   types confirmed absent; i64 usage confirmed present).
 - Build-link flags reviewed in `wasm/CMakeLists.txt`.
-- Interactive browser validation (Safari/Chrome/Firefox GUI runs) is owned by
-  the release lead as milestone M036 — results to be appended here.
+- Rendered browser validation on 2026-09-13 used Playwright 1.63.0 with a
+  disposable Clerk development instance, a fresh E2E PostgreSQL database,
+  the release Rust gateway, the native worker, and real WebSockets:
+  Chromium full journey + axe 12/12, Firefox smoke 1/1, WebKit smoke 1/1.
+  Native Safari, iOS/iPadOS Safari, and embedded WebViews were not run and
+  remain unverified.
