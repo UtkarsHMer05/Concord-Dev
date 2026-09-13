@@ -14,9 +14,13 @@ if(NOT DEFINED CONCORD_VERSION)
   string(TOLOWER "${PROJECT_VERSION}" CONCORD_VERSION)
 endif()
 
-# Optional short git sha for build metadata ("unknown" outside a git tree —
-# clean-tarball builds must never fail). Override with -DCONCORD_GIT_SHA=...
-# for release packaging.
+# Optional short git sha for build metadata. Policy (SA-NATV1 fix):
+# the sha is build metadata ONLY — a build from a source archive or
+# other gitless tree must print the plain version ("concord-worker
+# 1.0.0"), never a malformed "1.0.0 ()". An empty CONCORD_GIT_SHA
+# therefore means "no sha": only a NON-EMPTY value is embedded in
+# targets. Override with -DCONCORD_GIT_SHA=<sha> for release packaging;
+# an explicitly empty -DCONCORD_GIT_SHA= forces the plain version.
 if(NOT DEFINED CONCORD_GIT_SHA)
   set(CONCORD_GIT_SHA "")
   find_package(Git QUIET)
@@ -24,13 +28,13 @@ if(NOT DEFINED CONCORD_GIT_SHA)
     execute_process(
       COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      OUTPUT_VARIABLE CONCORD_GIT_SHA
+      OUTPUT_VARIABLE _concord_git_sha_raw
       OUTPUT_STRIP_TRAILING_WHITESPACE
       ERROR_QUIET
       RESULT_VARIABLE _git_result
     )
-    if(NOT _git_result EQUAL 0)
-      set(CONCORD_GIT_SHA "")
+    if(_git_result EQUAL 0 AND NOT _concord_git_sha_raw STREQUAL "")
+      set(CONCORD_GIT_SHA "${_concord_git_sha_raw}")
     endif()
   endif()
 endif()

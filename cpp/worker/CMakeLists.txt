@@ -17,12 +17,13 @@ target_link_options(concord-worker PRIVATE ${CONCORD_SANITIZER_FLAGS})
 
 # Release identity (cpp/CMakeLists.txt project VERSION == 1.0.0): threaded
 # to the binary as a compile definition so `--version` reports it without a
-# second hardcoded copy. CONCORD_GIT_SHA is optional — unset in clean
-# tarball builds, where main.cpp prints the plain version.
+# second hardcoded copy. CONCORD_GIT_SHA is OPTIONAL METADATA (SA-NATV1):
+# only a NON-EMPTY sha is embedded; gitless/source-archive builds get the
+# plain "concord-worker <version>" form (no malformed empty parens).
 target_compile_definitions(concord-worker PRIVATE
   CONCORD_VERSION="${CONCORD_VERSION}"
 )
-if(DEFINED CONCORD_GIT_SHA)
+if(DEFINED CONCORD_GIT_SHA AND NOT CONCORD_GIT_SHA STREQUAL "")
   target_compile_definitions(concord-worker PRIVATE CONCORD_GIT_SHA="${CONCORD_GIT_SHA}")
 endif()
 

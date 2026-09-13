@@ -20,8 +20,21 @@ target_link_options(concord_worker_tests PRIVATE ${CONCORD_SANITIZER_FLAGS})
 
 # Tests run the worker binary by absolute path (generator expression), so
 # the suite works from any working directory and under ctest.
+#
+# CONCORD_EXPECT_GIT_SHA (SA-NATV1 regression): mirrors the worker's sha
+# wiring so the --version test pins the EXACT output form this build must
+# produce — 1 = "concord-worker <version> (<sha>)" (git checkout),
+# 0 = "concord-worker <version>" (source archive / gitless tree). A build
+# can therefore never regress into the malformed "1.0.0 ()" middle ground
+# unnoticed: whichever side the configuration is on, the test asserts it.
+if(DEFINED CONCORD_GIT_SHA AND NOT CONCORD_GIT_SHA STREQUAL "")
+  set(CONCORD_WORKER_HAS_SHA 1)
+else()
+  set(CONCORD_WORKER_HAS_SHA 0)
+endif()
 target_compile_definitions(concord_worker_tests PRIVATE
   CONCORD_WORKER_TEST_BIN="$<TARGET_FILE:concord-worker>"
+  CONCORD_EXPECT_GIT_SHA=${CONCORD_WORKER_HAS_SHA}
 )
 
 add_test(NAME concord_worker_tests COMMAND concord_worker_tests)

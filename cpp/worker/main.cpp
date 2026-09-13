@@ -1766,8 +1766,12 @@ int run_worker() {
 // interactive driver both start at the frame loop; argv is ignored there).
 //
 // Output contract (pinned by tests/worker_test.cpp):
-//   "concord-worker 1.0.0 (<short-sha>)\n"  when CONCORD_GIT_SHA is wired
-//   "concord-worker 1.0.0\n"                 plain form otherwise
+//   "concord-worker 1.0.0 (<short-sha>)\n"  when a NON-EMPTY CONCORD_GIT_SHA
+//                                           is wired (git checkout builds)
+//   "concord-worker 1.0.0\n"                 plain form otherwise —
+//   including source-archive/gitless builds, which must NEVER emit a
+//   malformed "1.0.0 ()" (SA-NATV1: the worker CMakeLists only defines
+//   CONCORD_GIT_SHA when it is non-empty).
 // The version comes from the build (CONCORD_VERSION compile definition,
 // set from the CMake project VERSION == package.json version). The
 // build-definition fallback keeps a bare compile from failing.
