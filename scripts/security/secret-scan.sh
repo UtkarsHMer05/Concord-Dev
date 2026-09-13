@@ -36,8 +36,8 @@
 #   - The allowlist is per-FILE-per-PATTERN with a written reason for
 #     every entry. Nothing is allowlisted wholesale.
 #
-# CI wiring is deferred to the Phase 6 CI milestones (P6-M043/M045);
-# this script is documented in docs/SECURITY.md §9.1.
+# PR CI runs the tree scan; the strict local verifier runs both tree and
+# history modes. The contract is documented in docs/SECURITY.md §9.1.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 # Byte-locale: the history stream contains non-UTF-8 bytes (binary diffs);

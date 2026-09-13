@@ -95,7 +95,7 @@ grep -q "baseline-overlapping paths checked" "$WORK/case1.log" \
 R="$WORK/case2"; make_repo "$R"
 # make_repo leaves src/lib/utils.ts byte-identical to the baseline — the
 # scanner must hit the allowlist branch for it and PASS.
-git -C "$R" -c user.name=t -c user.email=t commit -q --allow-empty -m allowlist || true
+git -C "$R" -c user.name=t -c user.email=t commit -q --allow-empty -m allowlist
 ( cd "$R" && bash scripts/security/provenance-check.sh baseline-tag >"$WORK/case2.log" 2>&1 ); expect "2 allowlisted identical file -> PASS" 0 $?
 grep -q "ALLOWED identical src/lib/utils.ts" "$WORK/case2.log" \
   && { printf '  ok    %-58s\n' "2a allowlist entry actually exercised"; pass_n=$((pass_n+1)); } \

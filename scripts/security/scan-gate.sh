@@ -14,6 +14,10 @@ if [ "$#" -eq 0 ]; then
   echo "usage: $0 <trivy-json> [<trivy-json>...]" >&2
   exit 2
 fi
+if ! command -v jq >/dev/null 2>&1; then
+  echo "scan-gate: jq is required to parse Trivy JSON; refusing a false-green result" >&2
+  exit 2
+fi
 
 # Allowlist: VULN_ID|REASON|OWNER|REVIEW-DATE (YYYY-MM-DD)
 # Convention: entries are removed when the base image is refreshed or
@@ -36,7 +40,14 @@ for report in "$@"; do
     echo "scan-gate: missing report $report" >&2
     exit 2
   fi
-  # Trivy JSON: Results[].Vulnerabilities[].VulnerabilityID (+ Status)
+  # Validate and extract in the parent shell. A process substitution would
+  # hide jq's exit status and could turn malformed scanner output into an
+  # empty, falsely passing finding set.
+  scan_lines=""
+  if ! scan_lines="$(jq -r '.Results[]?.Vulnerabilities[]? | select((.Severity // "" | ascii_upcase) == "CRITICAL" or (.Severity // "" | ascii_upcase) == "HIGH") | [.VulnerabilityID, (.Status // "-"), .PkgName, .Severity] | @tsv' "$report")"; then
+    echo "scan-gate: invalid Trivy JSON in $report; refusing a false-green result" >&2
+    exit 2
+  fi
   while IFS=$'\t' read -r vuln_id status pkg severity; do
     [ -z "${vuln_id:-}" ] && continue
     checked+=1
@@ -67,7 +78,7 @@ for report in "$@"; do
     elif [ "$matched" = "active" ]; then
       allowed+=1
     fi
-  done < <(jq -r '.Results[]?.Vulnerabilities[]? | [.VulnerabilityID, (.Status // "-"), .PkgName, .Severity] | @tsv' "$report")
+  done <<< "$scan_lines"
 done
 
 echo "scan-gate: $checked critical/high findings checked, $allowed allowlisted, ${#new_failures[@]} failing"
