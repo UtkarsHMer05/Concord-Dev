@@ -74,7 +74,11 @@ jobs:
           # is exactly what should be released.
           fetch-depth: 1
       - name: Pin reproducible release timestamp to the checked-out commit
-        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct \"$GITHUB_SHA\")" >> "$GITHUB_ENV"
+        run: |
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+          test -n "$source_date_epoch"
+          test "$source_date_epoch" -ge 0
+          echo "SOURCE_DATE_EPOCH=$source_date_epoch" >> "$GITHUB_ENV"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -237,7 +241,7 @@ jobs:
         run: |
           node scripts/release/write-manifest.mjs \
             --dir release-artifacts \
-            --commit "$GITHUB_SHA" \
+            --commit "$(git rev-parse HEAD)" \
             --tag "${GITHUB_REF_NAME:-manual}" \
             --image-ref "concord-gateway:${GITHUB_REF_NAME:-manual}" \
             --image-ref "concord-web:${GITHUB_REF_NAME:-manual}"
