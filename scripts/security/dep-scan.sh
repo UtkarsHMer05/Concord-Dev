@@ -47,7 +47,10 @@ ACCEPTED_NPM="GHSA-67mh-4wv8-2f99|esbuild dev-server advisory in the drizzle-kit
 CONTAINER_POLICY_REVIEW="2026-10-13"
 CONTAINER_POLICY_OWNER="Concord release owner"
 CONTAINER_POLICY_REASON="pinned local-development or inactive-cloud image; findings are in base OS/embedded toolchain packages, not the server package; production release images use the separate Trivy gate"
-CONTAINER_POLICY_IMAGES="postgres:18.6-alpine nats:2.11.6-alpine redis:8.8.2-alpine nginx:1.29-alpine"
+# Scan the exact manifest references used by compose, not the mutable tags.
+# Keeping the digest in both the scan input and the policy match prevents a
+# tag move from silently inheriting an old acceptance.
+CONTAINER_POLICY_IMAGES="postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2 nats:2.11.6-alpine@sha256:7dec3f8f1ff181975dbdfc0d903d2a9724659648294dbc2ebb2fa3a294d573a6 redis:8.8.2-alpine@sha256:96cb544fa0af5aa898d160cffb7dae70c3df117190fc123831c64712cda425ff nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de"
 IMAGES="$CONTAINER_POLICY_IMAGES"
 
 review_epoch() {
@@ -75,8 +78,8 @@ container_policy_applies() {
     fi
   done
   [ "$found" -eq 0 ] || return 1
-  if [ "$image" = "nginx:1.29-alpine" ]; then
-    grep -Fq "image: nginx:1.29-alpine@sha256:" docker-compose.cloud.yml || return 1
+  if [[ "$image" == nginx:1.29-alpine@sha256:* ]]; then
+    grep -Fqx "    image: $image" docker-compose.cloud.yml || return 1
   else
     grep -Fqx "    image: $image" docker-compose.yml || return 1
   fi

@@ -63,6 +63,15 @@ async function durableAckCount(page: PlaywrightPage, documentId: string): Promis
         req.onerror = () => reject(new Error("cannot open concord-sync"));
         req.onsuccess = () => {
           const db = req.result;
+          // The editor can become ready just before SyncSession finishes its
+          // version-2 upgrade. Treat the transient pre-outbox schema as an
+          // empty durable set; the polling caller will observe the store once
+          // the real session has created it.
+          if (!db.objectStoreNames.contains("outbox")) {
+            db.close();
+            resolve(0);
+            return;
+          }
           try {
             const tx = db.transaction("outbox", "readonly");
             const get = tx.objectStore("outbox").getAll();
@@ -131,15 +140,15 @@ test.describe.serial("Chromium primary journey", () => {
 
     // F: type real content.
     const typed = "Hello from a real browser";
+    const ackedBeforeTyped = await durableAckCount(page, documentId);
     await typeInEditor(page, typed);
 
     // G: it appears in the editor.
     await expect
       .poll(async () => editorText(page), { timeout: 20_000 })
       .toContain(typed);
-    const ackedBeforeOffline = await durableAckCount(page, documentId);
     await expect
-      .poll(async () => (await durableAckCount(page, documentId)) > ackedBeforeOffline, { timeout: 45_000 })
+      .poll(async () => (await durableAckCount(page, documentId)) > ackedBeforeTyped, { timeout: 45_000 })
       .toBe(true);
 
     // H: reload — the local-first op-log restores the content (IndexedDB
@@ -336,13 +345,13 @@ test.describe.serial("Chromium primary journey", () => {
     const documentId = await createDocument(page, "E2E NetFail");
     await waitForEditor(page);
     const typed = "content before netfail";
+    const ackedBeforeTyped = await durableAckCount(page, documentId);
     await typeInEditor(page, typed);
     await expect
       .poll(async () => editorText(page), { timeout: 20_000 })
       .toContain(typed);
-    const ackedBeforeOffline = await durableAckCount(page, documentId);
     await expect
-      .poll(async () => (await durableAckCount(page, documentId)) > ackedBeforeOffline, { timeout: 45_000 })
+      .poll(async () => (await durableAckCount(page, documentId)) > ackedBeforeTyped, { timeout: 45_000 })
       .toBe(true);
 
     // Sever the network mid-session. The app must degrade truthfully

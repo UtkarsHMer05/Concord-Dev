@@ -459,7 +459,8 @@ specific finding as accepted, but cannot hide it.
   0 medium / 0 low — no RustSec advisories against the locked crate set.
 - **Containers** (`docker scout v1.24.0` over the three pinned local
   development images plus the digest-pinned, inactive cloud nginx edge
-  image):
+  image; the scanner consumes the exact `name:tag@sha256:digest` refs from
+  `scripts/security/dep-scan.sh`, not mutable tags):
 
   | Image | Critical | High | Medium | Low | Top critical/high packages |
   |---|---:|---:|---:|---:|---|
