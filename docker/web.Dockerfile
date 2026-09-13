@@ -56,7 +56,21 @@ FROM node:24.20-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684
 # embedded standalone app is). The trivy scan gate
 # (scripts/security/scan-gate.sh) enforces the CVE posture; refresh PRs
 # re-run it.
-RUN apk upgrade
+# The runtime executes Node directly and never invokes a package manager.
+# Remove the Node image's npm/npx/Corepack payloads so their bundled CLI
+# dependency tree cannot expand the production attack surface or fail the
+# release scan for tools that are absent from the shipped application.
+RUN apk upgrade \
+    && rm -rf /usr/local/lib/node_modules/npm \
+              /usr/local/lib/node_modules/corepack \
+              /usr/local/bin/npm \
+              /usr/local/bin/npx \
+              /usr/local/bin/corepack \
+    && test ! -e /usr/local/lib/node_modules/npm \
+    && test ! -e /usr/local/lib/node_modules/corepack \
+    && test ! -e /usr/local/bin/npm \
+    && test ! -e /usr/local/bin/npx \
+    && test ! -e /usr/local/bin/corepack
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
