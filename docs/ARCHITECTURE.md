@@ -1,6 +1,6 @@
 # Concord — Architecture
 
-Status: Authoritative (Concord v1 — final release-ready tree; see README)
+Status: Authoritative (Concord v1 implementation/release-candidate tree; final release state is in the hardening report)
 Version: 2.0
 Last updated: 2026-09-13
 

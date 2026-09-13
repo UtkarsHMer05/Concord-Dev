@@ -21,12 +21,13 @@
 </p>
 
 <p align="center">
-  <strong>Live demo →
+  <strong>Configured demo URL →
   <a href="https://concord-dev.vercel.app">concord-dev.vercel.app</a></strong><br />
   Sign in with an email code, create a document, start typing.
   Edits are CRDT-merged and persist locally across reloads; when a
   sync gateway is reachable, server durability follows the
-  PostgreSQL commit-before-ACK contract.
+  PostgreSQL commit-before-ACK contract. Current URL reachability was not
+  independently reverified in the final remediation pass.
 </p>
 
 ---
@@ -226,7 +227,7 @@ gates, and evidence in
 | 3 | Realtime transport: Rust WebSocket gateways, binary wire protocol, authN/authZ per batch, backpressure + graceful drain |
 | 4 | Distributed fanout: nginx LB over N gateways, NATS JetStream (msg-id dedup), Redis presence/rate limits; crash/storm/slow/lag E2E; 1→3 gateway scale-out, zero loss |
 | 5 | Snapshots, 98.6 % faster recovery, crash-safe compaction, restore-as-forward-ops, retention + audit hardening |
-| 6 | Proof phase: 32-row threat model fully mapped to tests, sanitizers, 5 M fuzz execs, 27-scenario chaos, deterministic SBOMs, hardened images, OTel/Prometheus/Grafana live-proven |
+| 6 | Proof phase: 32-row threat model mapped to controls with executable and planned-fuzz coverage recorded, sanitizers, 5 M fuzz execs, 27-scenario chaos, deterministic SBOMs, hardened images, OTel/Prometheus/Grafana live-proven |
 | 7 | Production polish + deployment preparation: browser-verified E2E on release gateway/worker builds, CSP/CSWSH fixes, and deployment runbooks; the exercised AWS stack is intentionally torn down |
 
 The pristine tutorial baseline is preserved at the git tag
@@ -252,7 +253,7 @@ stack — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 ```bash
 npm run typecheck && npm run lint && npm test   # web suites
 npm run test:realtime                          # real gateways over real WS
-./scripts/verify-native.sh Release              # C++ core 64 + worker 51
+./scripts/verify-native.sh Release              # C++ core 64 + worker 52
 ./scripts/verify-wasm.sh                       # WASM parity 26 + smoke
 cd rust && cargo test --workspace -- --test-threads=1 # Rust workspace
 npm run test:browser                            # Chromium browser journey + axe
@@ -315,8 +316,8 @@ Remaining v1 limitations, stated plainly:
   machinery exists and is tested at the protocol layer).
 - Embedded-WebView browsers are not independently verified in this pass and
   can need one event or a reload to converge live fanout visually. The current
-  rendered-browser evidence is Chromium full journey 12/12, Firefox smoke
-  1/1, and WebKit smoke 1/1; the data path is separately covered by realtime
+  rendered-browser evidence is Chromium 12/12 (7 journey + 5 accessibility),
+  Firefox smoke 1/1, and WebKit smoke 1/1; the data path is separately covered by realtime
   transport E2E.
 
 ## Provenance and attribution

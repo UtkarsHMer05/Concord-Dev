@@ -7,7 +7,9 @@ runs:
     - name: Install Emscripten and build WASM
       shell: bash
       run: |
-        git clone --depth 1 --branch 6.0.9 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+        git init -q "$RUNNER_TEMP/emsdk"
+        git -C "$RUNNER_TEMP/emsdk" fetch --depth 1 https://github.com/emscripten-core/emsdk.git 5eb0bde7585670252e8ba05e9d361627bffd08b5
+        git -C "$RUNNER_TEMP/emsdk" checkout --detach -q FETCH_HEAD
         "$RUNNER_TEMP/emsdk/emsdk" install 6.0.9
         "$RUNNER_TEMP/emsdk/emsdk" activate 6.0.9
         source "$RUNNER_TEMP/emsdk/emsdk_env.sh"

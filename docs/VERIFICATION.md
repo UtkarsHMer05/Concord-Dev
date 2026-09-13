@@ -28,7 +28,7 @@ environments, `docs/SECURITY.md` §8 for the threat model, and
 | Native/WASM parity | TEST | wasm golden tests (26) + `scripts/verify-wasm.sh`; TS↔Rust↔C++ golden fixtures (`tests/protocol/golden.test.ts`, `rust` protocol golden tests) |
 | Malformed input cannot crash the C++ core/worker | TEST/FUZZ | `cpp/crdt/fuzz/*` — 5 targets, smoke tier 1M execs each, zero crashes; regression corpus + `test_fuzz_regressions.cpp` pinned mechanism |
 | Malformed input cannot crash the Rust decoders | TEST/FUZZ | `rust/sync-gateway/examples/proto_fuzz.rs` (5 targets, 250k smoke + 1M extended per target) + `tests/protocol_fuzz_regressions.rs` (10 tests incl. the pinned FUZZ-2026-09-001 broker panic fix) |
-| Sanitizer-clean native code | TEST | ASan+UBSan 64 core + 51 worker green; TSan 64 + 51 green (single-threaded worker contract documented); runs in sanitizer trees incl. campaign |
+| Sanitizer-clean native code | TEST | ASan+UBSan 64 core + 52 worker green; TSan 64 + 52 green (single-threaded worker contract documented); runs in sanitizer trees incl. campaign |
 
 ## 3. Durability / fault-tolerance claims (within the tested fault model)
 

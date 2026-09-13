@@ -2,13 +2,14 @@
 
 Status: Authoritative
 Version: 1.0
-Last updated: 2026-09-06
+Last updated: 2026-09-13
 
 Concord's durable application data lives in PostgreSQL. This document
 describes the schema, invariants, migration policy, and local development
-workflow as of Phase 1. The CRDT update log, snapshots, and version history
-are later-phase additions (see [ARCHITECTURE.md](ARCHITECTURE.md) §4) and are
-intentionally absent here.
+workflow first introduced in Phase 1. The CRDT update log, snapshots, and
+version history were added in later phases; their current v1 invariants are
+documented in [ARCHITECTURE.md](ARCHITECTURE.md) §4,
+[STORAGE.md](STORAGE.md), and [RECOVERY.md](RECOVERY.md).
 
 Companion documents: [AUTHORIZATION.md](AUTHORIZATION.md),
 [DECISIONS.md](DECISIONS.md) (DEC-019, DEC-020),
@@ -180,7 +181,8 @@ extension, created by migration.
 - Application start must not unexpectedly mutate schema; migrations run
   explicitly via scripts (and automatically in the test harness against the
   test database).
-- Production deployment/migration strategy is a Phase 7 concern (DEC-010).
+- Production deployment/migration strategy is covered by the Phase 7 runbook;
+  live execution and provider-specific wiring remain owner actions (DEC-010).
 
 ## 6. Local development workflow
 

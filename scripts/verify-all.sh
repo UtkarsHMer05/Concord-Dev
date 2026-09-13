@@ -288,6 +288,7 @@ run_provenance() {
 
 run_security() {
   run_cmd security/secrets bash scripts/security/secret-scan.sh
+  run_cmd security/secrets-fail-closed bash scripts/security/secret-scan-tests.sh
   run_cmd security/secrets-history bash scripts/security/secret-scan.sh --history
   run_cmd security/npm-audit npm audit --audit-level=high
 

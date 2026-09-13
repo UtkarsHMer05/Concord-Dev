@@ -21,10 +21,12 @@ involved: Liveblocks and Convex were removed deliberately in Phases 0–1
 this project started from is preserved and audited at the immutable git
 tag `antonio-original-baseline` ([PROVENANCE.md](PROVENANCE.md)). The
 system was built in eight gated phases (2026-09-06 → 2026-09-11), with the
-canonical `concord-v1.0.0` tag preserved for the v1 release. The AWS
-10-service deployment was exercised historically and is intentionally torn
-down now; the web tier still runs live at
-[concord-dev.vercel.app](https://concord-dev.vercel.app).
+historical `concord-v1.0.0` tag preserved as the canonical v1 identity; the
+final hardening candidate and release state are recorded separately in the
+hardening report. The AWS 10-service deployment was exercised historically
+and is intentionally torn down now; the web tier's configured URL is
+[concord-dev.vercel.app](https://concord-dev.vercel.app) (current reachability
+was not independently reverified in this pass).
 
 ## Why a CRDT — and why built, not adopted
 
@@ -184,8 +186,8 @@ Stated plainly, with pointers (also README "What the live demo runs"):
   realtime fanout path (Rust gateways + nginx + NATS + Redis) is built,
   tested locally, and deployable. It was exercised historically on AWS as a
   10-service compose stack, then torn down to keep ongoing cost at zero. The
-  current repository's rendered-browser evidence is Chromium full journey
-  12/12, Firefox smoke 1/1, and WebKit smoke 1/1. The client detects the
+  current repository's rendered-browser evidence is Chromium 12/12 (7 journey
+  + 5 accessibility), Firefox smoke 1/1, and WebKit smoke 1/1. The client detects the
   missing gateway and degrades truthfully (no fake "collaborating" states).
 - **Collaborative subset**: text, headings, basic formatting. Content
   outside the subset degrades that session to whole-document save,

@@ -54,7 +54,7 @@ with the following matrix:
 
 | Browser | Status | Notes |
 |---|---|---|
-| Chrome/Chromium (last 2 majors) | **Supported** (primary dev target) | Playwright Chromium full rendered journey + accessibility gate: 12/12 passed; the Node/Vitest realtime suite remains a separate transport-level layer |
+| Chrome/Chromium (last 2 majors) | **Supported** (primary dev target) | Playwright Chromium: 12/12 passed (7 journey + 5 accessibility); the Node/Vitest realtime suite remains a separate transport-level layer |
 | Safari on macOS (16.4+) | **Supported by API/WebKit smoke; native Safari not verified** | Required APIs are present; Playwright WebKit load/auth/editor smoke passed 1/1. WebKit is not a claim about the Safari application, extensions, or iOS behavior |
 | Firefox (last 2 majors) | **Supported by API/Firefox smoke** | Bulk-memory + WASM BigInt satisfied; Playwright Firefox load/auth/editor smoke passed 1/1; the full realtime journey is Chromium-only |
 | Safari 15.x | Partial (untested) | APIs exist (bulk-memory, BigInt, classic workers); not covered by the interactive validation matrix — treated as unsupported for v1 claims |
@@ -113,6 +113,7 @@ with the following matrix:
 - Rendered browser validation on 2026-09-13 used Playwright 1.63.0 with a
   disposable Clerk development instance, a fresh E2E PostgreSQL database,
   the release Rust gateway, the native worker, and real WebSockets:
-  Chromium full journey + axe 12/12, Firefox smoke 1/1, WebKit smoke 1/1.
+  Chromium 12/12 (7 journey + 5 accessibility), Firefox smoke 1/1, and
+  WebKit smoke 1/1.
   Native Safari, iOS/iPadOS Safari, and embedded WebViews were not run and
   remain unverified.

@@ -13,8 +13,9 @@ Work top to bottom; check each box when verified.
 
 ## 0. Preconditions
 
-- [ ] The hardening branch (`codex/9-5-hardening`) is merged to `main`
-      and pushed (`git push origin main`).
+- [ ] The final hardening candidate has been merged to `main` and pushed
+      (`git push origin main`); verify the exact candidate SHA before changing
+      protection settings.
 - [ ] `gh auth status` shows an authenticated session with admin rights
       on `UtkarsHMer05/Concord-Dev`.
 
@@ -35,20 +36,26 @@ gh api -X PATCH repos/UtkarsHMer05/Concord-Dev \
 
 Require PRs, the CI status checks, and block force pushes/deletions.
 This example uses the classic protection API — the required status
-check names come from `.github/workflows/phase6-pr-ci.yml` (job ids:
-`web`, `rust`, `native`, `wasm`, `security`) and
-`.github/workflows/codeql.yml` (job: `codeql`; also set as a required
-workflow check if prompted by GitHub):
+check names come from the completed final run. The matrix lanes are
+`web`, `rust`, `native (g++)`, `native (clang++)`, `wasm`,
+`browser (chromium)`, `browser (firefox)`, `browser (webkit)`, and
+`security`; CodeQL's observed names are `Analyze (javascript-typescript)`
+and `Analyze (cpp)`:
 
 ```bash
 gh api -X PUT repos/UtkarsHMer05/Concord-Dev/branches/main/protection \
   -f "required_status_checks[strict]=true" \
   -f "required_status_checks[checks][]=web" \
   -f "required_status_checks[checks][]=rust" \
-  -f "required_status_checks[checks][]=native" \
+  -f "required_status_checks[checks][]=native (g++)" \
+  -f "required_status_checks[checks][]=native (clang++)" \
   -f "required_status_checks[checks][]=wasm" \
+  -f "required_status_checks[checks][]=browser (chromium)" \
+  -f "required_status_checks[checks][]=browser (firefox)" \
+  -f "required_status_checks[checks][]=browser (webkit)" \
   -f "required_status_checks[checks][]=security" \
-  -f "required_status_checks[checks][]=codeql" \
+  -f "required_status_checks[checks][]=Analyze (javascript-typescript)" \
+  -f "required_status_checks[checks][]=Analyze (cpp)" \
   -f "enforce_admins=false" \
   -f "required_pull_request_reviews[required_approving_review_count]=0" \
   -F "restrictions=null" \
@@ -114,10 +121,9 @@ Enable the GitHub-recognized security policy surface that
 ## 5. Dependabot verification
 
 [`.github/dependabot.yml`](../.github/dependabot.yml) configures
-weekly update PRs for npm, cargo (`/rust`), and github-actions
-(docker ecosystem is handled by digest pins in
-[`docker-compose.cloud.yml`](../docker-compose.cloud.yml) — refresh
-PRs arrive against those digests when tags move).
+weekly update PRs for npm, cargo (`/rust`), github-actions, and Dockerfile
+directories. Docker and compose image references are digest-pinned; refresh
+PRs update those digests when tags move.
 
 - [ ] After the first weekly cycle, check the repo's PR list (or
       `gh pr list --label dependencies`) for the first Dependabot PRs.

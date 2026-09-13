@@ -123,8 +123,8 @@ Types in use: `feat`, `fix`, `security`, `perf`, `test`, `docs`, `ci`,
 - Open a PR against `main`. The template asks for a summary, change
   type, testing evidence, and a checklist (tests added, no secrets, docs
   updated, CHANGELOG entry).
-- `phase6-pr-ci` must pass (web, rust, native, wasm, security jobs);
-  CodeQL runs on the PR too.
+- `phase6-pr-ci` must pass (web, rust, GCC/Clang native, WASM, Chromium/
+  Firefox/WebKit browser, and security jobs); CodeQL runs on the PR too.
 
 ## Testing expectations
 

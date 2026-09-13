@@ -1,12 +1,13 @@
 # Concord — Roadmap
 
-Status: Authoritative (bootstrap version)
-Version: 1.0
-Last updated: 2026-09-05
+Status: Authoritative historical delivery plan; current implementation state
+and release evidence are recorded in the final hardening report.
+Version: 1.1
+Last updated: 2026-09-13
 
-Concord is delivered through exactly eight high-level phases. Work never
-spans phases: no milestone from a future phase is implemented while an earlier
-phase is open (see DEC-013).
+Concord was organized and delivered through eight high-level phases. The
+phase table preserves that historical plan; later-phase implementation work
+is intentionally reflected in the current v1 state and final report.
 
 **Detailed milestone definitions are authoritative only when supplied by the
 corresponding phase master prompt.** This roadmap records each phase's
@@ -175,7 +176,8 @@ DEC-031..034, docs/OPERATIONS.md, docs/SECURITY.md §6.
   **Met:** 181/181 correctness scenarios (0 lost durable-ACKed ops,
   0 divergent replicas within the defined fault model); 27/27 chaos;
   sanitizer matrix + 5M fuzz execs clean; threat model 32/32 rows mapped
-  to executable tests; secret scan clean (tree + full history); five
+  to controls with executable or explicitly planned-fuzz coverage recorded;
+  secret scan clean (tree + full history); five
   phase-6 CI workflows + regression comparator; Prometheus/Grafana +
   OTel live; benchmark schema + baselines wired (98.6% recovery,
   +6.9 % ack-p95 at 4 gateways, 50.1 % compaction bytes, −91.4 % ack

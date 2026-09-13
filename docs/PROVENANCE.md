@@ -43,6 +43,10 @@ independent authorship — the per-file review below covers that.
 Current state after the hardening pass (regenerate the TSV for live
 counts): baseline 104 in-scope paths → **10 identical (all allowlisted
 shadcn output), 36 changed, 55 new, 58 removed** (101 current paths).
+The TSV intentionally scopes the carried-content review to `src/` and
+`public/` (104 baseline paths); the enforcement gate scans the complete
+baseline tree of 123 files, including documentation, configuration, and
+tooling, and currently checks 54 overlapping shipped paths.
 
 ### Resolved categories
 

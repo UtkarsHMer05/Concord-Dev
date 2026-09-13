@@ -132,7 +132,9 @@ jobs:
       - name: Build WASM (emscripten) + smoke + package
         run: |
           EMSDK_VERSION=6.0.9
-          git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git /tmp/emsdk
+          git init -q /tmp/emsdk
+          git -C /tmp/emsdk fetch --depth 1 https://github.com/emscripten-core/emsdk.git 5eb0bde7585670252e8ba05e9d361627bffd08b5
+          git -C /tmp/emsdk checkout --detach -q FETCH_HEAD
           /tmp/emsdk/emsdk install "$EMSDK_VERSION"
           /tmp/emsdk/emsdk activate "$EMSDK_VERSION"
           source /tmp/emsdk/emsdk_env.sh
@@ -176,14 +178,17 @@ jobs:
       # (HTTP up + uid 1000), then reports PASS/FAIL per image.
       - name: Build + smoke release images (clean git-archive tree)
         run: scripts/release/smoke-images.sh
-      # Export the exact images the smoke verified, under stable tags.
+      # Export the exact images the smoke verified under fixed local tags.
+      # The release ref is metadata, not a shell argument; keeping it out of
+      # docker tag/save also prevents a hostile tag name from becoming a
+      # command fragment.
       - name: Export image artifacts
         run: |
-          docker tag concord-gateway:smoke concord-gateway:${{ github.ref_name || 'manual' }}
-          docker tag concord-web:smoke concord-web:${{ github.ref_name || 'manual' }}
-          docker save concord-gateway:${{ github.ref_name || 'manual' }} \
+          docker tag concord-gateway:smoke concord-gateway:release
+          docker tag concord-web:smoke concord-web:release
+          docker save concord-gateway:release \
             -o release-artifacts/concord-gateway-image.tar
-          docker save concord-web:${{ github.ref_name || 'manual' }} \
+          docker save concord-web:release \
             -o release-artifacts/concord-web-image.tar
 
       # ---------------- SBOMs ----------------
@@ -207,7 +212,7 @@ jobs:
       - name: Vulnerability scan of web image (trivy)
         uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
-          image-ref: concord-web:${{ github.ref_name || 'manual' }}
+          image-ref: concord-web:release
           format: json
           output: release-artifacts/trivy-web.json
           exit-code: "0"
@@ -215,7 +220,7 @@ jobs:
       - name: Vulnerability scan of gateway image (trivy)
         uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
-          image-ref: concord-gateway:${{ github.ref_name || 'manual' }}
+          image-ref: concord-gateway:release
           format: json
           output: release-artifacts/trivy-gateway.json
           exit-code: "0"
@@ -249,7 +254,7 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: concord-release-${{ github.ref_name || github.run_id }}
+          name: concord-release-${{ github.run_id }}
           path: release-artifacts/
           retention-days: 90
           if-no-files-found: error

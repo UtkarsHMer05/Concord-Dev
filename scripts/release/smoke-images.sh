@@ -65,13 +65,22 @@ smoke_gateway() {
   note "building gateway image…"
   docker build -q -f docker/gateway.Dockerfile -t "$tag" "$WORK" >/dev/null
   note "starting gateway (loopback, dummy DB URL → it must still boot + serve health)…"
-  local cid
-  cid=$(docker run -d \
+  local cid=""
+  if ! cid=$(docker run -d \
     -e GATEWAY_BIND_HOST=0.0.0.0 \
     -e GATEWAY_BIND_PORT=8791 \
     -e GATEWAY_DATABASE_URL=postgres://concord:concord_local_dev@host.docker.internal:5433/concord_test \
     -e GATEWAY_CLERK_ISSUER=https://fun-blowfish-5798.clerk.accounts.dev \
-    -p 127.0.0.1:18791:8791 "$tag")
+    -p 127.0.0.1:18791:8791 "$tag"); then
+    note "gateway: docker run failed — FAIL"
+    FAIL+=("gateway")
+    return
+  fi
+  if [ -z "$cid" ]; then
+    note "gateway: docker run returned no container id — FAIL"
+    FAIL+=("gateway")
+    return
+  fi
   # The gateway fail-fast-exits (by design) without a reachable DB, so the
   # smoke points at the real dev DB via host.docker.internal (macOS Docker
   # Desktop runs containers in a VM — 127.0.0.1 would hit the VM, not the
@@ -116,13 +125,22 @@ smoke_web() {
   note "building web image…"
   docker build -q -f docker/web.Dockerfile -t "$tag" "$WORK" >/dev/null
   note "starting web (dummy DB URL; process liveness via HTTP)…"
-  local cid
+  local cid=""
   # No --rm: the stopped container's exit code must be inspectable.
-  cid=$(docker run -d -p 127.0.0.1:13000:3000 \
+  if ! cid=$(docker run -d -p 127.0.0.1:13000:3000 \
     -e DATABASE_URL=postgres://user:pass@127.0.0.1:1/none \
     -e NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_dummy \
     -e CLERK_SECRET_KEY=sk_test_dummy \
-    "$tag")
+    "$tag"); then
+    note "web: docker run failed — FAIL"
+    FAIL+=("web")
+    return
+  fi
+  if [ -z "$cid" ]; then
+    note "web: docker run returned no container id — FAIL"
+    FAIL+=("web")
+    return
+  fi
   local up=1
   for _ in $(seq 1 40); do
     # Any HTTP response (even 5xx) proves the Next server is up.
@@ -165,9 +183,18 @@ smoke_worker() {
   # Probe frame — the exact bytes proven by the phase6 release-artifacts
   # workflow: [u32 24 payload][u32 6 cmd][u64 1 seed][u32 10 ops]
   # [u32 2 replicas][u32 0 shape] (little-endian).
-  local cid
-  cid=$(docker run -d --rm --entrypoint /bin/sh "$tag" \
-    -c 'sleep 300')
+  local cid=""
+  if ! cid=$(docker run -d --entrypoint /bin/sh "$tag" \
+    -c 'sleep 300'); then
+    note "worker: docker run failed — FAIL"
+    FAIL+=("worker")
+    return
+  fi
+  if [ -z "$cid" ]; then
+    note "worker: docker run returned no container id — FAIL"
+    FAIL+=("worker")
+    return
+  fi
   local uid
   uid=$(docker exec "$cid" id -u 2>/dev/null || echo unknown)
   local probe_rc=1 probe_out=""

@@ -2,7 +2,7 @@
 
 Status: Authoritative (local dev + production runbooks)
 Version: 2.0 (P7-M013/M016-M019: graceful shutdown, migrations, backup/DR)
-Last updated: 2026-09-09
+Last updated: 2026-09-13
 
 Deployment topology for staging/prod: `docs/DEPLOYMENT.md` +
 `docker-compose.cloud.yml`. Environment variable contract:
@@ -46,8 +46,10 @@ Deployment topology for staging/prod: `docs/DEPLOYMENT.md` +
 `docker-compose.cloud.yml` binds Prometheus (`127.0.0.1:9090`) and
 Grafana (`127.0.0.1:3001`) to the instance's loopback, and the instance
 security group opens NOTHING for them (only the ALB SG reaches :3000
-and :8890). Grafana runs anonymous-Admin — safe **only** because the
-loopback binding + SG make remote reachability impossible. The one
+and :8890). Cloud Grafana requires real authentication; only the
+local-development compose file uses anonymous Admin, and it is safe
+**only** because the loopback binding makes remote reachability impossible.
+The one
 supported way to look at dashboards on the cloud stack:
 
 ```bash
@@ -55,7 +57,7 @@ supported way to look at dashboards on the cloud stack:
 ssh -N -L 9090:127.0.0.1:9090 -L 3001:127.0.0.1:3001 <instance>
 
 # then open locally:
-#   http://127.0.0.1:3001  (Grafana — Admin, anonymous)
+#   http://127.0.0.1:3001  (Grafana — authenticate with concord.env credentials)
 #   http://127.0.0.1:9090  (Prometheus)
 ```
 
@@ -65,9 +67,9 @@ Rules (security invariants — do not relax):
   Prometheus/Grafana, and never open 9090/3001 in the instance SG.
 - **Never** port-forward Grafana to `0.0.0.0` on your laptop (`-L
   3001:...` binds loopback by default — keep it that way).
-- If Grafana must ever be shared beyond one operator, anonymous-Admin
-  MUST be replaced by real authentication first (the compose file's
-  own comment states this condition).
+- Cloud mode already requires real Grafana authentication. If the local
+  development dashboard is ever shared beyond one operator, its
+  anonymous-Admin setting MUST be replaced first.
 
 ## Shutdown + failure behavior (tested)
 
@@ -414,10 +416,11 @@ scripts/release/smoke-images.sh
 # (verification helper for staged-but-uncommitted release-file changes).
 ```
 
-Measured smoke results (2026-09-09, Docker Desktop linux/arm64):
-gateway PASS (SIGTERM→exit 0 in 2222 ms), web PASS (exit 143 in 186 ms),
-worker PASS (probe status 0). All three from a clean `git archive HEAD`
-export.
+Measured smoke results (2026-09-13, Docker Desktop linux/arm64):
+gateway PASS (SIGTERM→exit 0 in 2224 ms), web PASS (exit 143 in 200 ms),
+worker PASS (probe status 0). All three used a clean source export with the
+verified generated WASM assets supplied separately because those files are
+git-ignored.
 
 Worker image note: the C++ runtime is linked statically
 (`-static-libstdc++ -static-libgcc`) so the runtime stage is bare
@@ -436,10 +439,11 @@ Reproducibility (measured, honest):
   `ba06875…` vs `0319383…`), BUT the **gateway binary inside is
   byte-identical** across both (sha256 `ea6f6f6a…` both times —
   Rust Release builds are deterministic here).
-- **Across days**: base-tag drift (`alpine:3.22`, `node:24.20-alpine`
-  are floating minor tags) means digests differ; the SBOM
-  (`scripts/security/sbom.sh`) records the resolved base digest per
-  build — that is the audit trail, not the image digest.
+- **Across days**: the Dockerfile and compose base references are digest
+  pinned. The runtime stages deliberately run mutable `apk upgrade` for
+  security freshness, so a complete image is not byte-reproducible across
+  rebuilds; the SBOM (`scripts/security/sbom.sh`) records the dependency
+  inventory and `SHA256SUMS` records each exported artifact.
 
 Practical rule: treat the SBOM + `SHA256SUMS` of exported artifacts as
 the reproducibility record; expect image digests to match only for

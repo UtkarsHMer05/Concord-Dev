@@ -19,7 +19,7 @@ commands. All commands run from the repository root.
 | CMake | 4.2.1 (verification host) | minimum required: 3.24 |
 | Ninja | 1.13.2 | |
 | Emscripten | 6.0.9 | WASM build of the same core |
-| Python | 3.12.8 | codegen/scripting only |
+| Python | 3.12.8 (historical campaign toolchain) | codegen/scripting only; current verification records the host version separately |
 
 Language level: **C++20** (no C++23 feature is currently required). Build
 outputs live under `build/` (git-ignored): `build/native`, `build/sanitize`,
@@ -104,7 +104,7 @@ ctest --test-dir build/sanitize --output-on-failure
 ```
 
 ThreadSanitizer is part of the shipped gate (the Phase 6 release-gate
-matrix runs the full 64+51 suites under TSan via
+matrix runs the full 64+52 suites under TSan via
 `CONCORD_SANITIZE_THREAD=ON`); the native worker's single-threaded contract
 is documented and asserted there. Phase 6 campaigns (30/30 seeds) also ran
 under TSan clean.
@@ -399,7 +399,7 @@ binary (Release: `cmake -S cpp -B build/native -G Ninja
 | web: snapshot-resync (vitest unit) | client wrapper decode + validation matrix + resync orchestration (pending preserved, cursor last) | 51 |
 
 Native worker suites: `./build/native/crdt/tests/concord_crdt_tests`
-(54) and `./build/native/worker/tests/concord_worker_tests` (49+):
+(64) and `./build/native/worker/tests/concord_worker_tests` (52):
 reconstruct/export/import/digest-after equivalence at K∈{1,n/2,n−1},
 determinism (cross-build byte-identical), bounds, seeded generators,
 restore-diff convergence batteries, corruption matrices; ASan/UBSan/TSan
@@ -460,8 +460,10 @@ decode layers (5 targets; 250k smoke + 1M extended execs per target).
 ### Security tooling
 
 - `scripts/security/secret-scan.sh [--history|--json]`: 8-pattern scanner,
-  tree + full git history; values redacted; 16 justified allowlist entries.
+  tree + full git history; values redacted; 18 justified allowlist entries.
   Lead-verified clean (exit 0) on both modes; positive control 10/10.
+  `scripts/security/secret-scan-tests.sh` proves injected per-file scan
+  failures fail closed with exit 2.
 - `scripts/security/dep-scan.sh [--json]`: npm/cargo-audit/docker-scout
   aggregate. Production npm and Rust are clean; the full npm development
   tree and loopback-only compose image findings are reported and classified

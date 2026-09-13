@@ -88,4 +88,5 @@ Audits and machine-readable evidence live in [audits/](audits/)
 |---|---|
 | [audits/V1_HARDENING_BASELINE.md](audits/V1_HARDENING_BASELINE.md) | The toolchain and gate results captured at the start of the v1 hardening pass (2026-09-12) |
 | [audits/V1_HARDENING_FINDINGS.md](audits/V1_HARDENING_FINDINGS.md) | The hardening finding ledger: severity, evidence, fix, and regression-test status per finding |
+| [audits/V1_HARDENING_FINAL_REPORT.md](audits/V1_HARDENING_FINAL_REPORT.md) | The final 22-section remediation, reproducibility, browser, provenance, CI, release, and residual-risk report |
 | [audits/provenance-paths.tsv](audits/provenance-paths.tsv) | Machine-readable path inventory: baseline vs current git blob ids for every in-scope `src/`/`public/` path (regenerate via `python3 scripts/audit-provenance.py`) |

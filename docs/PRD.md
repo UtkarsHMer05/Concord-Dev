@@ -358,8 +358,8 @@ be implied by product UI, docs, or demo scripts.
    **SUPERSEDED (Phase 7, D16 wiring — now SHIPPED):** the document page
    wires the real SyncSession to the Rust gateway
    (`src/lib/sync/use-sync-session.ts` via `editor.tsx`); live
-   multi-user collaboration IS part of v1 (verified on the production
-   deployment: two sessions, same document, durable fanout; see
+   multi-user collaboration IS part of v1 (verified through the local/release
+   harness: two sessions, same document, durable fanout; see
    `tests/realtime/` and the Phase-7 checkpoints). The original v1
    boundary text is retained below for history: the sync stack
    (SyncSession + Rust gateway) was implemented and verified against
@@ -400,9 +400,10 @@ be implied by product UI, docs, or demo scripts.
    merge.
 3. **Single-gateway durability.** ACK_DURABLE means PostgreSQL-local,
    single-node commit (FAILURE_MODEL §1.1); multi-region/multi-broker
-   replication is a Phase 4 target, not a v1 claim.
+   replication remains a deferred multi-region/multi-broker deployment
+   target, not a v1 claim.
 4. **Browser support.** Modern evergreen browsers with WebAssembly
-   (bulk-memory), module Web Workers, IndexedDB, and WebSockets required —
+   (bulk-memory), classic blob Web Workers, IndexedDB, and WebSockets required —
    full matrix in [BROWSER_SUPPORT.md](BROWSER_SUPPORT.md).
 5. **Desktop-first responsive range.** The document page uses a fixed
    816px-page metaphor; below tablet widths the content area scrolls
@@ -417,7 +418,8 @@ be implied by product UI, docs, or demo scripts.
 - Image upload service + storage quota management.
 - Full offline PWA (installable, background sync when the gateway returns).
 - Share links with role pickers; per-document sharing panel UI.
-- Multi-gateway/region deployment with broker fanout (Phase 4 architecture).
+- Multi-region/HA deployment remains deferred; the local three-gateway fanout
+  topology is included in v1 and verified through the release harness.
 
 ## 26. Final acceptance criteria
 

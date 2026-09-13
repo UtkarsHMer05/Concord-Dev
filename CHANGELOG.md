@@ -163,7 +163,8 @@ decisions are recorded in [docs/ROADMAP.md](docs/ROADMAP.md) and
 
 ### Phase 6 — Proof phase (2026-09-09)
 
-- 32-row threat model fully mapped to executable tests
+- 32-row threat model fully mapped to controls, with executable tests or
+  explicitly planned extended-fuzz coverage recorded for every row
   ([docs/SECURITY.md](docs/SECURITY.md) §8) — no unmapped rows.
 - 27/27 deterministic chaos scenarios (gateway, NATS, Redis, PostgreSQL,
   worker, compound faults): **0 lost durable-ACKed operations,

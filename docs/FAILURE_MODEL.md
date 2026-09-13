@@ -1,6 +1,7 @@
-# Concord — Failure Model and Durability Contract (Phase 3)
+# Concord — Failure Model and Durability Contract (Phase 3 history + current v1)
 
-Status: Authoritative · CURRENT (Phase 3 single-gateway) · TARGET (Phase 4) noted inline
+Status: Authoritative · §1–§4 preserve the Phase 3 boundary history; §7 onward
+records the current v1 distributed/storage contract.
 
 This document defines what Concord's synchronization layer does under every
 failure it can suffer, and precisely what an acknowledgement means. It is the
@@ -120,16 +121,17 @@ Committed rows exist; the ACK frame was never sent.
   room registry holds NO durable truth (P3-M025): a restart rebuilds rooms
   from client joins + the PostgreSQL op log only.
 
-## 3. What the server does NOT do
+## 3. What the Phase 3 server did NOT do (historical boundary)
 - It does not reorder operations into a CRDT-conflict-correct order.
 - It does not assign arrival-time semantics to operations.
-- It does not garbage-collect or snapshot (Phase 5).
+- Phase 3 did not garbage-collect or snapshot; current v1 adds both in the
+  Phase 5 storage/recovery plane described below.
 - It never trusts a client-supplied role/user id.
 
-## 4. Phase 4 boundary (TARGET, not implemented)
-A future distributed gateway must keep this contract: broker fanout may add
-`broker_replicated` levels, but `ACK_DURABLE` as defined here remains the
-floor and never lies about the local commit.
+## 4. Phase 4 boundary (historical planning note)
+The Phase 4 design was initially a target; it is implemented in §7. Broker
+fanout adds transport freshness but never changes `ACK_DURABLE`: PostgreSQL
+local commit remains the durability floor and the broker is not an authority.
 ---
 
 ## 7. Phase 4 distributed failure contract (CURRENT as of Phase 4)

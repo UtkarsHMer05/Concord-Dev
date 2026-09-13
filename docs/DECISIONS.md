@@ -1145,9 +1145,10 @@ retained and will not be removed.
   (or an unlucky race) could amplify reads or silently degrade the
   history/durability contract.
 - **Consequences:** legitimate resync flows are unaffected (a handful of
-  fetches per session); `write`/`malformed` scopes remain
-  policy-defined but unenforced at the frame layer (documented target,
-  unchanged from Phase 4).
+  fetches per session); write and malformed budgets are enforced across the
+  connection, malformed-control, binary/client-op, validated-operation, and
+  fetch paths. Write is counted per validated operation and malformed per
+  rejected frame; exhaustion closes the session (HARD-RATE-001).
 - **Evidence:** `phase5_security.rs` (4 regression tests), realtime E2E
   resync test, retention/compaction/history suite extensions.
 
@@ -1300,8 +1301,8 @@ retained and will not be removed.
   runtime across providers while the web app must reach the gateway —
   a single-stack deploy keeps networking, secrets and TLS in one
   place); on-prem/self-hosted (no public endpoint possible).
-- **Honest constraints recorded:** the AWS account in use holds ROOT
-  credentials (flagged in the security milestone — deployment scripts
+- **Honest constraints recorded:** the historical AWS deployment exercise
+  used an account with ROOT credentials (flagged in the security milestone — deployment scripts
   use scoped temporary credentials where possible; IAM hardening
   recommended post-v1). No Route53 hosted zone exists, so v1 uses the
   stable provider-assigned endpoint (ALB DNS name + CNAME path

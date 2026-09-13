@@ -1,13 +1,15 @@
 # Concord — Benchmarks
 
-Status: Authoritative
-Version: 1.0 (Phase 2)
-Last updated: 2026-09-06
+Status: Authoritative (Phase 2 baselines plus later dated campaigns)
+Version: 1.1
+Last updated: 2026-09-13
 
 This document records Concord's measurement **methodology** and the
 reproducible baseline commands. Headline performance claims require
-BEFORE/AFTER evidence on designed workloads with repeated runs (DEC-011);
-none exist yet — the numbers below are engineering baselines, not claims.
+BEFORE/AFTER evidence on designed workloads with repeated runs (DEC-011).
+The Phase 2 section is baseline-only; the later Phase 6/7 sections preserve
+dated, environment-recorded campaigns. The final remediation pass adds no
+new comparable performance delta.
 
 ---
 
@@ -316,8 +318,9 @@ are under the private benchmark runs directory (`SA-PERF7-*` reports).
 | Compaction, 50k history | 50,000 rows / 2,632,096 B → 0 rows / 0 B; snapshot 2,646,504 B kept = **50.1%** | identical |
 
 Deterministic digests and payload byte counts are byte-identical to
-Phase 6 (empirical proof the recovery path is unchanged; `cpp/` has zero
-commits since 28b983b). Zero digest-verification failures.
+Phase 6 (empirical proof the recovery implementation used by this campaign
+is unchanged; other `cpp/` files have later commits). Zero digest-verification
+failures.
 
 ### Ingest optimization (P7-M040, 25-op durable-ack microbench, medians)
 

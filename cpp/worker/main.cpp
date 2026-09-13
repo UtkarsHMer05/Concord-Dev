@@ -60,37 +60,24 @@ namespace crdt = concord::crdt;
 //
 // Value: 0x53595343 ("SYSC" in ASCII, big-endian) = 1398362947.
 //
-// Collision analysis (why no client replica can ever hold this id):
-//   - The only production client id allocator is `replicaIdForDocument`
-//     (src/lib/crdt/editor-bridge.ts:45-71): 8 bytes from Web Crypto
-//     getRandomValues (or Math.random fallback), then `bytes[0] |= 1`.
-//     The result is a full-width u64. Its top byte (bits 56..63) is fully
-//     random, so a client id lies in [2^56·k, ...] with k random — in
-//     particular ids in the range of kMaintenanceReplica (< 2^31) occur
-//     only with probability 2^-24 per allocation (top 33 bits all zero).
-//     That is not a structural reservation, so the format adds one: see
-//     below.
-//   - Because a random 64-bit allocator cannot be *proven* disjoint from
-//     any fixed constant, this worker additionally enforces the invariant
-//     it actually needs: kMaintenanceReplica is never used to GENERATE
-//     operations (reconstruction is apply-only, never local_* calls), and
-//     incoming ops carrying kMaintenanceReplica as their writer id are
-//     rejected with status 3 (op apply error) before touching Doc state.
-//     Therefore no operation the worker produces (snapshots, digests) can
-//     ever contain a maintenance-owned OpId, and a collision with some
-//     hypothetical client id 1398362947 is harmless: such a client's ops
-//     are rejected, never merged.
-//   - All other replica-id issuers are deterministic test harnesses
-//     (small integers) and the gateway, which stores but never allocates
-//     replica ids (rust/sync-gateway envelope.rs — identity comes from
-//     validated op bytes only).
+// Collision analysis (why client identities are structurally separate):
+//   - The production browser allocator sets the MSB of its u64 identity
+//     (`src/lib/crdt/editor-bridge.ts`), placing new client IDs above the
+//     low maintenance namespace. Existing ordinary stored IDs remain
+//     backwards-compatible.
+//   - The gateway's validated client-ingress decoder rejects both reserved
+//     origins before persistence; this worker also rejects its SYSC writer
+//     identity before touching document state. The worker never authors
+//     client input operations with that identity.
+//   - Other replica-id issuers are deterministic test harnesses and the
+//     gateway, which stores but never allocates identities from op bytes.
 constexpr std::uint64_t kMaintenanceReplicaValue = 0x53595343ULL;  // "SYSC"
 constexpr crdt::ReplicaId kMaintenanceReplica{kMaintenanceReplicaValue};
 
 // ---------------------------------------------------------------------------
 // Reserved restore replica id (P5-M036, DEC-039).
 //
-// Value: 0x52455354 ("REST" in ASCII, big-endian) = 1380408148. Distinct from
+// Value: 0x52455354 ("REST" in ASCII, big-endian) = 1380275028. Distinct from
 // the maintenance replica (0x53595343) on purpose: restore-diff INSERT ops
 // generated here must survive this worker's own reserved-namespace rejection
 // (read_op_batches / apply_batches reject kMaintenanceReplica only), because
@@ -100,13 +87,10 @@ constexpr crdt::ReplicaId kMaintenanceReplica{kMaintenanceReplicaValue};
 // (rust/sync-gateway/src/maintenance/history.rs MAINTENANCE_RESTORE_REPLICA),
 // whose tests pin its distinctness from SYSC.
 //
-// Collision analysis (mirrors the SYSC note above): the only production client
-// id allocator is a full-width random u64 (src/lib/crdt/editor-bridge.ts), so
-// a client could draw 1380408148 with probability ~2^-33 per allocation. The
-// structural mitigation is the ws/gateway-side reserved-band rejection
-// recorded as a TODO in history.rs; from this worker's side the invariant is:
-// kRestoreReplica is never used to author CLIENT input ops (only diff ops
-// generated here), and the batch it emits carries solely this band's ids.
+// The browser allocator's MSB reservation keeps new client IDs above this
+// low maintenance namespace, while the gateway independently rejects
+// client operations authored with either reserved origin. Restore uses this
+// identity only for worker-generated forward diff batches.
 constexpr std::uint64_t kRestoreReplicaValue = 0x52455354ULL;  // "REST"
 constexpr crdt::ReplicaId kRestoreReplica{kRestoreReplicaValue};
 

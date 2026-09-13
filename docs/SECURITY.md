@@ -196,8 +196,7 @@ findings, zero HIGH/CRITICAL. All MEDIUMs are fixed and regression-pinned
   refuses to serve any snapshot whose base64 form would exceed the frame
   cap (`payload_too_large`, never a truncated/undeliverable frame).
 - LOW/INFO (documented in the audit): oversize-serve guard (now fixed via
-  SEC5-3), `write`/`malformed` scopes still unenforced at frame level
-  (documented target), lease-expiry re-queue class reset (fixed),
+  SEC5-3), lease-expiry re-queue class reset (fixed),
   `enqueue_unique` coalescing race (documented, tolerable), uniform
   not-found refusal for malformed snapshot ids (accepted — no existence
   oracle), `token_head` logging (JWT header prefix only, public by
@@ -316,7 +315,7 @@ ending in `PLANNED → P6-Mxxx` declare the gap and its owner milestone.
 | T7 | Protocol-state abuse (frames out of order, second join, ops before READY) | AT1/AT2 | Connection state machine rejects illegal transitions (PROTOCOL §9.13) | `ws_integration::state_machine_rejects_out_of_order_frames` |
 | T8 | Op replay/duplication (resent batches double-apply or double-ACK) | AT2 | SQL-layer idempotency on op identities; deterministic ACK | `ws_integration::duplicate_resend_yields_single_durable_row_and_deterministic_ack`; `tests/realtime/e2e.test.ts` "duplicate resend across the network boundary"; `broker_integration::replayed_event_is_idempotent_at_every_layer` |
 | T9 | Stale permissions — role downgraded/revoked while a session is live | AT3/AT4 | Write authorization rechecked per batch inside the ingest transaction (live downgrade denied) | `tests/realtime/e2e.test.ts` "live downgrade"; multi-gateway/revocation propagation matrix `phase6_revocation` (P6-M022, LIVE: revoke ACL row mid-stream, revoke across two live gateways, org-membership removal, live VIEWER→EDITOR upgrade, no stale-cache window) |
-| T10 | Resource exhaustion — connect storms, fetch spam, slow consumers, oversized snapshots | AT1/AT2 | Rate scopes (connect 240/min/peer, fetch 30/min/conn), bounded outbound queue + slow-consumer disconnect, `payload_too_large` serve refusal | `multi_gateway::reconnect_storm_is_contained_by_admission_control`, `::slow_consumer_does_not_stall_global_collaboration`; `ws_integration::adversarial_rapid_reconnects_are_contained`, `::slow_consumer_disconnected_not_blocking_writer`; `phase5_security::sec5_1_fetch_snapshot_spam_is_throttled`, `::sec5_1_fetch_scope_exists_and_limits`; residual: `write`/`malformed` scopes defined but unenforced at frame layer (§5) — documented target for Phase 6 edge work |
+| T10 | Resource exhaustion — connect storms, fetch spam, slow consumers, oversized snapshots | AT1/AT2 | Rate scopes (connect 240/min/peer, write 2000/min/conn, malformed 50/min/conn, fetch 30/min/conn), bounded outbound queue + slow-consumer disconnect, `payload_too_large` serve refusal | `multi_gateway::reconnect_storm_is_contained_by_admission_control`, `::slow_consumer_does_not_stall_global_collaboration`; `ws_integration::adversarial_rapid_reconnects_are_contained`, `::slow_consumer_disconnected_not_blocking_writer`, malformed/binary/validated-operation frame-limit coverage; `phase5_security::sec5_1_fetch_snapshot_spam_is_throttled`, `::sec5_1_fetch_scope_exists_and_limits`; `ratelimit::default_write_and_malformed_scopes_are_enforced` (HARD-RATE-001) |
 | T11 | Error/message/log leakage (SQL text, stack traces, token material in errors) | any | Safe error vocabulary; banned-substring sweep; token logging is header prefix only | `ws_integration::adversarial_error_messages_never_leak_internals`; `token_head` documented LOW/INFO in §7.6; log redaction verified across the P6 suites (`phase6_authz_matrix`, `phase6_revocation`, `phase6_internal_trust` assert error frames carry only the safe vocabulary — P6-M023 log-surface assertions, LIVE) |
 | T12 | Existence oracle via differentiated errors (found vs forbidden) | AT2 | Uniform `forbidden`/`unavailable`/not-found outcomes | `ws_integration::join_no_access_is_forbidden_without_leak`; `phase5_security::sec5_clean_cross_document_fetch_refused_uniformly`; uniform-refusal regression in IDOR matrix `phase6_authz_matrix::matrix_guessed_document_ids_indistinguishable`, `::matrix_fetch_snapshot_cross_tenant_and_guessed_ids` (P6-M021, LIVE); `tests/db/idor-matrix.test.ts` masked-NotFound cells |
 
@@ -427,7 +426,10 @@ wholesale file exclusion):
 
 Run it as `bash scripts/security/secret-scan.sh` (see `--help` for the
 history-bounded mode). PR CI runs the tree scan; the strict local verifier
-runs both tree and history modes.
+runs both tree and history modes. Finding failures exit 1; internal
+enumeration, `awk`, or `grep` failures exit 2, so an unavailable or broken
+scanner cannot report a false clean result. The fail-closed behavior has a
+regression harness in `scripts/security/secret-scan-tests.sh`.
 
 ### 9.2 Dependency / supply-chain scanning (P6-M025)
 
@@ -664,8 +666,8 @@ work (CSWSH defense); an absent Origin (non-browser clients) is allowed
 | 9090/3001 (Prometheus/Grafana) | loopback only + NOT in SG | compose `127.0.0.1:` binds; SSH-tunnel access (OPERATIONS.md) |
 
 No SSH ingress is created; SSM Session Manager is the access path.
-Grafana anonymous-Admin is bound to loopback (never exposed; if it ever
-is, auth MUST be enabled — see OPERATIONS.md tunnel note).
+Cloud Grafana requires real authenticated access; anonymous Admin is retained
+only by the loopback-bound local-development compose file (see OPERATIONS.md).
 
 ### 10.4 Rate limits for public internet (recommended values)
 
@@ -713,7 +715,7 @@ Public exposure currently needs:
   effective header is pinned by `tests/proxy-claim-policy.test.ts`
   and was live-verified (per-request nonce rotation + nonce-bearing
   script tags).
-  **Live production E2E (P7-M033) found the cost of the initial
+  **Historical production-shaped E2E (P7-M033) found the cost of the initial
   omission of `'wasm-unsafe-eval'`: WebKit gates
   `WebAssembly.instantiate` on script-src, so the CRDT worker's engine
   init died inside the Emscripten glue with ZERO error signal (a
@@ -759,9 +761,10 @@ public SSH), the env file is root-600, and the operators list is the
 deployment owners. Post-v1 hardening path (documented, not built):
 secrets as docker secrets files / SSM Agent APIs rather than env vars.
 
-### 10.7 Post-v1 IAM posture (ROOT-credential account — DEC-050 flag)
+### 10.7 Post-v1 IAM posture (historical ROOT-credential account — DEC-050 flag)
 
-The account currently deploys with ROOT credentials. Recommended
+The historical deployment exercise used an account with ROOT credentials;
+current account posture is not reverified. Recommended
 post-v1 hardening (account-level actions, owned by the deployment
 owner, NOT part of this repo):
 

@@ -13,7 +13,9 @@
 # never written to a log, and never embedded in the JSON output.
 #
 # Exit status: 0 = clean (only allowlisted/documented findings), 1 = at
-# least one non-allowlisted finding, 2 = usage error.
+# least one non-allowlisted finding, 2 = usage error or an internal scan
+# command failure. A scanner that cannot read a tracked file must fail
+# closed instead of reporting a clean tree.
 #
 # Usage:
 #   bash scripts/security/secret-scan.sh               # working tree
@@ -225,8 +227,22 @@ emit_tree_records() {
       package-lock.json|*.png|*.jpg|*.ico|*.der|*.wasm) continue ;;
     esac
     if grep -Iq . "$REPO_ROOT/$f" 2>/dev/null; then
-      awk -v file="$f" '{ printf "%s\037%d\037%s\037tree\n", file, NR, $0 }' \
-        "$REPO_ROOT/$f" 2>/dev/null || true
+      if awk -v file="$f" '{ printf "%s\037%d\037%s\037tree\n", file, NR, $0 }' \
+          "$REPO_ROOT/$f" 2>/dev/null; then
+        :
+      else
+        rc=$?
+        echo "secret-scan: failed to read tracked text file '$f' (awk exit $rc)" >&2
+        return 2
+      fi
+    else
+      rc=$?
+      # grep -I returns 1 for binary/empty input, which is an expected skip;
+      # every other status is an I/O or execution failure and must be fatal.
+      if [ "$rc" -gt 1 ]; then
+        echo "secret-scan: failed to classify tracked file '$f' (grep exit $rc)" >&2
+        return 2
+      fi
     fi
   done
 }

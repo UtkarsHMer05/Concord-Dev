@@ -15,6 +15,7 @@
 #   6. invalid tag name                                         -> FAIL (2)
 #   7. valid tag object that enumerates zero files              -> FAIL (2)
 #   8. scan checks a nonzero path count (anti-zero-path pin)    -> asserted
+#   9. internal git/hash-object failure                         -> FAIL (2)
 #
 # Each case runs the REAL scanner script against a synthetic throwaway git
 # repository (created per case under a temp dir) so the tests cannot be
@@ -29,6 +30,7 @@ set -uo pipefail
 
 REAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCANNER="$REAL_ROOT/scripts/security/provenance-check.sh"
+REAL_GIT="$(command -v git)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/concord-prov-tests.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -153,6 +155,25 @@ if git -C "$REAL_ROOT" rev-parse --verify --quiet "refs/tags/antonio-original-ba
 else
   printf '  SKIP  %-58s\n' "8 real repo scan (tag absent — push creates it)"
 fi
+
+# --- Case 9: scanner-internal git failure -> FAIL(2) ------------------------
+# The scanner must not turn a failed hash-object invocation into a clean
+# provenance result. The wrapper delegates every other git operation to the
+# real binary, preserving the production invocation shape.
+R="$WORK/case9"; make_repo "$R"
+mkdir -p "$R/bin"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'for arg in "$@"; do' \
+  '  [ "$arg" = "hash-object" ] && exit 73' \
+  'done' \
+  'exec "$PROVENANCE_TEST_REAL_GIT" "$@"' > "$R/bin/git"
+chmod +x "$R/bin/git"
+( cd "$R" && PATH="$R/bin:$PATH" PROVENANCE_TEST_REAL_GIT="$REAL_GIT" \
+    bash scripts/security/provenance-check.sh baseline-tag >"$WORK/case9.log" 2>&1 ); expect "9 internal git failure -> FAIL(2)" 2 $?
+grep -q "internal failure: git hash-object failed" "$WORK/case9.log" \
+  && { printf '  ok    %-58s\n' "9a actionable internal-failure message"; pass_n=$((pass_n+1)); } \
+  || { printf '  FAIL  %-58s\n' "9a actionable internal-failure message"; fail_n=$((fail_n+1)); }
 
 echo
 printf 'provenance-tests: %d passed, %d failed\n' "$pass_n" "$fail_n"
