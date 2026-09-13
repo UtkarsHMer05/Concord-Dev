@@ -210,7 +210,7 @@ jobs:
       # failure is prohibited (F8); the scan JSONs are kept as evidence
       # either way.
       - name: Vulnerability scan of web image (trivy)
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0 (pins setup-trivy v0.2.6)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 commit (pins setup-trivy v0.2.6)
         with:
           image-ref: concord-web:release
           format: json
@@ -218,7 +218,7 @@ jobs:
           exit-code: "0"
           severity: CRITICAL,HIGH
       - name: Vulnerability scan of gateway image (trivy)
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0 (pins setup-trivy v0.2.6)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 commit (pins setup-trivy v0.2.6)
         with:
           image-ref: concord-gateway:release
           format: json
