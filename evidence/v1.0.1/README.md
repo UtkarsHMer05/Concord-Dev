@@ -3,6 +3,9 @@
 Status: `CANDIDATE_PENDING` · not a release
 Captured: 2026-09-14 (Asia/Kolkata)
 Implementation candidate: `42dcb17dd26c11a05dd20109102f37ea3fb5135a`
+Final main baseline: `c65a85f622abc630fe2abbb5dac2e5124920b7bf`
+Report commit: `PENDING_DOCUMENTATION_COMMIT` (current report/evidence edits are in the working tree)
+Release commit: `NOT ASSIGNED` while required gates remain unresolved
 
 This directory contains fresh, candidate-bound local evidence for the
 implementation commit above. It does not contain credentials, does not create
@@ -37,12 +40,13 @@ The canonical interpretation is in:
   `browser gate` were removed from current CI at the owner's request. No
   `concord-e2e` Clerk values are required by the current workflow; no remote
   authenticated-browser result is claimed.
-- Current CI-policy commit `bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf` passed
-  phase6-pr-ci run `34808535778`, CodeQL, and the phase2/3/4/5/6 supporting
-  workflows. The public Chromium job was skipped on the protected-branch
-  push; no secret-backed browser jobs or `browser gate` ran. Nightly release
-  contexts, artifacts, checksums, attestations, and a GitHub Release remain
-  pending. Exact run `34807277532` on
+- Final-main commit `c65a85f622abc630fe2abbb5dac2e5124920b7bf` passed
+  phase6-pr-ci run `34808993438`, CodeQL `34808993485`, and the phase2/3/4/5/6
+  supporting workflows (`34808993498`, `34808993460`, `34808993501`,
+  `34808993502`, `34808993473`). The public Chromium job was skipped on the
+  protected-branch push; no secret-backed browser jobs or `browser gate` ran.
+  Nightly release contexts, artifacts, checksums, attestations, and a GitHub
+  Release remain pending. Exact run `34807277532` on
   `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` remains historical pre-removal
   evidence of the old empty-Clerk preflight.
 - GitHub Dependabot vulnerability alerts and automated security fixes were

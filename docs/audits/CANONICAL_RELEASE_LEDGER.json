@@ -7,7 +7,14 @@
   "freshEvidence": "docs/audits/CANONICAL_FRESH_EVIDENCE.md",
   "candidate": {
     "implementationCommit": "42dcb17dd26c11a05dd20109102f37ea3fb5135a",
+    "releaseCommit": null,
+    "releaseCommitStatus": "NOT_ASSIGNED_PENDING_REQUIRED_GATES",
     "canonicalEvidenceCommit": "d38541330909c063926eaa02c179ba6136004a43",
+    "currentEvidenceCommit": "WORKTREE_UNCOMMITTED_ON_c65a85f622abc630fe2abbb5dac2e5124920b7bf",
+    "reportCommit": null,
+    "reportCommitStatus": "PENDING_DOCUMENTATION_COMMIT",
+    "finalMain": "c65a85f622abc630fe2abbb5dac2e5124920b7bf",
+    "releaseTag": null,
     "sourceFenceBase": "8731dbe35c2ad03e8ed67ac21e04725574694aae",
     "sourceFenceChanges": [
       "Correct native benchmark random-delete denominator to the configured kRandomDeletes value.",
@@ -15,9 +22,9 @@
       "Make release image smoke and dependency-scan metadata derive identity from the exact exported source tree and refreshed image references."
     ],
     "branch": "main",
-    "remoteVerificationCommit": "bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf",
-    "worktreeAtCapture": "CLEAN_AT_d38541330909c063926eaa02c179ba6136004a43",
-    "reportCommitRelation": "Documentation-only descendant of implementationCommit; never substitute it for the executable candidate SHA."
+    "remoteVerificationCommit": "c65a85f622abc630fe2abbb5dac2e5124920b7bf",
+    "worktreeAtCapture": "DIRTY_DURING_REPORT_EDIT_ON_c65a85f622abc630fe2abbb5dac2e5124920b7bf",
+    "reportCommitRelation": "Documentation-only report/finalMain descendant of the implementation candidate; no accepted releaseCommit exists and reportCommit/finalMain must never be substituted for one."
   },
   "historicalCheckpoints": {
     "v1.0.0-hardened.10": {
@@ -42,9 +49,34 @@
     "PENDING_REMOTE": "Exact candidate remote workflow conclusion has not been observed.",
     "OWNER_ACTION": "An external account, credential, legal, provider, or approval action is required.",
     "PENDING_DOCUMENTATION_COMMIT": "Evidence is prepared but not yet bound to the documentation commit that records it.",
+    "PENDING_FRESH_EVIDENCE": "A current evidence run or release identity is still required.",
     "NOT_CLAIMED": "The corresponding current claim is intentionally withheld.",
     "HISTORICAL_ONLY": "Evidence belongs to a named earlier checkpoint and is not current proof.",
     "CLOSED": "The current acceptance evidence is complete and no blocker remains for that row."
+  },
+  "masterPrompt": {
+    "source": "/Users/utkarshkhajuria/Downloads/concord mp/CONCORD_ABSOLUTE_FINAL_ONE_SHOT_AGENT_PROMPT.md",
+    "readThroughLine": 1811,
+    "requiredReportSections": 24,
+    "reportStructureStatus": "PRESENT_IN_WORKTREE_PENDING_DOCUMENTATION_COMMIT",
+    "trustedClerkBrowserRequirement": "NOT_SATISFIED_BY_OWNER_SCOPE",
+    "trustedClerkBrowserDecision": "Secret-backed authenticated browser CI and browser gate were removed by explicit owner request; current CI is secretless for that lane and no equivalent PASS is claimed.",
+    "releasePublicationDependency": "CURRENT_WORKFLOW_DOES_NOT_INCLUDE_TRUSTED_CLERK_BROWSER_GATE",
+    "masterPromptFindingStateMapping": {
+      "CLOSED": "CLOSED",
+      "PASS_LOCAL": "CLOSED",
+      "PASS_REMOTE": "CLOSED",
+      "PASS_POLICY_WITH_RESIDUAL": "ACCEPTED RESIDUAL RISK",
+      "OWNER_ACTION": "OWNER ACTION",
+      "NOT_CLAIMED": "OWNER ACTION",
+      "PENDING_FRESH_EVIDENCE": "OPEN",
+      "PENDING_REMOTE": "OPEN",
+      "FAIL_RELEASE_BLOCKER": "OPEN"
+    },
+    "directOwnerOverridesRecorded": [
+      "Remove secret-backed Chromium/Firefox/WebKit CI jobs and the browser gate.",
+      "Do not require Clerk secrets in the current CI policy."
+    ]
   },
   "gates": {
     "web": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "typecheck, lint, unit 16 files/209 tests, coverage, DB 7 files/69 tests, realtime 3 files/21 tests, and Next production build passed"},
@@ -54,7 +86,7 @@
     "branchProtection": {"status": "CLOSED", "verifiedSha": null, "details": "GitHub API readback confirms strict main protection now requires only the web, Rust, WASM, security, native GCC/Clang, and CodeQL contexts; all browser contexts were removed and other protection settings were preserved"},
     "browserTrusted": {"status": "NOT_CLAIMED", "verifiedSha": null, "details": "Secret-backed authenticated Chromium/Firefox/WebKit jobs and browser gate were intentionally removed from current CI by owner request; no current remote authenticated-browser result is claimed"},
     "nativeClang": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Apple Clang Release CTest 3/3 and worker smoke passed"},
-    "nativeGcc": {"status": "PASS_REMOTE", "verifiedSha": "bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf", "details": "CI-policy descendant phase6-pr-ci run 34808535778 native (g++) job passed"},
+    "nativeGcc": {"status": "PASS_REMOTE", "verifiedSha": "c65a85f622abc630fe2abbb5dac2e5124920b7bf", "details": "Final-main phase6-pr-ci run 34808993438 native (g++) job passed"},
     "wasm": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "WASM smoke plus 5 files/31 CRDT tests passed"},
     "rust": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "fmt, clippy, and workspace tests: 258 passed, 1 ignored, 0 failed"},
     "sanitizers": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "ASan/UBSan CTest 3/3 and TSan CTest 3/3 passed locally; macOS leak detection disabled; remote nightly pending"},
@@ -68,7 +100,7 @@
     "findingsValidation": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Historical findings registry validates with unique IDs and no historical OPEN Critical/High"},
     "imagePins": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "19 immutable refs checked; 7 runtime inputs deferred by design"},
     "dependencyScan": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Production npm 0/0/0/0, full npm 0/0/4/0 Moderate, Cargo 0/0/0/0; containers 44 Critical/180 High/158 Moderate/20 Low; tool errors 0; no allowlist"},
-    "remoteCi": {"status": "PASS_REMOTE", "verifiedSha": "bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf", "details": "Current phase6-pr-ci run 34808535778 passed web/rust/wasm/security/native GCC/Clang with no authenticated browser jobs or browser gate scheduled; public Chromium was skipped on the protected-branch push. CodeQL 34808535842 and phase2/3/4/5/6 supporting runs passed; nightly sanitizer/fuzz/chaos conclusions remain pending"},
+    "remoteCi": {"status": "PASS_REMOTE", "verifiedSha": "c65a85f622abc630fe2abbb5dac2e5124920b7bf", "details": "Final-main phase6-pr-ci run 34808993438 passed web/rust/wasm/security/native GCC/Clang with no authenticated browser jobs or browser gate scheduled; public Chromium was skipped on the protected-branch push. CodeQL 34808993485 and phase2/3/4/5/6 supporting runs 34808993498, 34808993460, 34808993501, 34808993502, and 34808993473 passed; nightly sanitizer/fuzz/chaos conclusions remain pending"},
     "releaseArtifacts": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "No tag, manifest, checksum, attestation, registry push, or GitHub Release created while post-change remote, nightly, and dependency blockers remain"},
     "liveRuntime": {"status": "NOT_CLAIMED", "verifiedSha": null, "details": "No AWS, Vercel, Neon, URL, TLS, deployed-SHA, live Clerk, or persistent realtime verification"}
   },
@@ -80,7 +112,7 @@
       "status": "CLOSED",
       "blocking": false,
       "title": "Candidate evidence is being committed separately from the implementation candidate",
-      "observedTruth": "Implementation candidate is 42dcb17dd26c11a05dd20109102f37ea3fb5135a; the canonical documentation/evidence bundle was committed separately as d38541330909c063926eaa02c179ba6136004a43 and the implementation SHA remains the executable evidence identity.",
+      "observedTruth": "Implementation candidate is 42dcb17dd26c11a05dd20109102f37ea3fb5135a; the committed final-main baseline is c65a85f622abc630fe2abbb5dac2e5124920b7bf and the current documentation/evidence update is an uncommitted working-tree descendant. The implementation SHA remains the executable evidence identity.",
       "requiredAction": "Keep later remote-state updates as documentation descendants and do not substitute them for the implementation SHA.",
       "owner": "release-lead",
       "evidence": ["docs/audits/CANONICAL_FRESH_EVIDENCE.md", "docs/audits/CANONICAL_RELEASE_REPORT.md"]
@@ -103,8 +135,8 @@
       "status": "PENDING_DOCUMENTATION_COMMIT",
       "blocking": true,
       "title": "Historical evidence must remain checkpoint evidence",
-      "observedTruth": "Historical v1.0.0/hardened.10 reports and evidence are preserved and now linked as historical; final static claim scan and documentation commit are still pending.",
-      "requiredAction": "Keep historical files byte-preserved, retain named SHA/freshness labels, and complete the final claim/link scan.",
+      "observedTruth": "Historical v1.0.0/hardened.10 reports and evidence remain preserved and are explicitly labeled historical in the current 24-section working-tree report; the current claim/link scan is pending the documentation commit.",
+      "requiredAction": "Keep historical files byte-preserved and do not promote them to current release proof.",
       "owner": "release-lead",
       "evidence": ["evidence/v1.0.0/", "docs/audits/V1_HARDENING_FINAL_REPORT.md", "docs/audits/V1_HARDENING_FINDINGS.md"]
     },
@@ -155,6 +187,18 @@
       "owner": "release-lead"
     },
     {
+      "id": "AUDIT-MASTER-BROWSER-001",
+      "severity": "HIGH",
+      "category": "master_prompt_alignment",
+      "status": "NOT_CLAIMED",
+      "blocking": false,
+      "title": "Master-prompt trusted browser/release dependency is outside the current owner-approved CI scope",
+      "observedTruth": "The supplied master prompt requires real Clerk production-mode browser evidence and release publication gated on that result; the direct owner instruction removed the secret-backed jobs and browser gate, so the criterion is intentionally not satisfied or relabeled as green.",
+      "requiredAction": "Keep the exception visible. Only if the owner later requests full master-prompt compliance should the trusted lane be restored with owner-configured disposable credentials and rerun on one exact candidate SHA.",
+      "owner": "external-owner",
+      "evidence": ["docs/audits/CANONICAL_RELEASE_REPORT.md", "docs/audits/CANONICAL_RELEASE_LEDGER.json"]
+    },
+    {
       "id": "AUDIT-BRANCH-001",
       "severity": "HIGH",
       "category": "ci_remote",
@@ -172,7 +216,7 @@
       "status": "PASS_LOCAL",
       "blocking": false,
       "title": "Credential-free build matrix passes locally",
-      "observedTruth": "Web, Apple Clang native, WASM, Rust format/lint/test, and exact source-export image smoke passed on implementationCommit; CI-policy descendant run 34808535778 also passed Linux GCC and Clang jobs, while clean-room/nightly release conclusions remain pending.",
+      "observedTruth": "Web, Apple Clang native, WASM, Rust format/lint/test, and exact source-export image smoke passed on implementationCommit; final-main run 34808993438 also passed Linux GCC and Clang jobs, while clean-room/nightly release conclusions remain pending.",
       "requiredAction": "Observe the exact candidate clean-room and nightly release conclusions before release.",
       "owner": "release-lead"
     },
@@ -218,8 +262,8 @@
       "status": "PENDING_REMOTE",
       "blocking": true,
       "title": "Post-change exact-candidate core CI passed; nightly remains pending",
-      "observedTruth": "Current CI-policy commit bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf passed phase6-pr-ci run 34808535778 and the supporting CodeQL/phase workflows with the secret-backed browser matrix and browser gate removed; nightly release-required contexts remain pending.",
-      "requiredAction": "Observe the scheduled/manual nightly contexts by exact head SHA and Actions app, and resolve the independent strict container blocker.",
+      "observedTruth": "Final-main commit c65a85f622abc630fe2abbb5dac2e5124920b7bf passed phase6-pr-ci run 34808993438 and the supporting CodeQL/phase workflows with the secret-backed browser matrix and browser gate removed; nightly release-required contexts remain pending.",
+      "requiredAction": "Observe the scheduled/manual nightly contexts by exact head SHA and Actions app after resolving the independent strict container blocker.",
       "owner": "release-lead"
     },
     {
@@ -254,8 +298,8 @@
       "status": "PENDING_DOCUMENTATION_COMMIT",
       "blocking": true,
       "title": "Current documentation must finish the stale-claim scan",
-      "observedTruth": "Canonical current documents are being reconciled while historical artifacts are preserved; final static claim/link/whitespace validation is not yet recorded.",
-      "requiredAction": "Run the final scoped claim scan, diff check, JSON validation, and document the exact result in the committed report.",
+      "observedTruth": "Canonical current documents now contain the master-prompt 24-section report structure, final-main CI identity, explicit browser scope deviation, owner-action registry references, and objective scorecard in the working tree; the documentation commit is still pending.",
+      "requiredAction": "Commit the validated report/evidence update, then rerun the scoped claim/link/whitespace validation whenever the report or current evidence changes.",
       "owner": "release-lead"
     },
     {
@@ -293,9 +337,9 @@
     }
   ],
   "evidence": [
-    {"id": "EV-STATE-001", "category": "repository_state", "status": "CLOSED", "verifiedSha": "d38541330909c063926eaa02c179ba6136004a43", "artifact": "docs/audits/CANONICAL_RELEASE_REPORT.md"},
+    {"id": "EV-STATE-001", "category": "repository_state", "status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": null, "artifact": "docs/audits/CANONICAL_RELEASE_REPORT.md (working-tree update on finalMain c65a85f)"},
     {"id": "EV-TAGS-001", "category": "release_identity", "status": "PENDING_FRESH_EVIDENCE", "verifiedSha": null, "artifact": null},
-    {"id": "EV-HISTORY-001", "category": "historical_evidence", "status": "CLOSED", "verifiedSha": "d38541330909c063926eaa02c179ba6136004a43", "artifact": "evidence/v1.0.0/ and preserved historical audit files"},
+    {"id": "EV-HISTORY-001", "category": "historical_evidence", "status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": null, "artifact": "evidence/v1.0.0/ and preserved historical audit files (preservation check pending documentation commit)"},
     {"id": "EV-PROV-001", "category": "provenance_licensing", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/PROVENANCE.md; scripts/security/provenance-check.sh; scripts/security/provenance-tests.sh"},
     {"id": "EV-LICENSE-001", "category": "provenance_licensing", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "Path-specific legal/permission record not present"},
     {"id": "EV-WEB-001", "category": "toolchain_build", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
@@ -308,12 +352,12 @@
     {"id": "EV-BROWSER-001", "category": "browser_e2e", "status": "HISTORICAL_ONLY", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "artifact": "Historical pre-removal run 34807277532 trusted Chromium/Firefox/WebKit and browser gate failed closed at the empty Clerk pk_test_ preflight; those jobs are not in current CI and local dev-mode/public browser evidence remains documented"},
     {"id": "EV-BRANCH-001", "category": "ci_remote", "status": "CLOSED", "verifiedSha": null, "artifact": "GitHub API branch-protection readback"},
     {"id": "EV-CLERK-001", "category": "web_auth_clerk", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": "GitHub concord-e2e Environment is not required by current CI after removal of the secret-backed browser jobs"},
-    {"id": "EV-CI-001", "category": "ci_remote", "status": "PASS_REMOTE", "verifiedSha": "bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf", "artifact": "Current phase6-pr-ci run https://github.com/UtkarsHMer05/Concord-Dev/actions/runs/34808535778, CodeQL 34808535842, and supporting phase2/3/4/5/6 runs passed; nightly contexts remain pending"},
+    {"id": "EV-CI-001", "category": "ci_remote", "status": "PASS_REMOTE", "verifiedSha": "c65a85f622abc630fe2abbb5dac2e5124920b7bf", "artifact": "Final-main phase6-pr-ci run https://github.com/UtkarsHMer05/Concord-Dev/actions/runs/34808993438, CodeQL 34808993485, and supporting phase2/3/4/5/6 runs 34808993498, 34808993460, 34808993501, 34808993502, and 34808993473 passed; nightly contexts remain pending"},
     {"id": "EV-SUPPLY-001", "category": "security_supply_chain", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/container-scan.json"},
     {"id": "EV-BENCH-001", "category": "benchmark_performance", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/native-benchmark.txt"},
     {"id": "EV-CHAOS-001", "category": "reliability", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/chaos-summary.json"},
     {"id": "EV-CLOUD-001", "category": "cloud_infrastructure", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": null},
-    {"id": "EV-DOC-001", "category": "documentation_claims", "status": "CLOSED", "verifiedSha": "d38541330909c063926eaa02c179ba6136004a43", "artifact": "git diff --check, JSON validation, historical-artifact diff, and full-history secret scan passed before the canonical evidence commit"},
+    {"id": "EV-DOC-001", "category": "documentation_claims", "status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": null, "artifact": "Current report structure/claim audit, git diff --check, JSON validation, historical-artifact preservation, and full-history secret scan are prepared in the working tree; reportCommit pending"},
     {"id": "EV-DEPENDABOT-001", "category": "security_supply_chain", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "GitHub API account-level settings readback"},
     {"id": "EV-PROD-001", "category": "production_runtime", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": null}
   ],
@@ -331,8 +375,16 @@
       "category": "ci_remote",
       "owner": "release-lead",
       "status": "FAIL_RELEASE_BLOCKER",
-      "action": "Resolve the strict container blocker, then observe the current exact candidate non-browser and required nightly/release contexts while retaining run 34807277532 as historical pre-removal evidence.",
+      "action": "Resolve the strict container blocker, then observe the required nightly/release contexts on one exact candidate SHA; final-main core checks already passed in run 34808993438 while retaining run 34807277532 as historical pre-removal evidence.",
       "acceptance": "All current release-required check names conclude success for one exact candidate SHA, including CodeQL, fuzz, sanitizer, and chaos."
+    },
+    {
+      "id": "OA-BROWSER-MASTER-001",
+      "category": "master_prompt_alignment",
+      "owner": "external-owner",
+      "status": "NOT_CLAIMED",
+      "action": "Do not restore the trusted Clerk browser lane under the current instruction. If full master-prompt compliance is later requested, configure the disposable Clerk Environment outside chat, restore the trusted production-mode lane, and rerun release gating on one exact SHA.",
+      "acceptance": "Either the current owner-approved exception remains documented, or a later exact-SHA trusted browser/release result is produced without exposing credentials."
     },
     {
       "id": "OA-DEPENDABOT-001",
@@ -377,6 +429,8 @@
     "releaseRequiresExactCandidateRemoteChecks": true,
     "releaseRequiresTrustedClerkBrowser": false,
     "trustedClerkBrowserCi": "REMOVED_BY_OWNER_REQUEST",
+    "masterPromptTrustedClerkBrowserRequirement": "NOT_SATISFIED_BY_OWNER_SCOPE",
+    "masterPromptReportStructure": "24_SECTIONS_PRESENT",
     "releaseRequiresStrictContainerSecurity": true,
     "documentationOnlyDescendantDoesNotChangeImplementationIdentity": true
   }

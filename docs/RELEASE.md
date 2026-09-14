@@ -4,19 +4,27 @@ Status: `CANDIDATE_PENDING` · not release-ready
 Last updated: 2026-09-14
 Candidate version: `1.0.1`
 Implementation candidate: `42dcb17dd26c11a05dd20109102f37ea3fb5135a`
+Final main baseline: `c65a85f622abc630fe2abbb5dac2e5124920b7bf`
+Report commit: `PENDING_DOCUMENTATION_COMMIT` (current report/evidence edits are in the working tree)
+Release commit: `NOT ASSIGNED` while required gates remain unresolved
 Canonical report: [`docs/audits/CANONICAL_RELEASE_REPORT.md`](audits/CANONICAL_RELEASE_REPORT.md)
 Machine-readable ledger: [`docs/audits/CANONICAL_RELEASE_LEDGER.json`](audits/CANONICAL_RELEASE_LEDGER.json)
 Fresh local evidence: [`docs/audits/CANONICAL_FRESH_EVIDENCE.md`](audits/CANONICAL_FRESH_EVIDENCE.md)
 Candidate evidence bundle: [`evidence/v1.0.1/`](../evidence/v1.0.1/)
 
-This document is the release-state boundary. The current implementation
+This document is the release-state boundary. It is reconciled against the
+supplied master prompt at
+`/Users/utkarshkhajuria/Downloads/concord mp/CONCORD_ABSOLUTE_FINAL_ONE_SHOT_AGENT_PROMPT.md`.
+The current implementation
 candidate has passed the credential-free local gates that were run, but the
 campaign has not produced a canonical release. The strict container scan is
 red (`44 Critical / 180 High`, no broad allowlist), and the independent
 nightly/release checks and external provenance/account actions remain open.
 The secret-backed authenticated browser jobs were removed from CI by explicit
 owner request; the earlier failed browser run is historical and is not a
-current release gate.
+current release gate. This is a deliberate scope deviation from the master
+prompt's trusted-Clerk-browser and browser-gated-publication criteria, and the
+current report does not count it as a pass.
 
 No credential, tag, GitHub Release, registry push, AWS deployment, Vercel
 deployment, URL reachability, live Clerk session, or persistent realtime
@@ -27,6 +35,8 @@ runtime is claimed.
 | Name | Value | Meaning |
 |---|---|---|
 | Implementation candidate | `42dcb17dd26c11a05dd20109102f37ea3fb5135a` | Exact code/configuration SHA used by the fresh local evidence |
+| Report commit / final main | `c65a85f622abc630fe2abbb5dac2e5124920b7bf` | Documentation-only descendant with final post-change CI readback |
+| Release commit | `NOT ASSIGNED` | No exact candidate is accepted for release while required gates remain unresolved |
 | Version | `1.0.1` | Synchronized package, Rust, CMake, and SBOM metadata |
 | Branch | `main` | Local branch used by this campaign |
 | Canonical tag | None | No tag was created or moved |
@@ -77,9 +87,10 @@ The complete command/result table is in
   `0/0`, Prometheus `11/38`, and Grafana `22/81` Critical/High findings at
   exact digest-pinned refs. These are unaccepted until fixed or resolved by
   exact advisory-level evidence. See [`docs/SECURITY.md`](SECURITY.md) §9.2.
-- Exact remote CI/nightly results: current CI-policy commit
-  `bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf` passed phase6-pr-ci run
-  `34808535778`, CodeQL, and the phase2/3/4/5/6 supporting workflows. The
+- Exact remote CI/nightly results: final-main commit
+  `c65a85f622abc630fe2abbb5dac2e5124920b7bf` passed phase6-pr-ci run
+  `34808993438`, CodeQL `34808993485`, and the phase2/3/4/5/6 supporting workflows
+  (`34808993498`, `34808993460`, `34808993501`, `34808993502`, `34808993473`). The
   public Chromium job was skipped on the protected-branch push; no
   secret-backed browser jobs or `browser gate` ran. Nightly release contexts
   remain pending. Run `34807277532` is retained only as historical
@@ -143,7 +154,9 @@ Only after all required gates are green may the release lead:
 1. freeze the exact `releaseCommit` and verify synchronized version metadata;
 2. verify every required GitHub check-run on that SHA;
 3. confirm the configured non-browser CI/reliability checks and release-image
-   security policy; no authenticated remote-browser success is implied;
+   security policy; no authenticated remote-browser success is implied. This
+   intentionally differs from the supplied master prompt's trusted-browser
+   dependency because the owner explicitly removed that CI lane;
 4. generate artifacts, SBOMs, a manifest, and `SHA256SUMS` from that exact
    commit/tag;
 5. independently verify artifact hashes and any supported attestation;

@@ -3,6 +3,9 @@
 Status: `CANDIDATE_PENDING` · not a release verdict
 Run date: 2026-09-14 (Asia/Kolkata)
 Implementation candidate: `42dcb17dd26c11a05dd20109102f37ea3fb5135a`
+Final main baseline: `c65a85f622abc630fe2abbb5dac2e5124920b7bf`
+Report commit: `PENDING_DOCUMENTATION_COMMIT` (current report/evidence edits are in the working tree)
+Release commit: `NOT ASSIGNED` while required gates remain unresolved
 
 This is the candidate-bound local evidence record for the Concord remediation
 implementation. It is deliberately separate from the preserved
@@ -27,8 +30,9 @@ between the preceding candidate `8731dbe` and this SHA are:
 The canonical documents and `evidence/v1.0.1/` files are documentation-only
 descendants created after the candidate-bound runs. They do not change the
 implementation under test. The initial canonical evidence bundle is committed
-at `d38541330909c063926eaa02c179ba6136004a43`; later remote-state updates, if any, remain descendants and must
-not replace the implementation SHA.
+at `d38541330909c063926eaa02c179ba6136004a43`; the current report/evidence
+descendant is currently an uncommitted working-tree update on `c65a85f`. Neither
+replaces the implementation SHA or creates a release identity.
 
 ## Fresh local gates
 
@@ -83,15 +87,17 @@ accepted and prevent a canonical release.
    deleted. The GitHub `concord-e2e` Environment is therefore no longer a CI
    prerequisite. The public secretless Chromium smoke and the local
    explicitly provisioned browser matrix remain available; no current remote
-   authenticated-browser result is claimed.
-2. **Remote exact-SHA CI — current non-browser gates passed.** CI-policy
-   commit `bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf` was observed in
-   phase6-pr-ci run `34808535778`: web, Rust, WASM, security, and native
+   authenticated-browser result is claimed. This is an explicit deviation
+   from the supplied master prompt's trusted-browser and release-publication
+   criteria, not an implied pass for those criteria.
+2. **Remote exact-SHA CI — current non-browser gates passed.** Final-main
+   commit `c65a85f622abc630fe2abbb5dac2e5124920b7bf` was observed in
+   phase6-pr-ci run `34808993438`: web, Rust, WASM, security, and native
    GCC/Clang passed; the public Chromium job was correctly skipped on a
    protected-branch push, and no authenticated browser jobs or `browser gate`
-   were scheduled. CodeQL run `34808535842` and phase2/3/4/5/6 supporting
-   runs `34808535762`, `34808535818`, `34808535768`, `34808535874`, and
-   `34808535834` also passed. The earlier run `34807277532` on
+   were scheduled. CodeQL run `34808993485` and phase2/3/4/5/6 supporting
+   runs `34808993498`, `34808993460`, `34808993501`, `34808993502`, and
+   `34808993473` also passed. The earlier run `34807277532` on
    `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` remains historical pre-removal
    evidence. Nightly `native-sanitizers`, `native-fuzz`, `rust-fuzz`, and
    `chaos` conclusions remain pending because those workflows are scheduled or
