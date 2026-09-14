@@ -77,12 +77,13 @@ The complete command/result table is in
   `0/0`, Prometheus `11/38`, and Grafana `22/81` Critical/High findings at
   exact digest-pinned refs. These are unaccepted until fixed or resolved by
   exact advisory-level evidence. See [`docs/SECURITY.md`](SECURITY.md) §9.2.
-- Exact remote CI/nightly results: push run `34807277532` on
-  `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` is historical pre-removal
-  evidence. Its non-browser core jobs passed; the then-existing trusted
-  browser jobs failed closed because the dedicated Clerk Environment was
-  empty. A post-change CI run is required for the current non-browser check
-  set, and nightly release contexts remain pending.
+- Exact remote CI/nightly results: current CI-policy commit
+  `bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf` passed phase6-pr-ci run
+  `34808535778`, CodeQL, and the phase2/3/4/5/6 supporting workflows. The
+  public Chromium job was skipped on the protected-branch push; no
+  secret-backed browser jobs or `browser gate` ran. Nightly release contexts
+  remain pending. Run `34807277532` is retained only as historical
+  pre-removal evidence.
 - Release identity: no tag, manifest, checksum set, attestation, or GitHub
   Release may be created while required gates are unresolved.
 - Dependabot vulnerability-alert and automated-fix account settings: the GitHub

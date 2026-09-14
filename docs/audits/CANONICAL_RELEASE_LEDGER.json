@@ -15,7 +15,7 @@
       "Make release image smoke and dependency-scan metadata derive identity from the exact exported source tree and refreshed image references."
     ],
     "branch": "main",
-    "remoteVerificationCommit": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a",
+    "remoteVerificationCommit": "bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf",
     "worktreeAtCapture": "CLEAN_AT_d38541330909c063926eaa02c179ba6136004a43",
     "reportCommitRelation": "Documentation-only descendant of implementationCommit; never substitute it for the executable candidate SHA."
   },
@@ -54,7 +54,7 @@
     "branchProtection": {"status": "CLOSED", "verifiedSha": null, "details": "GitHub API readback confirms strict main protection now requires only the web, Rust, WASM, security, native GCC/Clang, and CodeQL contexts; all browser contexts were removed and other protection settings were preserved"},
     "browserTrusted": {"status": "NOT_CLAIMED", "verifiedSha": null, "details": "Secret-backed authenticated Chromium/Firefox/WebKit jobs and browser gate were intentionally removed from current CI by owner request; no current remote authenticated-browser result is claimed"},
     "nativeClang": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Apple Clang Release CTest 3/3 and worker smoke passed"},
-    "nativeGcc": {"status": "PASS_REMOTE", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "details": "Exact candidate phase6-pr-ci run 34807277532 native (g++) job passed"},
+    "nativeGcc": {"status": "PASS_REMOTE", "verifiedSha": "bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf", "details": "CI-policy descendant phase6-pr-ci run 34808535778 native (g++) job passed"},
     "wasm": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "WASM smoke plus 5 files/31 CRDT tests passed"},
     "rust": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "fmt, clippy, and workspace tests: 258 passed, 1 ignored, 0 failed"},
     "sanitizers": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "ASan/UBSan CTest 3/3 and TSan CTest 3/3 passed locally; macOS leak detection disabled; remote nightly pending"},
@@ -68,7 +68,7 @@
     "findingsValidation": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Historical findings registry validates with unique IDs and no historical OPEN Critical/High"},
     "imagePins": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "19 immutable refs checked; 7 runtime inputs deferred by design"},
     "dependencyScan": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Production npm 0/0/0/0, full npm 0/0/4/0 Moderate, Cargo 0/0/0/0; containers 44 Critical/180 High/158 Moderate/20 Low; tool errors 0; no allowlist"},
-    "remoteCi": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "The current workflow no longer includes secret-backed browser jobs or browser gate. Prior run 34807277532 is historical pre-removal evidence: web/rust/wasm/security/native GCC/Clang passed while the then-existing trusted browser jobs failed at the empty Clerk preflight; post-change exact-SHA and nightly sanitizer/fuzz/chaos conclusions remain pending"},
+    "remoteCi": {"status": "PASS_REMOTE", "verifiedSha": "bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf", "details": "Current phase6-pr-ci run 34808535778 passed web/rust/wasm/security/native GCC/Clang with no authenticated browser jobs or browser gate scheduled; public Chromium was skipped on the protected-branch push. CodeQL 34808535842 and phase2/3/4/5/6 supporting runs passed; nightly sanitizer/fuzz/chaos conclusions remain pending"},
     "releaseArtifacts": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "No tag, manifest, checksum, attestation, registry push, or GitHub Release created while post-change remote, nightly, and dependency blockers remain"},
     "liveRuntime": {"status": "NOT_CLAIMED", "verifiedSha": null, "details": "No AWS, Vercel, Neon, URL, TLS, deployed-SHA, live Clerk, or persistent realtime verification"}
   },
@@ -172,7 +172,7 @@
       "status": "PASS_LOCAL",
       "blocking": false,
       "title": "Credential-free build matrix passes locally",
-      "observedTruth": "Web, Apple Clang native, WASM, Rust format/lint/test, and exact source-export image smoke passed on implementationCommit; exact push run 34807277532 also passed Linux GCC and Clang jobs, while clean-room/nightly release conclusions remain pending.",
+      "observedTruth": "Web, Apple Clang native, WASM, Rust format/lint/test, and exact source-export image smoke passed on implementationCommit; CI-policy descendant run 34808535778 also passed Linux GCC and Clang jobs, while clean-room/nightly release conclusions remain pending.",
       "requiredAction": "Observe the exact candidate clean-room and nightly release conclusions before release.",
       "owner": "release-lead"
     },
@@ -217,9 +217,9 @@
       "category": "ci_remote",
       "status": "PENDING_REMOTE",
       "blocking": true,
-      "title": "Post-change exact-candidate remote CI is pending",
-      "observedTruth": "The current workflow removes the secret-backed browser matrix and browser gate. Prior exact run 34807277532 on 110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a is retained as historical pre-removal evidence; the post-change non-browser check conclusions and nightly release-required contexts remain pending.",
-      "requiredAction": "Observe the current required check names by exact head SHA and Actions app, and resolve the independent strict container blocker.",
+      "title": "Post-change exact-candidate core CI passed; nightly remains pending",
+      "observedTruth": "Current CI-policy commit bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf passed phase6-pr-ci run 34808535778 and the supporting CodeQL/phase workflows with the secret-backed browser matrix and browser gate removed; nightly release-required contexts remain pending.",
+      "requiredAction": "Observe the scheduled/manual nightly contexts by exact head SHA and Actions app, and resolve the independent strict container blocker.",
       "owner": "release-lead"
     },
     {
@@ -308,7 +308,7 @@
     {"id": "EV-BROWSER-001", "category": "browser_e2e", "status": "HISTORICAL_ONLY", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "artifact": "Historical pre-removal run 34807277532 trusted Chromium/Firefox/WebKit and browser gate failed closed at the empty Clerk pk_test_ preflight; those jobs are not in current CI and local dev-mode/public browser evidence remains documented"},
     {"id": "EV-BRANCH-001", "category": "ci_remote", "status": "CLOSED", "verifiedSha": null, "artifact": "GitHub API branch-protection readback"},
     {"id": "EV-CLERK-001", "category": "web_auth_clerk", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": "GitHub concord-e2e Environment is not required by current CI after removal of the secret-backed browser jobs"},
-    {"id": "EV-CI-001", "category": "ci_remote", "status": "PENDING_REMOTE", "verifiedSha": null, "artifact": "Current post-removal exact-SHA run pending; historical pre-removal run https://github.com/UtkarsHMer05/Concord-Dev/actions/runs/34807277532 and CodeQL run 34807277478 remain recorded"},
+    {"id": "EV-CI-001", "category": "ci_remote", "status": "PASS_REMOTE", "verifiedSha": "bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf", "artifact": "Current phase6-pr-ci run https://github.com/UtkarsHMer05/Concord-Dev/actions/runs/34808535778, CodeQL 34808535842, and supporting phase2/3/4/5/6 runs passed; nightly contexts remain pending"},
     {"id": "EV-SUPPLY-001", "category": "security_supply_chain", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/container-scan.json"},
     {"id": "EV-BENCH-001", "category": "benchmark_performance", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/native-benchmark.txt"},
     {"id": "EV-CHAOS-001", "category": "reliability", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/chaos-summary.json"},

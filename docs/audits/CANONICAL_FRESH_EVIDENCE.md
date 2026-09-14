@@ -84,15 +84,18 @@ accepted and prevent a canonical release.
    prerequisite. The public secretless Chromium smoke and the local
    explicitly provisioned browser matrix remain available; no current remote
    authenticated-browser result is claimed.
-2. **Remote exact-SHA CI — pending after the CI-policy change.** The earlier
-   candidate run `34807277532` on `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a`
-   is retained as historical pre-removal evidence: web, Rust, WASM, security,
-   and native GCC/Clang passed, while the then-existing trusted browser jobs
-   failed closed at the empty Clerk preflight. A new workflow commit must
-   produce the current non-browser check conclusions; CodeQL and the
-   phase2/3/4/5/6 supporting runs remain separate evidence. Nightly
-   `native-sanitizers`, `native-fuzz`, `rust-fuzz`, and `chaos` conclusions
-   remain pending.
+2. **Remote exact-SHA CI — current non-browser gates passed.** CI-policy
+   commit `bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf` was observed in
+   phase6-pr-ci run `34808535778`: web, Rust, WASM, security, and native
+   GCC/Clang passed; the public Chromium job was correctly skipped on a
+   protected-branch push, and no authenticated browser jobs or `browser gate`
+   were scheduled. CodeQL run `34808535842` and phase2/3/4/5/6 supporting
+   runs `34808535762`, `34808535818`, `34808535768`, `34808535874`, and
+   `34808535834` also passed. The earlier run `34807277532` on
+   `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` remains historical pre-removal
+   evidence. Nightly `native-sanitizers`, `native-fuzz`, `rust-fuzz`, and
+   `chaos` conclusions remain pending because those workflows are scheduled or
+   manually dispatched rather than part of this push.
 3. **Release identity/artifacts — pending.** No `v1.0.1` tag, release manifest,
    checksum set, artifact attestation, registry push, or GitHub Release exists.
    These cannot be produced honestly while required gates remain unresolved.

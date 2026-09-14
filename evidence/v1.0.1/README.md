@@ -37,12 +37,14 @@ The canonical interpretation is in:
   `browser gate` were removed from current CI at the owner's request. No
   `concord-e2e` Clerk values are required by the current workflow; no remote
   authenticated-browser result is claimed.
-- Exact-candidate push run `34807277532` observed SHA
-  `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` is retained as historical
-  pre-removal evidence: core web/Rust/WASM/security and native jobs passed,
-  while the then-existing trusted browser jobs failed closed at the empty
-  Clerk `pk_test_` preflight. A post-change CI run, nightly release contexts,
-  artifacts, checksums, attestations, and a GitHub Release remain pending.
+- Current CI-policy commit `bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf` passed
+  phase6-pr-ci run `34808535778`, CodeQL, and the phase2/3/4/5/6 supporting
+  workflows. The public Chromium job was skipped on the protected-branch
+  push; no secret-backed browser jobs or `browser gate` ran. Nightly release
+  contexts, artifacts, checksums, attestations, and a GitHub Release remain
+  pending. Exact run `34807277532` on
+  `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` remains historical pre-removal
+  evidence of the old empty-Clerk preflight.
 - GitHub Dependabot vulnerability alerts and automated security fixes were
   observed disabled/unverified at account level; checked-in configuration is
   not a substitute for that setting.

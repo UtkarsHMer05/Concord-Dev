@@ -22,12 +22,16 @@
 
 The work is complete up to the real blockers that cannot be bypassed safely.
 The strict local dependency scan is red with `44 Critical / 180 High` image
-findings and no broad allowlist. The exact remote candidate run
-`34807277532` is historical evidence from before the authenticated browser
-jobs were removed; its core non-browser checks passed and its then-existing
-trusted browser preflight failed closed because the GitHub `concord-e2e`
-Environment was empty. The remaining nightly/release checks, artifacts, and
-account/legal decisions therefore cannot be certified as green.
+findings and no broad allowlist. Current CI-policy commit
+`bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf` passed phase6-pr-ci run
+`34808535778` and the supporting CodeQL/phase workflows with the current
+non-browser check set. The public Chromium job was skipped on the protected
+branch push, and no authenticated browser jobs or `browser gate` were
+scheduled. The remaining nightly/release checks, artifacts, and account/legal
+decisions therefore cannot be certified as green. The earlier run
+`34807277532` is retained as historical evidence from before the browser jobs
+were removed; its then-existing trusted browser preflight failed closed
+because the GitHub `concord-e2e` Environment was empty.
 
 ## 2. Identity
 
@@ -41,7 +45,7 @@ account/legal decisions therefore cannot be certified as green.
 | Report/evidence relation | This report and `evidence/v1.0.1/` are documentation-only descendants of `releaseCommit`; the report commit must not be confused with the executable candidate SHA |
 | Initial canonical evidence commit | `d38541330909c063926eaa02c179ba6136004a43` (documentation-only descendant; not used as the implementation SHA) |
 | Branch | `main` |
-| Remote verification snapshot | `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` (exact ref verified by run `34807277532`; later documentation descendants do not change the implementation) |
+| Remote verification snapshot | `bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf` (CI-policy descendant verified by run `34808535778`; the executable implementation candidate remains `42dcb17`) |
 | Audit date | 2026-09-14 (Asia/Kolkata) |
 
 Preserved historical references:
@@ -76,7 +80,7 @@ outputs or remote check conclusions.
 | Secret-backed browser jobs failed before Clerk authentication | GitHub `concord-e2e` had no dedicated publishable key, secret key, or audience variable | Removed the authenticated Chromium/Firefox/WebKit matrix and aggregate `browser gate`; retained the public secretless Chromium smoke and local harness | `CLOSED` as a current CI blocker; no remote authenticated-browser claim |
 | Browser CI was unsafe for public fork PRs | Secret-backed jobs were treated as universally required | Current CI exposes only `browser (public chromium)` to untrusted fork pull requests; no job receives Clerk secrets | `CLOSED` by workflow review |
 | Main branch protection required browser contexts that no longer exist | Protection previously required split trusted browser names and `browser gate` | Removed all browser contexts from protected `main`, preserving strict protection and existing non-status settings | `CLOSED` by GitHub API readback on 2026-09-14 |
-| Release workflow could rely on a different SHA | Artifact workflow lacked strict exact-check-run identity | Release workflow now validates normal SemVer, event SHA, check-run name/head SHA/Actions app, non-browser reliability gates, CodeQL, and core gates | `PASS_LOCAL` static review; post-change exact run pending |
+| Release workflow could rely on a different SHA | Artifact workflow lacked strict exact-check-run identity | Release workflow now validates normal SemVer, event SHA, check-run name/head SHA/Actions app, non-browser reliability gates, CodeQL, and core gates | `PASS_LOCAL` static review; current push checks passed, nightly contexts pending |
 | Web/gateway trust-boundary drift | Origin, CSP, Clerk party, TLS mode, and internal-service assumptions were not all exact | Added shared security configuration, per-request CSP nonce, HTTPS-only HSTS, exact `authorizedParties`, fail-closed TLS and internal-service requirements | Local tests/build pass; live/cloud auth remains unverified |
 | Native parity/sanitizer/fuzz evidence was incomplete or weakly bound | Sanitizer exclusivity, timeout, signed-byte, and campaign issues | Hardened CMake/worker/fuzz paths and reran Release, ASan/UBSan, TSan, property, and bounded fuzz campaigns | Fresh local pass; remote nightly still required |
 | Dev-container CVE inventory was high | Old pinned NATS/nginx/Grafana refs and no strict current inventory | Refreshed NATS, nginx, Grafana pins; retained exact Postgres/Redis/Prometheus refs after comparison; removed broad allowlist behavior | `FAIL_RELEASE_BLOCKER`; exact counts in §15 |
@@ -162,8 +166,8 @@ deployment claim.
 |---|---|
 | Apple Clang Release / CTest | `PASS_LOCAL` · `bash scripts/verify-native.sh Release`; CTest 3/3 |
 | Native worker identity/smoke | `PASS_LOCAL` · version `1.0.1 (42dcb17)` and exact image smoke worker probe |
-| Linux GCC Release | `PASS_REMOTE` · exact candidate phase6-pr-ci run `34807277532` |
-| Linux Clang Release | `PASS_REMOTE` · exact candidate phase6-pr-ci run `34807277532` |
+| Linux GCC Release | `PASS_REMOTE` · CI-policy descendant phase6-pr-ci run `34808535778` |
+| Linux Clang Release | `PASS_REMOTE` · CI-policy descendant phase6-pr-ci run `34808535778` |
 | Gitless source export | `PASS_LOCAL` for the exact export used by image smoke; a separate clean-clone release gate remains remote/pending |
 | WASM build/smoke/parity | `PASS_LOCAL` · WASM smoke plus 5 files / 31 CRDT tests |
 | Warnings-as-errors | `PASS_LOCAL` in the native verification script; CI also configures it explicitly |
@@ -293,25 +297,26 @@ implementation candidate and passed gateway, web, and worker probes with
 non-root IDs. This proves the source-export path used by that smoke helper.
 
 A separately cloned, fully clean working tree with all required release gates
-is not certified by the push workflows alone: the historical candidate run
-completed its core non-browser jobs, while the then-existing trusted browsers
-failed closed at the Clerk preflight; the post-change and nightly/release
-artifact gates remain pending. No generated artifact is treated as a release
-artifact yet.
+is not certified by the push workflows alone: the current CI-policy push
+completed its core non-browser jobs, while the separately scheduled nightly
+and release-artifact gates remain pending. No generated artifact is treated as
+a release artifact yet.
 
 ## 18. GitHub CI on `releaseCommit`
 
-The exact pushed candidate `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` was
-observed remotely before the CI-policy change. Push run `34807277532`
-concluded `failure`: `web`, `rust`, `wasm`, `security`, native GCC/Clang, and
-the source-side checks completed successfully, while the then-existing
-trusted browser jobs failed closed before authentication because the Clerk
-Environment was empty. That run is historical; a post-change exact-SHA run
-must be observed for the current check set. The separate exact-SHA CodeQL run
-`34807277478` and the phase2/3/4/5/6 supporting runs also concluded success.
-The nightly `native-sanitizers`, `native-fuzz`, `rust-fuzz`, and `chaos`
-contexts required by the release workflow have not yet produced current
-conclusions.
+The current CI-policy commit
+`bd0c3c099bc32d9fa296c8fafb7d6888df1fa1bf` was observed in phase6-pr-ci run
+`34808535778`, which concluded `success`: `web`, `rust`, `wasm`, `security`,
+native GCC/Clang, and the public-branch-safe job set completed successfully;
+the public Chromium job was skipped on this protected-branch push. No
+authenticated browser job or `browser gate` check was created. CodeQL run
+`34808535842` and supporting phase2/3/4/5/6 runs
+`34808535762`, `34808535818`, `34808535768`, `34808535874`, and
+`34808535834` also concluded success. The nightly
+`native-sanitizers`, `native-fuzz`, `rust-fuzz`, and `chaos` contexts required
+by the release workflow have not yet produced current conclusions. The older
+run `34807277532` remains historical pre-removal evidence of the empty-Clerk
+preflight failure.
 
 The release workflow is configured to require exact successful check runs for:
 
