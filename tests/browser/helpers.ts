@@ -195,14 +195,17 @@ export async function waitForEditor(page: Page): Promise<void> {
   ).toBeVisible({ timeout: 60_000 });
 }
 
-/** Type into the editor (clicks, then keyboard input with small delays). */
+/** Type into the editor (clicks, then keyboard input). */
 export async function typeInEditor(page: Page, text: string): Promise<void> {
   const editor = page.locator(".ProseMirror[contenteditable='true']").first();
   await waitForEditor(page);
   await expect(editor).toBeEditable();
   await editor.click();
   await expect(editor).toBeFocused();
-  await editor.pressSequentially(text, { delay: 8 });
+  // The editor must receive real keyboard events, but an artificial
+  // per-character delay makes this probe timing-dependent and needlessly
+  // lengthens every engine's run.
+  await editor.pressSequentially(text);
 }
 
 /** Read the editor's visible text content. */
@@ -221,6 +224,16 @@ export async function editorText(page: Page): Promise<string> {
 export class ConsoleMonitor {
   private errors: string[] = [];
 
+  // These are the only Clerk messages known to be harmless in the local
+  // development/test instance. Authentication, issuer, origin, ticket, and
+  // network failures intentionally remain fatal instead of being hidden by a
+  // broad `/clerk/i` filter.
+  private static readonly benignClerkNoise = [
+    /^clerk:\s*development mode is enabled\.?$/i,
+    /^clerk:\s*telemetry is (?:disabled|not enabled)\.?$/i,
+    /^clerk:\s*devtools are (?:disabled|not enabled)\.?$/i,
+  ];
+
   attach(page: Page): void {
     page.on("console", (msg) => {
       if (msg.type() === "error") {
@@ -235,8 +248,8 @@ export class ConsoleMonitor {
   fatalErrors(): string[] {
     return this.errors.filter((e) => {
       if (e.includes("Download the React DevTools")) return false;
-      // Clerk frontend benign notices (telemetry hints, dev notices).
-      if (/clerk/i.test(e)) return false;
+      // Clerk frontend benign notices (explicitly allowlisted above).
+      if (ConsoleMonitor.benignClerkNoise.some((pattern) => pattern.test(e))) return false;
       if (e.includes("third-party cookie")) return false;
       // Optional-asset 404s during dev (favicons etc.).
       if (/\(404\)/.test(e) && /favicon|\.png|\.svg/.test(e)) return false;

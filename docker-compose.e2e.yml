@@ -1,0 +1,64 @@
+# Disposable, authentication-enabled infrastructure for Concord browser E2E.
+#
+# This file is deliberately separate from docker-compose.yml: normal local
+# development remains convenient and loopback-only, while trusted browser CI
+# must exercise the same NATS authentication and Redis ACL shapes used by the
+# cloud topology. Every credential below is deterministic and CI-only; this
+# compose project is intended to run under a unique `docker compose -p` name
+# and is always torn down with `down --volumes`.
+#
+# Usage (with a unique project name):
+#   docker compose -p concord-e2e-<run> -f docker-compose.e2e.yml up -d --wait
+#
+# Host-port overrides are provided for concurrent local diagnostics. CI runners
+# should use the defaults because each job has its own host.
+
+services:
+  db:
+    image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+    environment:
+      POSTGRES_USER: concord
+      POSTGRES_PASSWORD: concord_e2e_postgres_password
+      POSTGRES_DB: concord
+    ports:
+      - "127.0.0.1:${CONCORD_E2E_DB_PORT:-55433}:5432"
+    volumes:
+      - concord_e2e_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U concord -d concord"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  nats:
+    image: nats:2.11.6-alpine@sha256:7dec3f8f1ff181975dbdfc0d903d2a9724659648294dbc2ebb2fa3a294d573a6
+    # `-js` is explicit: the CI probe exercises both authenticated core NATS
+    # pub/sub and the JetStream API. The server never accepts anonymous clients.
+    command:
+      ["-js", "-sd", "/data", "-m", "8222", "--user", "concord_e2e", "--pass", "concord-e2e-nats-password"]
+    ports:
+      - "127.0.0.1:${CONCORD_E2E_NATS_PORT:-54223}:4222"
+    volumes:
+      - concord_e2e_nats:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8222/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8.8.2-alpine@sha256:96cb544fa0af5aa898d160cffb7dae70c3df117190fc123831c64712cda425ff
+    command: ["redis-server", "--aclfile", "/etc/redis/users.acl"]
+    ports:
+      - "127.0.0.1:${CONCORD_E2E_REDIS_PORT:-56379}:6379"
+    volumes:
+      - ./docker/redis/e2e-users.acl:/etc/redis/users.acl:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "--user", "concord_e2e", "-a", "concord-e2e-redis-password", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  concord_e2e_pgdata:
+  concord_e2e_nats:

@@ -21,9 +21,12 @@
 # (tests/protocol + fixtures/) and rust cargo test --lib (protocol golden
 # tests) — both run in the web and rust jobs above; no separate job needed.
 #
-#   browser  real Playwright Chromium journey + accessibility, with Firefox
-#            and WebKit auth/editor smoke coverage against the real Clerk
-#            dev instance, gateway, PostgreSQL, NATS, Redis and WASM worker.
+#   browser-public   secretless Chromium smoke of the compiled public surface
+#                    for untrusted fork pull requests.
+#   browser-trusted  real production-mode Clerk Chromium journey + accessibility,
+#                    with Firefox and WebKit auth/editor smoke coverage against
+#                    the dedicated Clerk dev instance, gateway, PostgreSQL,
+#                    authenticated NATS/Redis and WASM worker.
 #
 # SHARED-DB HAZARD (from SA-CHAOS6/SA-WEB6): all Rust integration suites
 # and the TS db/realtime projects share ONE concord_test database. This
@@ -182,50 +185,71 @@ jobs:
       - name: CRDT parity/runtime tests against the built module
         run: npx vitest run tests/crdt
 
-  browser:
-    name: browser (${{ matrix.browser }})
+  # Untrusted fork pull requests never receive Clerk, database, or broker
+  # credentials. This lane deliberately verifies only the anonymous compiled
+  # production surface with an inert, public key-shaped build input.
+  browser-public:
+    name: browser (public chromium)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: ./.github/actions/build-wasm
+      - name: Build anonymous production surface (inert Clerk placeholders)
+        run: npm run build
+        env:
+          # These values identify no Clerk instance and grant no capability.
+          # They exist solely because the compiled client validates the key
+          # shape while rendering the anonymous sign-in shell.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2ktcGxhY2Vob2xkZXIuY2xlcmsuYWNjb3VudHMuZGV2JA
+          CONCORD_REQUIRE_TLS: "0"
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Stage standalone static and public assets
+        # The standalone server intentionally excludes these two trees; the
+        # release Dockerfile copies them in the same layout.
+        run: |
+          mkdir -p .next/standalone/.next
+          cp -R .next/static .next/standalone/.next/static
+          cp -R public .next/standalone/public
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run secretless anonymous browser check
+        run: npx playwright test --config=playwright.public.config.ts
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2ktcGxhY2Vob2xkZXIuY2xlcmsuYWNjb3VudHMuZGV2JA
+          CONCORD_REQUIRE_TLS: "0"
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  # Same-repository PRs and protected-branch pushes use the dedicated,
+  # environment-scoped Clerk test instance. No credential is present during
+  # checkout, dependency installation, WASM/native builds, or Docker setup.
+  browser-trusted:
+    name: browser (trusted ${{ matrix.browser }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    environment: concord-e2e
     strategy:
       fail-fast: false
       matrix:
         include:
           - browser: chromium
+            profile: full
             command: npm run test:browser
           - browser: firefox
+            profile: smoke
             command: npm run test:browser:smoke:firefox
           - browser: webkit
+            profile: smoke
             command: npm run test:browser:smoke:webkit
-    services:
-      postgres:
-        image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
-        env:
-          POSTGRES_USER: concord
-          POSTGRES_PASSWORD: concord_local_dev
-          POSTGRES_DB: concord
-        ports: ["5433:5432"]
-        options: >-
-          --health-cmd "pg_isready -U concord -d concord"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 12
-      nats:
-        image: nats:2.11.6-alpine@sha256:7dec3f8f1ff181975dbdfc0d903d2a9724659648294dbc2ebb2fa3a294d573a6
-        ports: ["4222:4222"]
-      redis:
-        image: redis:8.8.2-alpine@sha256:96cb544fa0af5aa898d160cffb7dae70c3df117190fc123831c64712cda425ff
-        ports: ["6379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 12
-    env:
-      DATABASE_TEST_URL: postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CONCORD_E2E_CLERK_PUBLISHABLE_KEY }}
-      CLERK_SECRET_KEY: ${{ secrets.CONCORD_E2E_CLERK_SECRET_KEY }}
-      GATEWAY_CLERK_ISSUER: ${{ secrets.CONCORD_E2E_CLERK_ISSUER }}
-      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -237,10 +261,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable snapshot
       - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # latest snapshot
       - run: npm ci
-      - name: Require the disposable Clerk E2E instance configuration
+      - name: Allocate disposable E2E infrastructure namespace
         run: |
-          test -n "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" || { echo "CONCORD_E2E_CLERK_PUBLISHABLE_KEY repository secret is required" >&2; exit 1; }
-          test -n "$CLERK_SECRET_KEY" || { echo "CONCORD_E2E_CLERK_SECRET_KEY repository secret is required" >&2; exit 1; }
+          project="concord-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.browser }}"
+          case "$project" in
+            *[!a-z0-9-]*|'') echo "invalid generated compose project name" >&2; exit 2 ;;
+          esac
+          echo "CONCORD_E2E_COMPOSE_PROJECT=$project" >> "$GITHUB_ENV"
+      - name: Start authenticated disposable PostgreSQL, NATS, and Redis
+        run: docker compose -p "$CONCORD_E2E_COMPOSE_PROJECT" -f docker-compose.e2e.yml up --detach --wait
+      - name: Verify authenticated broker and cache contracts
+        run: node scripts/e2e/verify-infra-auth.mjs
+        env:
+          CONCORD_E2E_NATS_URL: nats://concord_e2e:concord-e2e-nats-password@127.0.0.1:54223
+          CONCORD_E2E_REDIS_URL: redis://concord_e2e:concord-e2e-redis-password@127.0.0.1:56379
       - uses: ./.github/actions/build-wasm
       - name: Build release gateway
         run: cargo build --release
@@ -252,9 +286,91 @@ jobs:
             -DCONCORD_WARNINGS_AS_ERRORS=ON
           cmake --build build/native --target concord-worker
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium firefox webkit
-      - name: Run real browser gate
-        run: ${{ matrix.command }}
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run one-shot authenticated production browser gate
+        # All credential-bearing settings are deliberately scoped to this
+        # single step. The real harness uses `next build` + its generated
+        # standalone Node server, a
+        # credential-restricted NATS/Redis pair, and an exact Clerk audience
+        # plus dynamically allocated authorized party.
+        run: |
+          set -euo pipefail
+          case "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in
+            pk_test_*) ;;
+            *) echo "concord-e2e requires a pk_test_ publishable key from a dedicated Clerk test instance" >&2; exit 1 ;;
+          esac
+          case "$CLERK_SECRET_KEY" in
+            sk_test_*) ;;
+            *) echo "concord-e2e requires an sk_test_ secret from a dedicated Clerk test instance" >&2; exit 1 ;;
+          esac
+          test -n "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" || { echo "missing concord-e2e publishable key variable" >&2; exit 1; }
+          test -n "$CLERK_SECRET_KEY" || { echo "missing concord-e2e Clerk secret" >&2; exit 1; }
+          test -n "$GATEWAY_CLERK_AUDIENCE" || { echo "missing concord-e2e Clerk audience variable" >&2; exit 1; }
+          test "$GATEWAY_CLERK_AUDIENCE" = "concord-e2e" || {
+            echo "concord-e2e Clerk audience must be exactly concord-e2e" >&2
+            exit 1
+          }
+          ${{ matrix.command }}
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          CONCORD_E2E_MODE: production
+          CONCORD_E2E_PROFILE: ${{ matrix.profile }}
+          CONCORD_E2E_NO_RETRY: "1"
+          CONCORD_E2E_REQUIRE_INTERNAL_AUTH: "1"
+          CONCORD_E2E_REQUIRE_CLAIM_POLICY: "1"
+          CONCORD_E2E_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.browser }}
+          CONCORD_E2E_DB_BASE: postgres://concord:concord_e2e_postgres_password@127.0.0.1:55433
+          CONCORD_E2E_NATS_URL: nats://concord_e2e:concord-e2e-nats-password@127.0.0.1:54223
+          CONCORD_E2E_REDIS_URL: redis://concord_e2e:concord-e2e-redis-password@127.0.0.1:56379
+          # Public configuration is stored as environment variables; the
+          # backend API key remains an environment secret.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.CONCORD_E2E_CLERK_PUBLISHABLE_KEY }}
+          GATEWAY_CLERK_ISSUER: ${{ vars.CONCORD_E2E_CLERK_ISSUER }}
+          GATEWAY_CLERK_AUDIENCE: ${{ vars.CONCORD_E2E_CLERK_AUDIENCE }}
+          CLERK_SECRET_KEY: ${{ secrets.CONCORD_E2E_CLERK_SECRET_KEY }}
+          # The harness resolves these literals after allocating its random
+          # localhost port, making the web and gateway azp checks exact.
+          CONCORD_APP_ORIGIN: $CONCORD_E2E_WEB_ORIGIN
+          GATEWAY_CLERK_AUTHORIZED_PARTY: $CONCORD_E2E_WEB_ORIGIN
+      - name: Remove this job's disposable E2E infrastructure
+        if: always()
+        run: docker compose -p "$CONCORD_E2E_COMPOSE_PROJECT" -f docker-compose.e2e.yml down --volumes --remove-orphans
+
+  # Branch protection consumes one stable context while this job makes the
+  # public-vs-trusted decision explicit. A skipped lane is valid only when
+  # the other lane succeeded for the event that actually ran.
+  browser-gate:
+    name: browser gate
+    needs: [browser-public, browser-trusted]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce the applicable browser lane
+        env:
+          IS_UNTRUSTED_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          PUBLIC_RESULT: ${{ needs.browser-public.result }}
+          TRUSTED_RESULT: ${{ needs.browser-trusted.result }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_UNTRUSTED_FORK" = true ]; then
+            test "$PUBLIC_RESULT" = success || {
+              echo "secretless public browser lane did not succeed (result: $PUBLIC_RESULT)" >&2
+              exit 1
+            }
+            test "$TRUSTED_RESULT" = skipped || {
+              echo "trusted browser lane unexpectedly ran for an untrusted fork (result: $TRUSTED_RESULT)" >&2
+              exit 1
+            }
+          else
+            test "$PUBLIC_RESULT" = skipped || {
+              echo "public browser lane unexpectedly ran for a trusted event (result: $PUBLIC_RESULT)" >&2
+              exit 1
+            }
+            test "$TRUSTED_RESULT" = success || {
+              echo "authenticated trusted browser lane did not succeed (result: $TRUSTED_RESULT)" >&2
+              exit 1
+            }
+          fi
 
   security:
     runs-on: ubuntu-latest

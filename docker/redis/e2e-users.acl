@@ -1,0 +1,7 @@
+# Disposable E2E Redis ACL. These deterministic values are intentionally not
+# production secrets: docker-compose.e2e.yml is isolated to a local/CI runner
+# and is destroyed after each run. Keep this command/key surface aligned with
+# docker/redis/users.acl and the gateway's ephemeral implementation.
+
+user default off -@all +ping
+user concord_e2e on -@all +ping +incr +expire +del +scan +hset ~concord:* >concord-e2e-redis-password

@@ -24,9 +24,8 @@ test("smoke: load, sign in, open editor, type", async ({ page }) => {
   const resp = await page.goto("/");
   expect(resp?.status()).toBeLessThan(400);
 
-  // The smoke project names map to provisioned users (chromium/firefox/webkit).
-  const engine = test.info().project.name;
-  await signIn(page, user(engine === "chromium" ? "smoke" : "primary"));
+  // Smoke globalSetup provisions exactly one user, regardless of engine.
+  await signIn(page, user("smoke"));
   const documentId = await createDocument(page, "Smoke");
   await waitForEditor(page);
 

@@ -311,7 +311,9 @@ test.describe.serial("Chromium primary journey", () => {
       // indistinguishable from missing, by design).
       await signIn(stranger, user("isolation-stranger"));
       await stranger.goto(`/documents/${documentId}`);
-      await stranger.waitForLoadState("networkidle");
+      // A WebSocket/Clerk page may never become network-idle. DOM readiness
+      // plus the denied-editor assertion is the relevant state here.
+      await stranger.waitForLoadState("domcontentloaded");
       // Not the editor; the app's not-found page renders instead.
       const editorCount = await stranger
         .locator(".ProseMirror[contenteditable='true']")
