@@ -257,19 +257,25 @@ Rules:
 - **Evidence:** Constitution Sections 16/50.
 - **Revisit conditions:** None.
 
-## DEC-015 — The baseline tag `antonio-original-baseline` is immutable
+## DEC-015 — The baseline tag `antonio-original-baseline` is preserved as a historical reference
 
 - **Status:** Accepted
 - **Decision:** Git tag `antonio-original-baseline` (→ `942035c`) is a
-  permanent reference to the pristine tutorial import. It is never rewritten,
-  moved, deleted, or force-updated; history before it is never rebased.
-- **Alternatives:** Branch-only references (rejected: tags are immutable
-  anchors); deleting after modernization (rejected: provenance/regression
-  value).
+  preserved reference to the pristine tutorial import. The project does not
+  treat an ordinary Git tag as a cryptographically protected or externally
+  immutable release object; any future release claim must be bound to a
+  specific commit and independently verified.
+- **Alternatives:** Branch-only references (rejected: a named tag is easier to
+  locate for provenance and regression comparison); deleting after
+  modernization (rejected: provenance/regression value).
 - **Rationale:** Permanent provenance, comparison anchor, and regression aid.
 - **Consequences:** Modernization happens forward on `main` (and later phase
-  branches); the tag is untouched.
-- **Evidence:** Tag verified 2026-09-05 (`git rev-parse` == `942035c` == main).
+  branches); the named reference remains available for comparison, while
+  release integrity is established by commit-SHA and ruleset-controlled
+  publication checks.
+- **Evidence:** Tag resolved locally on 2026-09-05 (`git rev-parse` ==
+  `942035c`). This records its observed pointer; it is not a claim that the
+  hosting provider enforces tag immutability.
 - **Revisit conditions:** None.
 
 ## Provenance note (recorded, not a decision)

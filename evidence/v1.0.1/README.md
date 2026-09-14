@@ -1,0 +1,51 @@
+# Concord `1.0.1` candidate evidence
+
+Status: `CANDIDATE_PENDING` · not a release
+Captured: 2026-09-14 (Asia/Kolkata)
+Implementation candidate: `42dcb17dd26c11a05dd20109102f37ea3fb5135a`
+
+This directory contains fresh, candidate-bound local evidence for the
+implementation commit above. It does not contain credentials, does not create
+or imply a `v1.0.1` tag, and does not prove a GitHub Release, deployment, URL,
+live Clerk session, or persistent realtime runtime.
+
+The canonical interpretation is in:
+
+- [`docs/audits/CANONICAL_RELEASE_REPORT.md`](../../docs/audits/CANONICAL_RELEASE_REPORT.md)
+- [`docs/audits/CANONICAL_RELEASE_LEDGER.json`](../../docs/audits/CANONICAL_RELEASE_LEDGER.json)
+- [`docs/audits/CANONICAL_FRESH_EVIDENCE.md`](../../docs/audits/CANONICAL_FRESH_EVIDENCE.md)
+
+## Recorded local results
+
+- Web typecheck, lint, unit tests, coverage, disposable PostgreSQL DB tests,
+  realtime tests, and production build passed.
+- Native Release/CTest, WASM parity/smoke, Rust workspace tests, property
+  campaign, bounded native fuzz campaign, ASan/UBSan, and TSan passed.
+- The refreshed authenticated local NATS/JetStream and Redis ACL negative
+  tests passed; the isolated E2E compose project was removed afterward.
+- The 27-scenario local chaos run passed with zero lost durable-ACKed
+  operations and zero divergent replicas.
+- The exact image smoke, SBOM regeneration, secret scan, provenance checks,
+  findings validation, and immutable-image-pin validation passed.
+
+## Blocking or external results
+
+- The strict local dependency/container scan remains red: `44 Critical` and
+  `180 High` container findings are unaccepted across the refreshed dev/cloud
+  image inventory. No broad allowlist was used.
+- Trusted authenticated Chromium/Firefox/WebKit CI is blocked by the empty
+  GitHub `concord-e2e` Environment. The required Clerk values must be supplied
+  by the owner without placing secrets in this evidence tree.
+- Exact-candidate remote CI, nightly/reliability conclusions, release
+  artifacts, checksums, attestations, and a GitHub Release do not exist until
+  the candidate is pushed and all required gates pass.
+- GitHub Dependabot vulnerability alerts and automated security fixes were
+  observed disabled/unverified at account level; checked-in configuration is
+  not a substitute for that setting.
+- No AWS or Vercel/live-runtime verification was requested or claimed.
+
+Four development-only npm Moderate findings remain in the Drizzle/esbuild
+tooling chain. A forced audit repair would introduce a breaking Drizzle
+tooling downgrade; the advisory's dev server is not started or reachable in
+production. This is documented in `docs/SECURITY.md` and remains a precise
+residual, not a hidden clean result.

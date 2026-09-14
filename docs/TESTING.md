@@ -1,11 +1,24 @@
 # Concord — Testing
 
-Status: Authoritative
-Version: 1.4 (V1 hardening)
-Last updated: 2026-09-13
+Status: Authoritative procedure · not a current evidence report
+Version: 1.5 (V1 hardening / 1.0.1 candidate)
+Last updated: 2026-09-14
 
 This document records how every layer of Concord is tested, with exact
-commands. All commands run from the repository root.
+commands. All commands run from the repository root. The candidate-bound
+local results for implementation commit
+`42dcb17dd26c11a05dd20109102f37ea3fb5135a` are recorded in the canonical
+release handoff:
+[`docs/audits/CANONICAL_RELEASE_REPORT.md`](audits/CANONICAL_RELEASE_REPORT.md)
+and the current execution ledger in
+[`docs/audits/CANONICAL_FRESH_EVIDENCE.md`](audits/CANONICAL_FRESH_EVIDENCE.md)
+with its machine-readable
+[`docs/audits/CANONICAL_RELEASE_LEDGER.json`](audits/CANONICAL_RELEASE_LEDGER.json).
+The current local run has fresh web, database, realtime, native, WASM,
+property, fuzz, sanitizer, chaos, security, and secretless public-browser
+results recorded in the execution ledger. Authenticated Clerk browser runs,
+remote CI/nightly conclusions, deployment, and live runtime remain explicitly
+unverified.
 
 ---
 
@@ -103,11 +116,11 @@ cmake --build build/sanitize
 ctest --test-dir build/sanitize --output-on-failure
 ```
 
-ThreadSanitizer is part of the shipped gate (the Phase 6 release-gate
-matrix runs the full 64+52 suites under TSan via
-`CONCORD_SANITIZE_THREAD=ON`); the native worker's single-threaded contract
-is documented and asserted there. Phase 6 campaigns (30/30 seeds) also ran
-under TSan clean.
+ThreadSanitizer is part of the release matrix. The current candidate passed
+the local TSan lane (`scripts/verify-native.sh tsan`, CTest 3/3); the macOS
+run emitted no diagnostic. Supported Linux/nightly conclusions remain a
+separate remote gate, and macOS leak detection is explicitly limited as noted
+in the canonical evidence.
 
 ## 5. Fuzzing (native)
 
@@ -174,10 +187,15 @@ the real Next.js page in a real browser, use the real Clerk frontend and
 handshake, boot `public/crdt-worker.js`, exercise the editor, and use the
 Rust gateway over a real WebSocket.
 
-Prerequisites:
+For the **strict, authenticated** browser path, start the isolated E2E
+infrastructure rather than the ordinary developer compose stack:
 
 ```bash
-docker compose up -d db nats redis
+docker compose -p concord-e2e-local -f docker-compose.e2e.yml up -d --wait
+export CONCORD_E2E_DB_BASE='postgres://concord:concord_e2e_postgres_password@127.0.0.1:55433'
+export CONCORD_E2E_NATS_URL='nats://concord_e2e:concord-e2e-nats-password@127.0.0.1:54223'
+export CONCORD_E2E_REDIS_URL='redis://concord_e2e:concord-e2e-redis-password@127.0.0.1:56379'
+node scripts/e2e/verify-infra-auth.mjs
 (cd rust && cargo build --release)
 cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCONCORD_WARNINGS_AS_ERRORS=ON
@@ -186,15 +204,33 @@ npm run wasm:build
 npm run worker:bundle
 ```
 
-The browser setup loads `.env.local` when present. It requires a disposable
-Clerk development-instance `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
-`CLERK_SECRET_KEY`; these values are never committed. `globalSetup` creates
-throwaway E2E users and an organization through the Clerk Backend API, then
-mints short-lived sign-in tickets. The browser consumes each ticket through
-Clerk's public client API, so the resulting session is a real Clerk session
-and the gateway verifies the real issuer/JWKS path. This avoids a mailbox and
-personal-account dependency without fabricating production claims. The
-provisioned records are deleted by Playwright teardown.
+The browser setup loads `.env.local` when present, but canonical trusted runs
+must use a **dedicated Clerk development/test instance**, never a production
+instance. It requires the public `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, the
+secret `CLERK_SECRET_KEY`, and an issuer (derived from the public key unless
+`GATEWAY_CLERK_ISSUER` is explicitly set). A strict trusted run additionally
+requires the dedicated token-template audience and exact dynamic origin
+policy:
+
+```bash
+export GATEWAY_CLERK_AUDIENCE='concord-e2e'
+export GATEWAY_CLERK_AUTHORIZED_PARTY='$CONCORD_E2E_WEB_ORIGIN'
+export CONCORD_APP_ORIGIN='$CONCORD_E2E_WEB_ORIGIN'
+export CONCORD_E2E_REQUIRE_INTERNAL_AUTH=1
+export CONCORD_E2E_REQUIRE_CLAIM_POLICY=1
+export CONCORD_E2E_MODE=production
+export CONCORD_E2E_NO_RETRY=1
+```
+
+`$CONCORD_E2E_WEB_ORIGIN` is a literal sentinel deliberately resolved by the
+harness after it allocates the per-run web port; do not substitute a stale
+fixed localhost port. `globalSetup` creates throwaway email-only E2E users
+and organizations through the Clerk Backend API, then mints short-lived
+sign-in tickets. The browser consumes each ticket through Clerk's public
+client API, so the resulting session is a real Clerk session and the gateway
+verifies the real issuer/JWKS path. This avoids a mailbox, a personal account,
+and unused E2E password credentials. The provisioned records are deleted by
+Playwright teardown.
 
 Commands:
 
@@ -203,6 +239,31 @@ npm run test:browser                 # Chromium journey + axe accessibility
 npm run test:browser:smoke:firefox   # Firefox load/auth/editor smoke
 npm run test:browser:smoke:webkit    # WebKit load/auth/editor smoke
 ```
+
+The setup infers a `full` or `smoke` provisioning profile from the explicit
+`CONCORD_E2E_PROFILE` value (`full` or `smoke`); when it is unset, the
+repository's smoke script/test-file names are detected as a conservative
+fallback. Full runs provision only the users required by the journey and axe
+suites. Smoke runs provision exactly one `smoke` user and organization. Use
+`CONCORD_E2E_NO_RETRY=1` for a one-shot diagnostic run. The default
+`CONCORD_E2E_MODE=dev` starts `next dev`; `CONCORD_E2E_MODE=production` builds
+with the allocated gateway endpoint and public Clerk key, then starts
+the generated standalone Node server against that production build. The
+harness stages `.next/static` and `public/` into the standalone layout exactly
+as the production web image does. It holds a per-checkout lock while the stack
+is running, so concurrent browser invocations in one checkout are rejected
+instead of sharing `.next` state or the destructive `concord_e2e` database.
+
+For an E2E run that must exercise internal-service authentication, set
+`CONCORD_E2E_REQUIRE_INTERNAL_AUTH=1` together with explicit credential-bearing
+`CONCORD_E2E_NATS_URL` and `CONCORD_E2E_REDIS_URL` values. Set
+`CONCORD_E2E_REQUIRE_CLAIM_POLICY=1` for the trusted release path; it fails
+closed unless the audience plus both dynamic exact-origin settings above are
+present. Without the internal-auth flag, the local development NATS/Redis
+defaults remain unauthenticated. The setup never prints those URL values or
+Clerk secrets. Before provisioning, a conservative janitor removes only
+explicitly namespaced E2E users and organizations whose trusted creation
+timestamp is at least 24 hours old.
 
 The Chromium journey covers load, authentication, document creation, editor
 rendering, WASM worker fetch, typing, local persistence across reload,
@@ -213,11 +274,34 @@ visible keyboard focus; no axe rules are globally disabled. Playwright stores
 traces/screenshots only on failure. Firefox and WebKit intentionally run the
 short smoke path; they are not claimed to pass the full realtime journey.
 
-CI runs the three browser lanes in `.github/workflows/phase6-pr-ci.yml`.
-The required repository secrets are `CONCORD_E2E_CLERK_PUBLISHABLE_KEY` and
-`CONCORD_E2E_CLERK_SECRET_KEY`; `CONCORD_E2E_CLERK_ISSUER` is optional when it
-can be derived from the publishable key. An unset secret fails the CI lane
-explicitly.
+CI runs a safe two-tier browser design in
+`.github/workflows/phase6-pr-ci.yml`: untrusted fork PRs execute only the
+anonymous, non-secret `browser (public chromium)` check, while trusted pushes
+and same-repository PRs execute the credentialed production matrix and the
+aggregate `browser gate` check. The GitHub Environment is named
+`concord-e2e`. Configure these **Environment variables**:
+
+```text
+CONCORD_E2E_CLERK_PUBLISHABLE_KEY  public Clerk publishable key
+CONCORD_E2E_CLERK_ISSUER           optional explicit issuer (otherwise derived)
+CONCORD_E2E_CLERK_AUDIENCE         exact dedicated audience: concord-e2e
+```
+
+and this **Environment secret**:
+
+```text
+CONCORD_E2E_CLERK_SECRET_KEY       dedicated development/test Clerk secret
+```
+
+The workflow maps them into the application names only on its final
+Playwright/global-setup step. Checkout, dependency installation, Rust/CMake
+builds, and Playwright-browser installation do not receive the Clerk secret.
+Missing or malformed trusted values fail explicitly; a public fork must never
+receive them. Clean up the exact local E2E compose project when finished:
+
+```bash
+docker compose -p concord-e2e-local -f docker-compose.e2e.yml down --volumes
+```
 
 ## Strict release verification and traceability
 
@@ -229,10 +313,13 @@ bash scripts/verify-all.sh --strict
 ```
 
 It runs each selected web, DB/realtime, GCC/Clang native, Rust, WASM,
-Chromium/Firefox/WebKit, provenance, and security gate independently and
-prints `PASS`, `FAIL`, `SKIP`, and `required SKIP` totals. Release acceptance
-is `FAIL: 0` and `required SKIP: 0`; a missing required service/tool is never
-converted into a green parent gate.
+provenance, and security gate independently and prints `PASS`, `FAIL`, `SKIP`,
+and `required SKIP` totals. Release acceptance is `FAIL: 0` and `required
+SKIP: 0`; a missing required service/tool is never converted into a green
+parent gate. The standalone strict command does not substitute for the
+dedicated Clerk production-mode matrix: canonical release acceptance also
+requires the exact-release-commit `browser gate` plus the three trusted
+browser checks in GitHub Actions.
 
 The release workflow writes `release-manifest.json` before `SHA256SUMS` using
 `scripts/release/write-manifest.mjs`. The manifest records the checked-out
@@ -461,14 +548,17 @@ decode layers (5 targets; 250k smoke + 1M extended execs per target).
 
 - `scripts/security/secret-scan.sh [--history|--json]`: 8-pattern scanner,
   tree + full git history; values redacted; 18 justified allowlist entries.
-  Lead-verified clean (exit 0) on both modes; positive control 10/10.
-  `scripts/security/secret-scan-tests.sh` proves injected per-file scan
-  failures fail closed with exit 2.
+  The historical checkpoint recorded clean (exit 0) on both modes; positive
+  control 10/10. Re-run for a current result.
+  `scripts/security/secret-scan-tests.sh` historically proved injected
+  per-file scan failures fail closed with exit 2. Re-run it for the candidate
+  before using the result as current evidence.
 - `scripts/security/dep-scan.sh [--json]`: npm/cargo-audit/docker-scout
-  aggregate. Production npm and Rust are clean; the full npm development
-  tree and loopback-only compose image findings are reported and classified
-  under the dated residual policy in SECURITY.md §9.2. The command exits
-  non-zero only for an unaccepted critical/high finding or a scanner error.
+  aggregate. The historical checkpoint recorded clean production npm and Rust;
+  the full npm development tree and loopback-only compose image findings are
+  reported and classified under the dated residual policy in SECURITY.md §9.2.
+  The command exits non-zero only for an unaccepted critical/high finding or a
+  scanner error.
 - `scripts/security/sbom.sh` → `scripts/sbom/*.cdx.json` (deterministic
   CycloneDX; byte-identical regeneration).
 

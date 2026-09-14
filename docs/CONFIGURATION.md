@@ -139,7 +139,7 @@ The worker is not env-configured — it is a **binary path contract**:
 | Service | Variables | Notes |
 |---|---|---|
 | PostgreSQL 18.6 | `DATABASE_URL` (web), `GATEWAY_DATABASE_URL` (gateway) | Same instance, two roles. The **migration user needs CREATE on the schema** (see docs/MIGRATIONS.md). Loopback dev port is 5433 (native 5432 is occupied). |
-| NATS 2.11 (JetStream) | `GATEWAY_NATS_URL` (`nats://…`) | Live transport only — never truth (see DR). Subject prefix via `GATEWAY_NATS_SUBJECT_PREFIX`. |
+| NATS 2.12 (JetStream) | `GATEWAY_NATS_URL` (`nats://…`) | Live transport only — never truth (see DR). Subject prefix via `GATEWAY_NATS_SUBJECT_PREFIX`. |
 | Redis 8.8 | `GATEWAY_REDIS_URL` (`redis://…`) | Ephemeral only: presence, rate-limit counters. No persistence by design — a wipe is never a data event. |
 | Clerk | `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (web); `GATEWAY_CLERK_ISSUER` (gateway) | The issuer is where the gateway fetches JWKS over HTTPS (unless `GATEWAY_JWKS_FILE` overrides in dev). |
 

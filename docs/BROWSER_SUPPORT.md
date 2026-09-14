@@ -1,14 +1,17 @@
 # Concord — Browser Support Matrix (v1)
 
-Status: Authoritative (Phase 7, M011 + final hardening browser gate)
-Last updated: 2026-09-13
+Status: Authoritative capability baseline · current candidate evidence is separate
+Last updated: 2026-09-14
 
 This document states, truthfully, which browsers can run the Concord v1 web
 client and why. It is derived from a static API audit of the shipped client
 code (`src/lib/crdt/**`, `src/lib/sync/**`, `src/app/**`, `src/components/**`)
 and a feature scan of the compiled WebAssembly module (`public/wasm/concord-crdt.wasm`,
-disassembled with binaryen `wasm-dis`). The rendered-browser gate is now also
-recorded below; native Safari remains a separate, unexecuted platform.
+disassembled with binaryen `wasm-dis`). The rendered-browser results recorded
+below are historical checkpoint results; the current candidate has only the
+secretless public Chromium smoke in the canonical evidence. Trusted
+authenticated browser acceptance remains blocked on the dedicated Clerk
+Environment. Native Safari remains a separate, unexecuted platform.
 
 ---
 
@@ -54,9 +57,9 @@ with the following matrix:
 
 | Browser | Status | Notes |
 |---|---|---|
-| Chrome/Chromium (last 2 majors) | **Supported** (primary dev target) | Playwright Chromium: 12/12 passed (7 journey + 5 accessibility); the Node/Vitest realtime suite remains a separate transport-level layer |
-| Safari on macOS (16.4+) | **Supported by API/WebKit smoke; native Safari not verified** | Required APIs are present; Playwright WebKit load/auth/editor smoke passed 1/1. WebKit is not a claim about the Safari application, extensions, or iOS behavior |
-| Firefox (last 2 majors) | **Supported by API/Firefox smoke** | Bulk-memory + WASM BigInt satisfied; Playwright Firefox load/auth/editor smoke passed 1/1; the full realtime journey is Chromium-only |
+| Chrome/Chromium (last 2 majors) | **Supported by API; current trusted E2E pending** | Historical Playwright Chromium 12/12 passed (7 journey + 5 accessibility); current candidate secretless public smoke is 1/1; the Node/Vitest realtime suite remains a separate transport-level layer |
+| Safari on macOS (16.4+) | **Supported by API/WebKit smoke; native Safari not verified** | Historical Playwright WebKit load/auth/editor smoke passed 1/1. WebKit is not a current candidate authenticated pass or a claim about the Safari application, extensions, or iOS behavior |
+| Firefox (last 2 majors) | **Supported by API/Firefox smoke; current trusted E2E pending** | Historical Playwright Firefox load/auth/editor smoke passed 1/1; the current candidate trusted lane is blocked; the full realtime journey is Chromium-only |
 | Safari 15.x | Partial (untested) | APIs exist (bulk-memory, BigInt, classic workers); not covered by the interactive validation matrix — treated as unsupported for v1 claims |
 | Edge/Opera (Chromium) | Expected to work (Chromium engine); not separately tested | |
 | iOS/iPadOS Safari | Not verified for v1 (desktop-first product; see PRD §25a.C.5) | Responsive chrome is in place but the 816px document page is desktop-first |
@@ -110,7 +113,7 @@ with the following matrix:
   `concord-crdt.wasm` (bulk-memory sites counted; SIMD/atomics/reference
   types confirmed absent; i64 usage confirmed present).
 - Build-link flags reviewed in `wasm/CMakeLists.txt`.
-- Rendered browser validation on 2026-09-13 used Playwright 1.63.0 with a
+- Historical rendered browser validation on 2026-09-13 used Playwright 1.63.0 with a
   disposable Clerk development instance, a fresh E2E PostgreSQL database,
   the release Rust gateway, the native worker, and real WebSockets:
   Chromium 12/12 (7 journey + 5 accessibility), Firefox smoke 1/1, and

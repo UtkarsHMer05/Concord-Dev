@@ -2,8 +2,8 @@
 
 Status: Authoritative (Phase 6 threat model current; Phase 4 §1–6 and
 Phase 5 §7 remain in force as described below)
-Version: 2.1
-Last updated: 2026-09-13
+Version: 2.2
+Last updated: 2026-09-14
 
 > **Document structure.** §1–§5 record the Phase 3 posture, §6 the Phase 4
 > distributed additions, §7 the Phase 5 storage-integrity additions, and
@@ -204,7 +204,7 @@ findings, zero HIGH/CRITICAL. All MEDIUMs are fixed and regression-pinned
 
 ---
 
-## 8. Phase 6 formal threat model (P6-M020, CURRENT as of 2026-09-13)
+## 8. Phase 6 formal threat model (P6-M020, CURRENT as of 2026-09-14)
 
 This section is the systematic map over everything §1–§7 state pointwise.
 Conventions:
@@ -456,38 +456,31 @@ specific finding as accepted, but cannot hide it.
 - **Rust** (`cargo audit 0.22.2` over Cargo.lock; installed this phase
   via `cargo install cargo-audit --locked`): 0 critical / 0 high /
   0 medium / 0 low — no RustSec advisories against the locked crate set.
-- **Containers** (`docker scout v1.24.0` over the three pinned local
-  development images plus the digest-pinned, inactive cloud nginx edge
-  image; the scanner consumes the exact `name:tag@sha256:digest` refs from
-  `scripts/security/dep-scan.sh`, not mutable tags):
+- **Containers** (`docker scout v1.24.0` over the pinned local development
+  images plus the digest-pinned, inactive cloud edge images; the scanner
+  consumes the exact `name:tag@sha256:digest` refs from
+  `scripts/security/dep-scan.sh`, not mutable tags). The fresh scan-of-record
+  below is a strict release gate: raw findings remain visible and no broad
+  allowlist is applied:
 
   | Image | Critical | High | Medium | Low | Top critical/high packages |
   |---|---:|---:|---:|---:|---|
-  | postgres:18.6-alpine (PG 18.6, alpine 3.24.1) | 6 | 38 | 21 | 5 | golang stdlib(22), alpine base(22), openssl(9), curl(9) |
-  | nats:2.11.6-alpine (nats 2.11.6, alpine 3.22.1) | 13 | 52 | 46 | 7 | alpine base(30), openssl(29), golang stdlib(22), go crypto(13) |
-  | redis:8.8.2-alpine (redis 8.8.2, alpine 3.23.5) | 2 | 10 | 2 | 0 | alpine base(12), openssl(9), util-linux(3) |
-  | nginx:1.29-alpine (nginx 1.29.8, alpine 3.23.4) | 8 | 35 | 24 | 8 | alpine base(43), openssl(18), curl(18), util-linux(3) |
+  | postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2 | 6 | 38 | 21 | 5 | golang stdlib, Alpine base, openssl, curl |
+  | nats:2.12-alpine@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6 | 3 | 13 | 4 | 0 | Alpine base, openssl, Go stdlib/crypto |
+  | redis:8.8.2-alpine@sha256:96cb544fa0af5aa898d160cffb7dae70c3df117190fc123831c64712cda425ff | 2 | 10 | 2 | 0 | Alpine base, openssl, util-linux |
+  | nginx:1.31.5-alpine-slim@sha256:3b171d7224b669faa3cc2137fea0a65301791df1ec1f271ebd2a2b7461f7fade | 0 | 0 | 0 | 0 | No findings reported |
+  | prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996 | 11 | 38 | 48 | 3 | Embedded Go/Docker dependencies and Alpine/base packages |
+  | grafana/grafana:12.3.0@sha256:70d9599b186ce287be0d2c5ba9a78acb2e86c1a68c9c41449454d0fc3eeb84e8 | 22 | 81 | 83 | 12 | Embedded application/base packages |
 
-  ACCEPTED for Phase 6 under the exact-image policy (owner: Concord release
-  owner; review by 2026-10-13; documented residual): zero of the critical/high
-  findings are in the database/server applications themselves
-  (postgresql, nats-server, redis-server, nginx packages are clean);
-  every critical/high sits in base-image OS packages (openssl, curl,
-  util-linux, musl) or in the images' embedded Go toolchain artifacts.
-  The three local images are dev-only and loopback-bound (`127.0.0.1` port
-  maps); the nginx edge image is only a digest-pinned inactive cloud-stack
-  dependency and is not deployed by this repository state. None is exposed
-  to an unauthenticated network in the exercised local posture (§8.1 B5/B6;
-  attacker AT5 only), and the upstream tags are the current
-  stable pins (upgrades probed: postgres 18.x is the newest tag family
-  with identical counts; nats 2.12-alpine reduces criticals to 3 but is
-  a feature-release jump not validated against the Phase 4/5 suites).
-  Remediation of base-image packages is release-image work: P6-M027
-  (harden images) and Phase 7 productionization own the rebuild-on-
-  patched-base pass with gateway test-matrix validation. The scanner emits
-  the raw counts and marks them accepted only when the exact image is still
-  present in the named compose file and the review date has not expired;
-  release images have no equivalent allowlist.
+  The 2026-09-14 strict run reports **44 Critical / 180 High / 158
+  Moderate / 20 Low** across these images and therefore exits non-zero. The
+  counts are unaccepted release blockers, not an accepted residual policy.
+  The NATS and nginx refreshes materially reduce the prior inventory, but the
+  remaining findings require an upstream patched image, a deliberately
+  rebuilt/validated image, or an exact advisory-level disposition before a
+  canonical release. Loopback binding and dev-only classification reduce the
+  exercised exposure; they do not turn an unpatched Critical/High finding
+  green and are not an allowlist.
 - **C/C++**: no third-party C or C++ dependencies exist (verified
   against `cpp/CMakeLists.txt`, `cpp/crdt/CMakeLists.txt`,
   `cpp/worker/CMakeLists.txt`: C++20 standard library only; no
@@ -495,7 +488,7 @@ specific finding as accepted, but cannot hide it.
   vendored sources), so the native audit surface is the toolchain
   itself, covered by the P6-M016/M017 sanitizer and fuzz matrices.
 
-Scan-of-record (2026-09-13): npm 11.19.0 / node v24.20.0; cargo-audit
+Scan-of-record (2026-09-14): npm 11.19.0 / node v24.20.0; cargo-audit
 0.22.2 (cargo 1.98.1); docker scout v1.24.0 (docker 29.7.2). Re-run any
 time with `bash scripts/security/dep-scan.sh` (`--json` for
 machine-readable). PR CI runs the source audit with an explicit
@@ -542,7 +535,7 @@ any time with `bash scripts/security/sbom.sh` (`web` / `rust` /
 
 ---
 
-## 10. Production security configuration (P7-M020; required posture, reviewed 2026-09-13)
+## 10. Production security configuration (P7-M020; required posture, reviewed 2026-09-14)
 
 This section is the security sign-off record for the Phase 7 staging/
 production topology (DEC-050: ALB → web :3000 + nginx :8890 → 3
@@ -631,12 +624,16 @@ NEXT_PUBLIC_SYNC_GATEWAY_URL=ws://<ALB-DNS-NAME>:8890/api/v1/sync
 `NEXT_PUBLIC_SYNC_GATEWAY_URL=wss://<sync-host>[:port]/api/v1/sync` together.
 The web proxy derives the CSP `connect-src` entry from the gateway URL's
 exact scheme/host/port and fails closed for a missing, malformed, or plain
-`ws://` value in this mode. It also requires the app origin to be an exact
-HTTPS origin. `Strict-Transport-Security: max-age=31536000;
-includeSubDomains` is emitted only when `NODE_ENV=production` and this flag is
-`1`; it intentionally does not include `preload`. With the flag unset or `0`,
-local development may use an exact `ws://` endpoint and an HTTP app origin,
-but the CSP never widens to blanket `ws:`/`wss:` sources.
+`ws://` value in this mode. The shared parser in `src/server/env.ts` rejects
+invalid WebSocket URLs in every mode; endpoint paths and queries are retained
+only in the client URL, never copied into the CSP source. It also requires the
+app origin to be an exact HTTPS origin. `Strict-Transport-Security:
+max-age=31536000; includeSubDomains` is emitted only for a production response
+whose request URL is actually HTTPS and whose flag is `1`; it intentionally
+does not include `preload`. With the flag unset or `0`, local development may
+use an exact `ws://` endpoint and an HTTP app origin, but the CSP never widens
+to blanket `ws:`/`wss:` sources. A non-empty `CONCORD_REQUIRE_TLS` value other
+than `0` or `1` is a startup error rather than an implicit downgrade.
 
 **Clerk claim migration before the next cloud bundle:** Concord's browser
 currently calls `getToken()` without a template, so this is a **session
@@ -654,6 +651,15 @@ app URL and `CONCORD_APP_ORIGIN` for Clerk's web middleware
 are migrated; a configured audience/party is enforced strictly by the
 gateway. This code path has unit tests, but the Clerk dashboard and a
 live cloud authentication round trip still require verification.
+
+The policy has a deliberate ownership boundary: the web tier does not invent,
+rewrite, or validate the gateway's `aud` claim. The gateway owns
+`GATEWAY_CLERK_AUDIENCE` and `GATEWAY_CLERK_AUTHORIZED_PARTY`, and a hosted
+deployment must set both to the exact values configured in the Clerk session
+token and the browser's app origin. The web tier owns
+`CONCORD_APP_ORIGIN`; when set, it passes that exact origin to Clerk as
+`authorizedParties`. Leaving these claim-policy settings unset is a local/test
+compatibility allowance only, not a production posture.
 [Clerk session-token claim editor](https://clerk.com/docs/guides/sessions/customize-session-tokens)
 and [Clerk session-token claims](https://clerk.com/docs/guides/sessions/session-tokens)
 describe these settings and the `azp` claim.
@@ -720,15 +726,18 @@ Public exposure currently needs:
   'none'`; `base-uri 'self'`; `form-action 'self'`;
   `frame-ancestors 'none'`; plus `upgrade-insecure-requests` in
   production. `connect-src` contains the exact origin derived from
-  `NEXT_PUBLIC_SYNC_GATEWAY_URL`; production never uses blanket `ws:` or
-  `wss:` scheme sources. Nosniff, X-Frame-Options DENY, Referrer-Policy, and
-  Permissions-Policy still ship on every response via
+  `NEXT_PUBLIC_SYNC_GATEWAY_URL` after the typed validation in
+  `src/server/env.ts`; production never uses blanket `ws:` or `wss:` scheme
+  sources. Paths, queries, credentials, fragments, whitespace, and
+  non-WebSocket schemes are never accepted as a CSP source. Nosniff,
+  X-Frame-Options DENY, Referrer-Policy, and Permissions-Policy still ship on
+  every response via
   `next.config.ts`. Script `'unsafe-inline'` is GONE: Next 16 stamps
   the nonce onto all framework/page scripts (parsed from the request
   CSP header) and Clerk's server components do the same; the
   effective header is pinned by `tests/proxy-claim-policy.test.ts`
-  and was live-verified (per-request nonce rotation + nonce-bearing
-  script tags).
+  and candidate-bound locally verified (per-request nonce rotation +
+  nonce-bearing script tags); this is not a hosted-runtime claim.
   **Historical production-shaped E2E (P7-M033) found the cost of the initial
   omission of `'wasm-unsafe-eval'`: WebKit gates
   `WebAssembly.instantiate` on script-src, so the CRDT worker's engine

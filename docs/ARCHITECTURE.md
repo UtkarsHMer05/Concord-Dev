@@ -1,8 +1,8 @@
 # Concord — Architecture
 
-Status: Authoritative (Concord v1 implementation/release-candidate tree; final release state is in the hardening report)
+Status: Authoritative architecture; current release state is in the canonical candidate report
 Version: 2.0
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 This document distinguishes architecture states at all times:
 
@@ -13,7 +13,8 @@ This document distinguishes architecture states at all times:
   (Sections 1–3), each labeled with the phase that superseded it.
 
 The former TARGET section (§4) described the planned end state; the v1
-implementation is now present and verified by local/release gates. Its
+implementation is now present and verified by candidate-bound local gates.
+Its
 "planned" labeling is retired, while any future direction beyond v1 lives in
 [ROADMAP.md](ROADMAP.md), never presented as existing.
 
@@ -350,12 +351,14 @@ JSON content envelope, debounced Convex saves. Superseded by Phase 1.
 
 ---
 
-## 4. CURRENT — Concord v1 architecture (implemented, release-verified)
+## 4. CURRENT — Concord v1 architecture (implemented, candidate-bound locally verified)
 
 The former TARGET view below is now the implemented v1 architecture. It is
-verified through local Docker/release gates and browser E2E; the AWS topology
-in [DEPLOYMENT.md](DEPLOYMENT.md) is a deployable runbook and historical
-exercise, not an assertion that a live AWS environment exists today. It
+verified through candidate-bound local Docker/release gates and transport
+tests; the current candidate's only rendered-browser result is the secretless
+public smoke, while authenticated browser evidence remains pending. The AWS
+topology in [DEPLOYMENT.md](DEPLOYMENT.md) is a deployable runbook and
+historical exercise, not an assertion that a live AWS environment exists today. It
 superseded Sections 1–2.
 
 ```mermaid

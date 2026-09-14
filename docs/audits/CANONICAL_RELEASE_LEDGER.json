@@ -1,0 +1,389 @@
+{
+  "schema": "concord.release.ledger/1",
+  "status": "CANDIDATE_PENDING",
+  "auditDate": "2026-09-14",
+  "releaseVersion": "1.0.1",
+  "report": "docs/audits/CANONICAL_RELEASE_REPORT.md",
+  "freshEvidence": "docs/audits/CANONICAL_FRESH_EVIDENCE.md",
+  "candidate": {
+    "implementationCommit": "42dcb17dd26c11a05dd20109102f37ea3fb5135a",
+    "canonicalEvidenceCommit": "PENDING_DOCUMENTATION_COMMIT",
+    "sourceFenceBase": "8731dbe35c2ad03e8ed67ac21e04725574694aae",
+    "sourceFenceChanges": [
+      "Correct native benchmark random-delete denominator to the configured kRandomDeletes value.",
+      "Refresh digest-pinned NATS, nginx, and Grafana image references after bounded upstream comparison; retain Postgres, Redis, and Prometheus references when no safer reduction was demonstrated.",
+      "Make release image smoke and dependency-scan metadata derive identity from the exact exported source tree and refreshed image references."
+    ],
+    "branch": "main",
+    "localOriginMain": "a2b5125347b10c6c4d3fc0ff72cc33bab626f060",
+    "worktreeAtCapture": "DIRTY_DOCUMENTATION_ONLY",
+    "reportCommitRelation": "Documentation-only descendant of implementationCommit; never substitute it for the executable candidate SHA."
+  },
+  "historicalCheckpoints": {
+    "v1.0.0-hardened.10": {
+      "commit": "b711111431f15717c2a887f81404eabce71e1046",
+      "status": "HISTORICAL_ONLY"
+    },
+    "concord-v1.0.0": {
+      "commit": "f9ecc6eb23ef2bbb329ae009b26f1dc0b8f7432a",
+      "status": "HISTORICAL_ONLY"
+    },
+    "antonio-original-baseline": {
+      "commit": "942035cb8498a2de936b21425cba66c9ec7dc69e",
+      "status": "HISTORICAL_REFERENCE"
+    }
+  },
+  "statusVocabulary": {
+    "CANDIDATE_PENDING": "Candidate exists but one or more required gates or artifacts remain unresolved.",
+    "PASS_LOCAL": "Fresh local result bound to implementationCommit; it does not substitute for required remote or external evidence.",
+    "PASS_POLICY_WITH_RESIDUAL": "Policy result is usable with an exact documented residual that is not a Critical/High release blocker.",
+    "FAIL_RELEASE_BLOCKER": "A required release gate failed and blocks publication.",
+    "PENDING_REMOTE": "Exact candidate remote workflow conclusion has not been observed.",
+    "OWNER_ACTION": "An external account, credential, legal, provider, or approval action is required.",
+    "PENDING_DOCUMENTATION_COMMIT": "Evidence is prepared but not yet bound to the documentation commit that records it.",
+    "NOT_CLAIMED": "The corresponding current claim is intentionally withheld.",
+    "HISTORICAL_ONLY": "Evidence belongs to a named earlier checkpoint and is not current proof.",
+    "CLOSED": "The current acceptance evidence is complete and no blocker remains for that row."
+  },
+  "gates": {
+    "web": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "typecheck, lint, unit 16 files/209 tests, coverage, DB 7 files/69 tests, realtime 3 files/21 tests, and Next production build passed"},
+    "browserPublic": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Secretless production Chromium smoke 1/1 passed"},
+    "browserLocalDev": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Full local dev-mode Chromium journey/accessibility plus Firefox/WebKit smoke jobs passed under the strict orchestrator; local .env.local and default dev configuration were used, so this does not substitute for trusted production-mode Clerk evidence"},
+    "strictLocal": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "25 PASS / 1 FAIL / 0 SKIP / 0 required SKIP; the sole failing sub-gate was security/dependency-scan"},
+    "branchProtection": {"status": "CLOSED", "verifiedSha": null, "details": "GitHub API readback confirms strict main protection now requires the current trusted browser contexts plus browser gate; obsolete unsplit browser contexts were removed and other protection settings were preserved"},
+    "browserTrusted": {"status": "OWNER_ACTION", "verifiedSha": null, "details": "GitHub concord-e2e Environment is empty; authenticated production-mode Chromium/Firefox/WebKit cannot provision"},
+    "nativeClang": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Apple Clang Release CTest 3/3 and worker smoke passed"},
+    "nativeGcc": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "Configured Linux CI matrix lane; no exact candidate conclusion observed"},
+    "wasm": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "WASM smoke plus 5 files/31 CRDT tests passed"},
+    "rust": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "fmt, clippy, and workspace tests: 258 passed, 1 ignored, 0 failed"},
+    "sanitizers": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "ASan/UBSan CTest 3/3 and TSan CTest 3/3 passed locally; macOS leak detection disabled; remote nightly pending"},
+    "fuzzProperty": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "30/30 property seeds, 60,000 generated operations, and 160,000 bounded native fuzz executions passed"},
+    "chaos": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Run 20260914-090958-chaos: 27/27 passed, 0 skipped, zero lost durable-ACKed ops, zero divergent replicas"},
+    "internalAuth": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Authenticated NATS JetStream/pubsub and Redis ACL allow/deny checks passed in isolated E2E infrastructure"},
+    "imageSmoke": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Gateway, web, and worker smoke passed from an exact clean source export with non-root IDs"},
+    "sbom": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Deterministic Web 194, Rust 327, native 7 component SBOMs regenerated and parsed"},
+    "secretScan": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Tree and full history scan clean with no non-allowlisted findings"},
+    "provenance": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "54 baseline-overlapping paths, zero unallowlisted identical paths, 14 regression assertions"},
+    "findingsValidation": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Historical findings registry validates with unique IDs and no historical OPEN Critical/High"},
+    "imagePins": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "19 immutable refs checked; 7 runtime inputs deferred by design"},
+    "dependencyScan": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Production npm 0/0/0/0, full npm 0/0/4/0 Moderate, Cargo 0/0/0/0; containers 44 Critical/180 High/158 Moderate/20 Low; tool errors 0; no allowlist"},
+    "remoteCi": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "Exact candidate conclusions absent at capture time; release workflow requires core, CodeQL, trusted browser, sanitizer, fuzz, and chaos checks"},
+    "releaseArtifacts": {"status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": null, "details": "No tag, manifest, checksum, attestation, registry push, or GitHub Release created while blockers remain"},
+    "liveRuntime": {"status": "NOT_CLAIMED", "verifiedSha": null, "details": "No AWS, Vercel, Neon, URL, TLS, deployed-SHA, live Clerk, or persistent realtime verification"}
+  },
+  "findings": [
+    {
+      "id": "AUDIT-STATE-001",
+      "severity": "HIGH",
+      "category": "repository_state",
+      "status": "PENDING_DOCUMENTATION_COMMIT",
+      "blocking": true,
+      "title": "Candidate evidence is being committed separately from the implementation candidate",
+      "observedTruth": "Implementation candidate is 42dcb17dd26c11a05dd20109102f37ea3fb5135a; the canonical documentation/evidence files are currently uncommitted documentation-only changes.",
+      "requiredAction": "Commit the canonical documentation/evidence, verify clean status, and preserve the implementation SHA as the evidence identity.",
+      "owner": "release-lead",
+      "evidence": ["docs/audits/CANONICAL_FRESH_EVIDENCE.md", "docs/audits/CANONICAL_RELEASE_REPORT.md"]
+    },
+    {
+      "id": "AUDIT-ID-001",
+      "severity": "HIGH",
+      "category": "release_identity",
+      "status": "PENDING_FRESH_EVIDENCE",
+      "blocking": true,
+      "title": "No canonical v1.0.1 release identity or artifact set exists",
+      "observedTruth": "No v1.0.1 tag, release manifest, SHA256SUMS, attestation, registry push, or GitHub Release exists.",
+      "requiredAction": "After every required gate is green, create artifacts from the exact accepted candidate and verify tag/object, manifest, checksums, and release metadata without moving historical tags.",
+      "owner": "release-lead"
+    },
+    {
+      "id": "AUDIT-HISTORY-001",
+      "severity": "HIGH",
+      "category": "historical_evidence",
+      "status": "PENDING_DOCUMENTATION_COMMIT",
+      "blocking": true,
+      "title": "Historical evidence must remain checkpoint evidence",
+      "observedTruth": "Historical v1.0.0/hardened.10 reports and evidence are preserved and now linked as historical; final static claim scan and documentation commit are still pending.",
+      "requiredAction": "Keep historical files byte-preserved, retain named SHA/freshness labels, and complete the final claim/link scan.",
+      "owner": "release-lead",
+      "evidence": ["evidence/v1.0.0/", "docs/audits/V1_HARDENING_FINAL_REPORT.md", "docs/audits/V1_HARDENING_FINDINGS.md"]
+    },
+    {
+      "id": "AUDIT-PROV-001",
+      "severity": "HIGH",
+      "category": "provenance_licensing",
+      "status": "PASS_LOCAL",
+      "blocking": false,
+      "title": "Mechanical provenance scan passes but is not legal clearance",
+      "observedTruth": "Candidate-bound checks report 54 baseline overlaps, zero unallowlisted identical paths, and 14 regression assertions; retained tutorial/generated/third-party paths still require path-specific disposition.",
+      "requiredAction": "Complete the per-path provenance and licensing review and record any permission or legal decision before an unconditional release claim.",
+      "owner": "release-lead",
+      "evidence": ["docs/PROVENANCE.md", "docs/audits/provenance-paths.tsv"]
+    },
+    {
+      "id": "AUDIT-LEGAL-001",
+      "severity": "HIGH",
+      "category": "user_approval_legal",
+      "status": "OWNER_ACTION",
+      "blocking": true,
+      "title": "External provenance/licensing approval is not recorded",
+      "observedTruth": "Mechanical scans cannot grant permission or legal approval for retained baseline-derived or third-party material.",
+      "requiredAction": "Record explicit owner/legal disposition or replacement for every unresolved path before an unconditional public release claim.",
+      "owner": "external-owner"
+    },
+    {
+      "id": "AUDIT-AUTH-001",
+      "severity": "HIGH",
+      "category": "web_auth_clerk",
+      "status": "OWNER_ACTION",
+      "blocking": true,
+      "title": "Dedicated Clerk E2E Environment is empty",
+      "observedTruth": "Repository API state showed no dedicated publishable key, secret key, or audience variable in GitHub Environment concord-e2e.",
+      "requiredAction": "Configure the dedicated non-production Clerk instance and exact audience/origin policy, without exposing credentials, then rerun trusted auth.",
+      "owner": "external-owner",
+      "evidence": ["docs/TESTING.md", "docs/audits/CANONICAL_FRESH_EVIDENCE.md"]
+    },
+    {
+      "id": "AUDIT-BROWSER-001",
+      "severity": "HIGH",
+      "category": "browser_e2e",
+      "status": "OWNER_ACTION",
+      "blocking": true,
+      "title": "Trusted authenticated browser matrix cannot provision",
+      "observedTruth": "The full local dev-mode Chromium journey/accessibility and Firefox/WebKit smoke jobs passed in the strict orchestrator, while authenticated production-mode Chromium, Firefox, WebKit, accessibility, and two-context trusted journeys remain blocked by missing Clerk configuration.",
+      "requiredAction": "Run the no-retry trusted browser matrix with the exact candidate and record browser versions, accessibility, realtime, reconnect, and negative auth results.",
+      "owner": "release-lead"
+    },
+    {
+      "id": "AUDIT-BRANCH-001",
+      "severity": "HIGH",
+      "category": "ci_remote",
+      "status": "CLOSED",
+      "blocking": false,
+      "title": "Protected main required obsolete browser contexts",
+      "observedTruth": "GitHub API readback initially showed browser (chromium), browser (firefox), and browser (webkit); the protected branch now requires the three trusted browser contexts and browser gate, with strict protection and non-status settings preserved.",
+      "requiredAction": "Recheck required contexts if workflow job names change.",
+      "owner": "release-lead"
+    },
+    {
+      "id": "AUDIT-BUILD-001",
+      "severity": "HIGH",
+      "category": "toolchain_build",
+      "status": "PASS_LOCAL",
+      "blocking": false,
+      "title": "Credential-free build matrix passes locally",
+      "observedTruth": "Web, Apple Clang native, WASM, Rust format/lint/test, and exact source-export image smoke passed on implementationCommit; Linux GCC/Clang remote lanes remain pending.",
+      "requiredAction": "Observe the exact candidate Linux GCC/Clang and clean-room remote conclusions before release.",
+      "owner": "release-lead"
+    },
+    {
+      "id": "AUDIT-BENCH-001",
+      "severity": "MEDIUM",
+      "category": "benchmark_performance",
+      "status": "PASS_LOCAL",
+      "blocking": false,
+      "title": "Fresh native candidate benchmark recorded",
+      "observedTruth": "The current native benchmark was rerun on implementationCommit with five-run medians and the corrected 2,000-unit random-delete denominator.",
+      "requiredAction": "Do not publish a cross-version delta from this local baseline; rerun only comparable workloads if a release headline requires it.",
+      "owner": "release-lead",
+      "evidence": ["evidence/v1.0.1/native-benchmark.txt", "docs/BENCHMARKS.md"]
+    },
+    {
+      "id": "AUDIT-FUZZ-001",
+      "severity": "HIGH",
+      "category": "fuzz_property",
+      "status": "PASS_LOCAL",
+      "blocking": false,
+      "title": "Fresh bounded property and native fuzz campaign passes",
+      "observedTruth": "30/30 property seeds and 160,000 bounded standalone native fuzz executions completed without crashes.",
+      "requiredAction": "Observe the required remote fuzz/nightly conclusions; do not call the bounded run exhaustive fuzz coverage.",
+      "owner": "release-lead",
+      "evidence": ["docs/audits/CANONICAL_FRESH_EVIDENCE.md"]
+    },
+    {
+      "id": "AUDIT-SAN-001",
+      "severity": "HIGH",
+      "category": "sanitizer_native",
+      "status": "PASS_LOCAL",
+      "blocking": false,
+      "title": "Fresh local sanitizer lanes pass with an explicit macOS limitation",
+      "observedTruth": "ASan/UBSan and TSan CTest matrices passed locally; macOS leak detection was disabled because the runtime does not support it; remote nightly remains pending.",
+      "requiredAction": "Observe supported Linux/nightly sanitizer lanes and retain the explicit leak-detection limitation.",
+      "owner": "release-lead"
+    },
+    {
+      "id": "AUDIT-CI-001",
+      "severity": "HIGH",
+      "category": "ci_remote",
+      "status": "PENDING_REMOTE",
+      "blocking": true,
+      "title": "No exact-candidate remote CI conclusion at capture time",
+      "observedTruth": "The candidate had not yet been pushed when this evidence was captured; historical runs do not cover the changed workflows or exact implementation SHA.",
+      "requiredAction": "Push the candidate, inspect exact check-runs by name/head SHA/app, and preserve failures including missing-Clerk preflight.",
+      "owner": "release-lead"
+    },
+    {
+      "id": "AUDIT-SUPPLY-001",
+      "severity": "HIGH",
+      "category": "security_supply_chain",
+      "status": "FAIL_RELEASE_BLOCKER",
+      "blocking": true,
+      "title": "Strict container dependency gate remains red",
+      "observedTruth": "Fresh strict dep-scan reports 44 Critical and 180 High container findings, with no tool errors and no broad allowlist; image smoke, SBOM, pin, secret, and provenance checks pass separately.",
+      "requiredAction": "Resolve the container inventory with patched upstream/custom validated images or exact advisory-level disposition, then rerun the strict gate.",
+      "owner": "release-lead",
+      "evidence": ["evidence/v1.0.1/container-scan.json", "docs/SECURITY.md"]
+    },
+    {
+      "id": "AUDIT-CONTAINER-001",
+      "severity": "HIGH",
+      "category": "security_supply_chain",
+      "status": "PENDING_FRESH_EVIDENCE",
+      "blocking": true,
+      "title": "Unaccepted Critical/High findings remain in pinned development/observability images",
+      "observedTruth": "Postgres 6/38, NATS 3/13, Redis 2/10, nginx 0/0, Prometheus 11/38, and Grafana 22/81 Critical/High counts were observed at exact refreshed digests on linux/arm64.",
+      "requiredAction": "Use a patched upstream digest or a deliberately rebuilt and validated derivative; no broad allowlist; review again by 2026-10-14.",
+      "owner": "release-lead",
+      "reviewDate": "2026-10-14",
+      "evidence": ["evidence/v1.0.1/container-scan.json"]
+    },
+    {
+      "id": "AUDIT-DOC-001",
+      "severity": "MEDIUM",
+      "category": "documentation_claims",
+      "status": "PENDING_DOCUMENTATION_COMMIT",
+      "blocking": true,
+      "title": "Current documentation must finish the stale-claim scan",
+      "observedTruth": "Canonical current documents are being reconciled while historical artifacts are preserved; final static claim/link/whitespace validation is not yet recorded.",
+      "requiredAction": "Run the final scoped claim scan, diff check, JSON validation, and document the exact result in the committed report.",
+      "owner": "release-lead"
+    },
+    {
+      "id": "AUDIT-DEPENDABOT-001",
+      "severity": "MEDIUM",
+      "category": "security_supply_chain",
+      "status": "OWNER_ACTION",
+      "blocking": true,
+      "title": "Dependabot account-level security settings are disabled or unverified",
+      "observedTruth": "GitHub API readback reported vulnerability alerts disabled and automated security fixes disabled; checked-in dependabot.yml is present but does not enable account-level settings.",
+      "requiredAction": "Enable and read back alerts and automated fixes with repository administration access, or record the bounded platform failure and owner exception.",
+      "owner": "external-owner"
+    },
+    {
+      "id": "AUDIT-RUNTIME-001",
+      "severity": "HIGH",
+      "category": "production_runtime",
+      "status": "NOT_CLAIMED",
+      "blocking": false,
+      "title": "No live runtime claim is made",
+      "observedTruth": "No AWS, Vercel, Neon, URL, deployed SHA, TLS, live Clerk, or persistent realtime runtime was verified.",
+      "requiredAction": "Keep live wording withheld; if later authorized, verify the selected persistent topology independently.",
+      "owner": "external-owner"
+    },
+    {
+      "id": "AUDIT-AWS-001",
+      "severity": "MEDIUM",
+      "category": "cloud_infrastructure",
+      "status": "NOT_CLAIMED",
+      "blocking": false,
+      "title": "AWS is intentionally not reprovisioned",
+      "observedTruth": "The recorded former AWS environment was torn down; this campaign did not run a new AWS deployment or destructive inventory operation.",
+      "requiredAction": "Choose and authorize a future provider separately; do not recreate AWS merely to close an evidence gap.",
+      "owner": "external-owner"
+    }
+  ],
+  "evidence": [
+    {"id": "EV-STATE-001", "category": "repository_state", "status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_RELEASE_REPORT.md"},
+    {"id": "EV-TAGS-001", "category": "release_identity", "status": "PENDING_FRESH_EVIDENCE", "verifiedSha": null, "artifact": null},
+    {"id": "EV-HISTORY-001", "category": "historical_evidence", "status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": null, "artifact": "evidence/v1.0.0/ and preserved historical audit files"},
+    {"id": "EV-PROV-001", "category": "provenance_licensing", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/PROVENANCE.md; scripts/security/provenance-check.sh; scripts/security/provenance-tests.sh"},
+    {"id": "EV-LICENSE-001", "category": "provenance_licensing", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "Path-specific legal/permission record not present"},
+    {"id": "EV-WEB-001", "category": "toolchain_build", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
+    {"id": "EV-NATIVE-001", "category": "toolchain_build", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/image-smoke.txt"},
+    {"id": "EV-RUST-001", "category": "toolchain_build", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
+    {"id": "EV-WASM-001", "category": "toolchain_build", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
+    {"id": "EV-SAN-001", "category": "sanitizer_native", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
+    {"id": "EV-FUZZ-001", "category": "fuzz_property", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
+    {"id": "EV-STRICT-001", "category": "orchestration", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "25 PASS / 1 FAIL / 0 SKIP / 0 required SKIP; only security/dependency-scan failed"},
+    {"id": "EV-BROWSER-001", "category": "browser_e2e", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "Local dev-mode browser jobs pass in docs/audits/CANONICAL_FRESH_EVIDENCE.md; trusted production-mode Clerk matrix remains blocked"},
+    {"id": "EV-BRANCH-001", "category": "ci_remote", "status": "CLOSED", "verifiedSha": null, "artifact": "GitHub API branch-protection readback"},
+    {"id": "EV-CLERK-001", "category": "web_auth_clerk", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "GitHub concord-e2e Environment is empty"},
+    {"id": "EV-CI-001", "category": "ci_remote", "status": "PENDING_REMOTE", "verifiedSha": null, "artifact": null},
+    {"id": "EV-SUPPLY-001", "category": "security_supply_chain", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/container-scan.json"},
+    {"id": "EV-BENCH-001", "category": "benchmark_performance", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/native-benchmark.txt"},
+    {"id": "EV-CHAOS-001", "category": "reliability", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/chaos-summary.json"},
+    {"id": "EV-CLOUD-001", "category": "cloud_infrastructure", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": null},
+    {"id": "EV-DOC-001", "category": "documentation_claims", "status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": null, "artifact": "git diff --check, JSON validation, historical-artifact diff, and full-history secret scan passed; final commit binding remains pending"},
+    {"id": "EV-DEPENDABOT-001", "category": "security_supply_chain", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "GitHub API account-level settings readback"},
+    {"id": "EV-PROD-001", "category": "production_runtime", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": null}
+  ],
+  "ownerActions": [
+    {
+      "id": "OA-CLERK-001",
+      "category": "web_auth_clerk",
+      "owner": "external-owner",
+      "status": "OWNER_ACTION",
+      "action": "Configure concord-e2e with a dedicated non-production Clerk publishable key, secret key, exact audience concord-e2e, optional issuer, and the matching token template/origin policy.",
+      "acceptance": "Secret-free metadata plus exact-candidate trusted Chromium/Firefox/WebKit, accessibility, negative-auth, realtime, and reconnect results."
+    },
+    {
+      "id": "OA-CONTAINER-001",
+      "category": "security_supply_chain",
+      "owner": "release-lead",
+      "status": "FAIL_RELEASE_BLOCKER",
+      "action": "Resolve 44 Critical / 180 High unaccepted container findings with patched upstream or deliberately rebuilt/validated images; no broad allowlist.",
+      "acceptance": "Fresh strict scan returns no unaccepted Critical/High and records exact image digests, scanner, platform, and tool status."
+    },
+    {
+      "id": "OA-REMOTE-001",
+      "category": "ci_remote",
+      "owner": "release-lead",
+      "status": "PENDING_REMOTE",
+      "action": "Push the implementation plus canonical documentation, observe exact candidate check-runs, and retain failed/preflight details.",
+      "acceptance": "All release-required check names conclude success for one exact candidate SHA, including trusted browsers, CodeQL, fuzz, sanitizer, and chaos."
+    },
+    {
+      "id": "OA-DEPENDABOT-001",
+      "category": "security_supply_chain",
+      "owner": "external-owner",
+      "status": "OWNER_ACTION",
+      "action": "Enable and read back GitHub Dependabot vulnerability alerts and automated security fixes, or record bounded platform failure.",
+      "acceptance": "API readback shows enabled settings or a documented platform-owner exception."
+    },
+    {
+      "id": "OA-LEGAL-001",
+      "category": "user_approval_legal",
+      "owner": "external-owner",
+      "status": "OWNER_ACTION",
+      "action": "Resolve path-specific provenance/licensing permissions for retained baseline-derived or third-party/generated material.",
+      "acceptance": "Per-path permission, replacement, allowlist, or legal decision linked to candidate evidence."
+    },
+    {
+      "id": "OA-RELEASE-001",
+      "category": "release_identity",
+      "owner": "release-lead",
+      "status": "PENDING_FRESH_EVIDENCE",
+      "action": "Only after all blockers close, create v1.0.1 artifacts from the exact accepted commit and independently verify manifest/checksums/attestation/release metadata.",
+      "acceptance": "Exact tag/object, release manifest, SHA256SUMS, SBOMs, artifact digests, and GitHub Release API verification."
+    }
+  ],
+  "historicalArtifacts": [
+    {"path": "docs/audits/V1_HARDENING_BASELINE.md", "status": "HISTORICAL_ONLY", "preserved": true},
+    {"path": "docs/audits/V1_HARDENING_FINAL_REPORT.md", "status": "HISTORICAL_ONLY", "preserved": true},
+    {"path": "docs/audits/V1_HARDENING_FINDINGS.md", "status": "HISTORICAL_ONLY", "preserved": true},
+    {"path": "evidence/v1.0.0/", "status": "HISTORICAL_ONLY", "preserved": true},
+    {"path": "docs/audits/provenance-paths.tsv", "status": "HISTORICAL_ONLY", "preserved": true}
+  ],
+  "policy": {
+    "noInventedSecrets": true,
+    "noInventedCounts": true,
+    "noHistoricalEvidenceRewrite": true,
+    "noTagRewrite": true,
+    "noBroadContainerAllowlist": true,
+    "noLiveDeploymentClaim": true,
+    "awsReprovisioning": "FORBIDDEN_BY_CURRENT_SCOPE",
+    "releaseRequiresExactCandidateRemoteChecks": true,
+    "releaseRequiresTrustedClerkBrowser": true,
+    "releaseRequiresStrictContainerSecurity": true,
+    "documentationOnlyDescendantDoesNotChangeImplementationIdentity": true
+  }
+}

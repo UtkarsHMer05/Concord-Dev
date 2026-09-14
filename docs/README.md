@@ -7,14 +7,17 @@ that matches your question. Documents are authoritative for their phase
 and code disagree, code wins and the doc must be fixed (the standing
 rule from [CONFIGURATION.md](CONFIGURATION.md)).
 
-Audits live in [audits/](audits/); the secret-free machine-readable v1
-evidence index lives in [../evidence/v1.0.0/](../evidence/v1.0.0/).
+Audits live in [audits/](audits/). The current candidate handoff is
+[`audits/CANONICAL_RELEASE_REPORT.md`](audits/CANONICAL_RELEASE_REPORT.md),
+with candidate evidence under [`../evidence/v1.0.1/`](../evidence/v1.0.1/).
+The secret-free v1.0.0 evidence index remains preserved at
+[`../evidence/v1.0.0/`](../evidence/v1.0.0/) as historical evidence.
 
 ## Start here
 
 | Document | What it answers |
 |---|---|
-| [README.md](../README.md) (root) | The 30-second tour: what Concord is, what is hard about it, the measured results, and the honest scope of the live demo |
+| [README.md](../README.md) (root) | The 30-second tour: what Concord is, what is hard about it, the measured results, and the honest scope of the configured demo reference |
 | [ENGINEERING_BRIEF.md](ENGINEERING_BRIEF.md) | The technical orientation for engineers/interviewers: the core decisions, the hardest bugs found, and where each claim is documented |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How the system fits together: components, boundaries, the write path, and the distributed/storage planes (with mermaid diagrams) |
 
@@ -91,5 +94,9 @@ evidence index lives in [../evidence/v1.0.0/](../evidence/v1.0.0/).
 | [audits/V1_HARDENING_BASELINE.md](audits/V1_HARDENING_BASELINE.md) | The toolchain and gate results captured at the start of the v1 hardening pass (2026-09-12) |
 | [audits/V1_HARDENING_FINDINGS.md](audits/V1_HARDENING_FINDINGS.md) | The hardening finding ledger: severity, evidence, fix, and regression-test status per finding |
 | [audits/V1_HARDENING_FINAL_REPORT.md](audits/V1_HARDENING_FINAL_REPORT.md) | The final 22-section remediation, reproducibility, browser, provenance, CI, release, and residual-risk report |
+| [audits/CANONICAL_RELEASE_REPORT.md](audits/CANONICAL_RELEASE_REPORT.md) | Current `1.0.1` candidate verdict, exact local evidence, unresolved blockers, and owner actions |
+| [audits/CANONICAL_FRESH_EVIDENCE.md](audits/CANONICAL_FRESH_EVIDENCE.md) | Candidate-bound local gate results and limitations |
+| [audits/CANONICAL_RELEASE_LEDGER.json](audits/CANONICAL_RELEASE_LEDGER.json) | Machine-readable current findings/evidence/owner-action ledger |
+| [../evidence/v1.0.1/README.md](../evidence/v1.0.1/README.md) | Secret-free evidence bundle for implementation candidate `42dcb17…` |
 | [../evidence/v1.0.0/README.md](../evidence/v1.0.0/README.md) | Secret-free machine-readable CI, security, reproducibility, and performance evidence for v1.0.0 |
 | [audits/provenance-paths.tsv](audits/provenance-paths.tsv) | Machine-readable path inventory: baseline vs current git blob ids for every in-scope `src/`/`public/` path (regenerate via `python3 scripts/audit-provenance.py`) |

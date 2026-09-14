@@ -1,0 +1,14 @@
+Concord 1.0.1 candidate image smoke
+implementationCommit=42dcb17dd26c11a05dd20109102f37ea3fb5135a
+capturedAt=2026-09-14
+command=CONCORD_RELEASE_GIT_SHA=$(git rev-parse HEAD) scripts/release/smoke-images.sh
+
+Result: PASS · 3/3 images/services
+
+- gateway: health/live OK; uid 10001; SIGTERM exit 0 in 2194ms
+- web: HTTP up; uid 1000; SIGTERM exit 143 in 138ms
+- worker: generate_ops status 0; uid 10001
+- source export: clean tree 42dcb17 (438 tracked files)
+
+The helper validates image labels and runtime identity from the exact exported
+tree. No registry push or deployment was performed.

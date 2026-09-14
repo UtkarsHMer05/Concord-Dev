@@ -3,7 +3,7 @@
 Status: Authoritative historical delivery plan; current implementation state
 and release evidence are recorded in the final hardening report.
 Version: 1.1
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 Concord was organized and delivered through eight high-level phases. The
 phase table preserves that historical plan; later-phase implementation work
@@ -217,5 +217,7 @@ owner action rather than a current product claim.
 - Every phase ends with a completion report (milestones, tests, benchmarks,
   decisions changed, branch/tag, memory/state updates) before the next begins.
 - Tags such as `phase-0-complete` are created only after their gates pass.
-- The `antonio-original-baseline` tag is immutable (DEC-015).
+- The `antonio-original-baseline` tag is preserved as a historical provenance
+  reference (DEC-015); release integrity is established by candidate SHA and
+  protected publication checks, not by an ordinary tag alone.
 - Deployment decisions stay out of Phases 0–6 (DEC-010).

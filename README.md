@@ -5,8 +5,8 @@
 <h1 align="center">Concord</h1>
 
 <p align="center">
-  A local-first collaborative document workspace — with the entire
-  synchronization engine built from scratch.
+  A local-first collaborative document workspace — with the synchronization
+  engine implemented in this repository.
 </p>
 
 <p align="center">
@@ -17,18 +17,26 @@
   <img src="https://img.shields.io/badge/Transport-NATS%20JetStream-34A1C1?logo=nats&logoColor=white" alt="NATS" />
   <img src="https://img.shields.io/badge/Cached-Redis-DC382D?logo=redis&logoColor=white" alt="Redis" />
   <img src="https://img.shields.io/badge/license-MIT-black" alt="License: MIT" />
-  <img src="https://img.shields.io/badge/release-1.0.0-blue" alt="Release 1.0.0" />
+  <img src="https://img.shields.io/badge/release-1.0.1--candidate-blue" alt="Candidate 1.0.1 (not published)" />
 </p>
 
 <p align="center">
-  <strong>Configured demo URL →
+  <strong>Configured demo URL (not currently verified) →
   <a href="https://concord-dev.vercel.app">concord-dev.vercel.app</a></strong><br />
-  Sign in with an email code, create a document, start typing.
-  Edits are CRDT-merged and persist locally across reloads; when a
-  sync gateway is reachable, server durability follows the
-  PostgreSQL commit-before-ACK contract. Current URL reachability was not
-  independently reverified in the final remediation pass.
+  This link is retained as a configuration/historical reference. The current
+  audit makes no availability, deployed-SHA, live-auth, or live-realtime claim.
 </p>
+
+> Verification status (2026-09-14): historical release/browser/production
+> statements below remain tied to named checkpoints. Fresh credential-free
+> candidate results for implementation commit `42dcb17…` are recorded in the
+> canonical handoff; trusted Clerk, exact remote CI, release artifacts, and
+> live-runtime claims remain blocked or withheld. The canonical handoff is
+> [`docs/audits/CANONICAL_RELEASE_REPORT.md`](docs/audits/CANONICAL_RELEASE_REPORT.md)
+> and its machine-readable
+> [`CANONICAL_RELEASE_LEDGER.json`](docs/audits/CANONICAL_RELEASE_LEDGER.json).
+> The current package/runtime version is 1.0.1, but no v1.0.1 tag or release
+> has been published and no live deployment is claimed by this README.
 
 ---
 
@@ -53,10 +61,10 @@ Concord's answer, all built in this repository:
   gateway is reachable.
 
 No collaboration SaaS is involved. Liveblocks and Convex were removed
-deliberately (Phases 0–1, asserted by smoke tests: their old endpoints
-404). The sync stack — merge semantics, wire protocol, gateways,
-recovery — is original to this repo, and **every number in this README
-is measured**, with reproduction commands in
+deliberately (Phases 0–1, asserted by historical smoke tests: their old
+endpoints 404). The sync stack — merge semantics, wire protocol, gateways,
+recovery — is implemented in this repo, and every retained number in this
+README is labeled and sourced in
 [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## What is hard about this (and how it is answered)
@@ -66,17 +74,18 @@ One C++20 core (YATA-style origin anchoring, tombstones, last-writer-wins
 attribute registers) is compiled to native *and* WASM; every
 correctness suite asserts the two produce byte-identical digests.
 Replicas converge under arbitrary reordering, duplication, and
-partition — verified by a 130-seed randomized campaign
+partition — as recorded by a historical 130-seed randomized campaign
 (**1.06 M operations, 0 divergent replicas**) and a 27-scenario chaos
-matrix (**0 lost durable-ACKed operations**).
+matrix (**0 lost durable-ACKed operations**). These are checkpoint results,
+not current-tree reruns.
 
 **2. "Saved" must actually mean saved.**
 An operation is acknowledged only after its PostgreSQL WAL commit;
 delivery is at-least-once with idempotent ingestion (operation
 identity = canonical bytes; a unique index is the dedup boundary).
 Client crash mid-batch, gateway SIGKILL after commit-before-ACK, NATS
-redelivery storm — all tested scenarios, none lose an acknowledged
-operation. The exact claims (and non-claims) are written down in
+redelivery storm — the historical test scenarios recorded no loss of an
+acknowledged operation. The exact claims (and non-claims) are written down in
 [`docs/FAILURE_MODEL.md`](docs/FAILURE_MODEL.md).
 
 **3. Local-first has to be real, not a marketing word.**
@@ -152,9 +161,10 @@ fires only after commit; on any failure the ops stay pending in the
 client outbox and re-send under the same identities — the server
 dedups.
 
-## Snapshots, recovery, compaction
+## Historical snapshots, recovery, and compaction result
 
-History is the operation log; snapshots compress it. Recovery can
+History is the operation log; snapshots compress it. A historical campaign
+recorded recovery that could
 replay 100 k operations (65.2 s p50) or import a snapshot plus the 1 k
 tail after it (**0.96 s p50 — 98.4 % faster**, digest-verified on every
 run, reproduced four times: 98.6 / 98.5 / 98.6 / 98.4 %). Safe
@@ -162,15 +172,19 @@ compaction prunes operations covered by a snapshot boundary (staged,
 crash-safe, integrity-checked): after fully compacting a 50 k-op
 document, **50.1 %** of durable bytes remain.
 
-## Measured results
+## Recorded historical measurements
+
+The values in this table are retained measurements from named historical
+campaigns. They are not current-tree measurements and must not be changed or
+reused as a fresh release result without a candidate-bound rerun.
 
 | Claim | Measured |
 |---|---|
 | Durable-ACK ingest, 25-op batch | p50 31.45 → **2.72 ms** (−91.4 %) after replacing per-op INSERT round trips with one multi-row `unnest` INSERT; throughput 771 → **8 685 ops/s** (11.3×). Profiler-driven; replay digests identical before/after. |
 | Scale-out, 1 → 4 gateways (200 ops/s open-loop) | ack p95 13.19 → **15.23 ms**, **zero loss, 0.000 % errors** — a gateway costs ~2 ms |
 | Snapshot+tail recovery | **98.4 % faster** than full replay (65.2 → 0.96 s p50; 100 k history / 1 k tail; 5 runs) |
-| Recorded correctness campaigns | **181/181 scenarios** on the cited Phase 6/7 campaign commits; 0 divergent replicas, 0 lost durable-ACKed ops |
-| Fuzzing | **5 M executions, 0 crashes** (every fixed crash pinned by a corpus regression) |
+| Historical correctness campaigns | **181/181 scenarios** on the cited Phase 6/7 campaign commits; 0 divergent replicas, 0 lost durable-ACKed ops |
+| Historical fuzzing campaign | **5 M executions, 0 crashes** (every fixed crash pinned by a corpus regression) |
 | Node-instrumented WASM/worker proxy | typing 0.003 ms/op; 5 k-op fanout batch 227 ms; runtime bundle 180 KB (not real-browser latency) |
 
 Environments, run counts, denominators, and reproduction commands for
@@ -178,10 +192,12 @@ every number: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 The performance and chaos figures above are recorded historical campaigns
 with their source commits in `docs/BENCHMARKS.md`; the final remediation pass
-does not claim a new before/after performance delta. Fresh hardening evidence
-is reported in [`docs/audits/V1_HARDENING_FINAL_REPORT.md`](docs/audits/V1_HARDENING_FINAL_REPORT.md).
+did not claim a new before/after performance delta. Fresh current-checkout
+evidence is pending in the canonical handoff; the older
+[`docs/audits/V1_HARDENING_FINAL_REPORT.md`](docs/audits/V1_HARDENING_FINAL_REPORT.md)
+is a historical report, not the current verdict.
 
-## Proving it: the verification campaign
+## Historical proof campaign (not current release acceptance)
 
 - **Chaos:** gateway SIGKILL / rolling restart, NATS pause / restart /
   redelivery / lag / storage loss, Redis loss, Postgres outage, worker
@@ -190,12 +206,12 @@ is reported in [`docs/audits/V1_HARDENING_FINAL_REPORT.md`](docs/audits/V1_HARDE
   in-flight durable writes → close, measured ~2.2–3 s; a rolling gateway
   restart was verified during the historical production-shaped exercise
   with both client sessions intact.
-- **Sanitizers:** ASan + UBSan and TSan green across the native matrix.
-- **Test suites:** the current counts are generated from the final verification
-  run rather than copied from an earlier phase report. The reproducible
-  commands cover web unit/DB/realtime projects, native core/worker CTest,
-  WASM parity, the full Rust workspace, and the rendered-browser matrix; the
-  exact final counts are recorded in the hardening report.
+- **Sanitizers:** ASan + UBSan and TSan were reported green in the historical
+  native matrix; no current sanitizer result is asserted here.
+- **Test suites:** the commands cover web unit/DB/realtime projects, native
+  core/worker CTest, WASM parity, the Rust workspace, and the rendered-browser
+  matrix. Historical counts remain tied to their checkpoints; fresh counts
+  belong in the canonical report.
 
 ## Security
 
@@ -227,8 +243,8 @@ gates, and evidence in
 | 3 | Realtime transport: Rust WebSocket gateways, binary wire protocol, authN/authZ per batch, backpressure + graceful drain |
 | 4 | Distributed fanout: nginx LB over N gateways, NATS JetStream (msg-id dedup), Redis presence/rate limits; crash/storm/slow/lag E2E; 1→3 gateway scale-out, zero loss |
 | 5 | Snapshots, 98.6 % faster recovery, crash-safe compaction, restore-as-forward-ops, retention + audit hardening |
-| 6 | Proof phase: 32-row threat model mapped to controls with executable and scheduled/manual extended-fuzz coverage recorded, sanitizers, 5 M historical fuzz execs, 27-scenario chaos, deterministic SBOMs, hardened images, OTel/Prometheus/Grafana live-proven |
-| 7 | Production polish + deployment preparation: browser-verified E2E on release gateway/worker builds, CSP/CSWSH fixes, and deployment runbooks; the exercised AWS stack is intentionally torn down |
+| 6 | Historical proof phase: 32-row threat model mapped to controls with executable and scheduled/manual extended-fuzz coverage recorded, sanitizer evidence, historical fuzz executions, 27-scenario chaos, deterministic SBOMs, hardened images, and observability evidence |
+| 7 | Historical production polish + deployment preparation: browser E2E on release gateway/worker builds, CSP/CSWSH fixes, and deployment runbooks; the exercised AWS stack was later torn down |
 
 The pristine tutorial baseline is preserved at the git tag
 `antonio-original-baseline` (see Provenance below).
@@ -285,25 +301,21 @@ Deep dives: [ARCHITECTURE](docs/ARCHITECTURE.md) ·
 [VERIFICATION](docs/VERIFICATION.md) ·
 [DECISIONS](docs/DECISIONS.md)
 
-## What the live demo runs (honest scope)
+## Demo configuration and deployment status
 
-The demo at [concord-dev.vercel.app](https://concord-dev.vercel.app)
-runs the **web tier on Vercel + Neon PostgreSQL + Clerk**, free tier.
+The repository retains the configured URL
+[concord-dev.vercel.app](https://concord-dev.vercel.app) as a historical or
+owner-provided reference. It was not independently verified in this audit, so
+this README makes no current claim about URL reachability, deployed version,
+Clerk authentication, or live data durability.
 
-Working live: sign-in, creating/renaming/deleting documents,
-CRDT-backed editing, and edits durable across reloads in your browser
-(the local-first op-log) — documents and permissions live in
-PostgreSQL.
-
-Not running on the demo URL: the **multi-user realtime fanout path**
-(Rust gateways + nginx + NATS + Redis). That stack is built, tested,
-and deployable — an AWS 10-service compose deployment was exercised
-historically and then torn down to keep ongoing cost at zero. The current
-repository validates the path locally with real gateways and browser E2E;
-the client detects the missing
-gateway and stays in local-first mode truthfully (no fake
-"collaborating" states) — the same degradation any offline session
-uses by design.
+A prior project state described a Vercel + Neon + Clerk web-tier deployment
+and a separately exercised AWS realtime stack that was later torn down. Those
+are historical records. The former multi-user realtime path (Rust gateways,
+nginx, NATS, Redis, PostgreSQL, and worker) must not be represented as running
+on Vercel serverless functions without a separately verified architecture and
+runtime. The local repository still documents how to exercise that path with
+local services; local procedures are not live deployment proof.
 
 Remaining v1 limitations, stated plainly:
 
@@ -315,27 +327,25 @@ Remaining v1 limitations, stated plainly:
 - History/restore UI is out of the v1 boundary (the revision/restore
   machinery exists and is tested at the protocol layer).
 - Embedded-WebView browsers are not independently verified in this pass and
-  can need one event or a reload to converge live fanout visually. The current
-  rendered-browser evidence is Chromium 12/12 (7 journey + 5 accessibility),
-  Firefox smoke 1/1, and WebKit smoke 1/1; the data path is separately covered by realtime
-  transport E2E.
+  can need one event or a reload to converge live fanout visually. Historical
+  rendered-browser evidence recorded Chromium 12/12 (7 journey + 5
+  accessibility), Firefox smoke 1/1, and WebKit smoke 1/1; the data path is
+  separately covered by historical realtime transport E2E. These counts are
+  not current-checkout results.
 
 ## Provenance and attribution
 
 This project originated from the Code With Antonio "Google Docs Clone"
-tutorial (Next.js/React/Clerk/Convex/Liveblocks) and was deliberately
-rebuilt into an original engineering project. The tutorial-derived
-material is fully resolved: all baseline artwork, fonts, template copy,
-and tutorial-identical source were replaced with original Concord
-implementations; the retained `src/components/ui/` primitives are
-verified shadcn/ui generator output (MIT, attributed in
-[`NOTICE`](NOTICE)); and the full synchronization stack — CRDT, wire
-protocol, gateways, data layer — is original to this repository. The
-pristine tutorial baseline is preserved for transparency at the git tag
-`antonio-original-baseline`, and CI enforces the boundary
-(`scripts/security/provenance-check.sh` fails if any shipped file is
-byte-identical to the baseline without a verified permissive-license
-allowlist entry). The full record is
+tutorial (Next.js/React/Clerk/Convex/Liveblocks) and was rebuilt into a
+systems project in this repository. The provenance status is deliberately
+path-specific: a historical pass recorded replacement of baseline artwork,
+fonts, template copy, and selected source, while retained
+`src/components/ui/` primitives are described as shadcn/ui generator output
+with MIT attribution in [`NOTICE`](NOTICE). The synchronization stack is
+implemented in this repository, but no blanket “100% original” or final legal
+clearance claim is made. The pristine tutorial baseline is preserved for
+transparency at the git tag `antonio-original-baseline`, and CI enforces a
+mechanical byte-identity boundary; see the candidate-bound details in
 [`docs/PROVENANCE.md`](docs/PROVENANCE.md).
 
 ## License

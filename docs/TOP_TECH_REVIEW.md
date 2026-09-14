@@ -1,12 +1,13 @@
 # Concord v1 — Top Technical Review
 
-Status: factual, evidence-backed review of the final remediation state.
+Status: factual, evidence-backed checkpoint review plus current candidate limits.
 This is a review matrix, not a numeric or marketing score. It separates
 verified repository behavior from deployment and measurement limits.
 
 Evidence checkpoints:
 
-- Executable implementation: `b711111431f15717c2a887f81404eabce71e1046`
+- Current implementation candidate: `42dcb17dd26c11a05dd20109102f37ea3fb5135a`
+- Historical hardened implementation: `b711111431f15717c2a887f81404eabce71e1046`
 - Current code-equivalent CI checkpoint: `1efdbfe049affc2da9b72798a4c2fbbea74ed03f`
 - Public evidence index: [`evidence/v1.0.0/README.md`](../evidence/v1.0.0/README.md)
 - Verification matrix: [`VERIFICATION.md`](VERIFICATION.md)
@@ -14,9 +15,9 @@ Evidence checkpoints:
 | Review lens | Verified evidence | Limitations / required follow-up |
 |---|---|---|
 | Google systems / SWE | CRDT property campaigns, protocol golden tests, durable-ACK and recovery contracts, multi-gateway and chaos suites, strict Rust/native/web CI, and fail-closed scanner/provenance gates are documented in [`VERIFICATION.md`](VERIFICATION.md). | No new comparable throughput or latency delta was measured in this remediation. Production-scale behavior remains bounded by the documented fault model and the absence of a live AWS deployment. |
-| Amazon / AWS | Cloud Compose configuration has authenticated NATS/Redis/Grafana defaults, segmented networks, capability drops, pinned images, trusted-proxy configuration, and release image smoke checks. Release artifacts and checksums are published from the hardened tag. | AWS, DNS/TLS, IAM, proxy CIDRs, Clerk dashboard settings, and hosted-origin verification are external owner actions. No live AWS stack is claimed. |
+| Amazon / AWS | Cloud Compose configuration has authenticated NATS/Redis/Grafana defaults, segmented networks, capability drops, pinned images, trusted-proxy configuration, and a candidate image smoke path. Historical evidence records the earlier artifact/checksum exercise. | AWS, DNS/TLS, IAM, proxy CIDRs, Clerk dashboard settings, hosted-origin verification, and current artifact publication are external or pending actions. No live AWS stack is claimed. |
 | Adobe product engineering | Real Playwright coverage exercises the web journey, realtime reconnect, multi-context isolation, network failure behavior, console hygiene, and accessibility. CSP/nonce policy and exact `authorizedParties` configuration are tested in repository policy tests. | The three protected remote browser jobs remain red at their missing disposable Clerk-secret preflight. Local browser evidence cannot certify the unavailable remote credentials or hosted origin. |
-| Siemens EDA / C++ and toolchain quality | Gitless clone/archive reproducibility, GCC and Apple Clang Release builds, root CTest 3/3, native protocol/version tests, WASM golden coverage, and the documented sanitizer/fuzz workflows cover the native boundary. | The new coverage diagnostic is measured on the local GCC toolchain; a new full sanitizer/fuzz campaign was not run as part of this report. Extended reliability remains a scheduled/manual CI workflow. |
+| Siemens EDA / C++ and toolchain quality | The candidate has local Apple Clang Release/CTest, WASM parity, sanitizer, property, fuzz, and exact-source-export smoke evidence; the CI matrix also configures GCC/Clang lanes. | Exact candidate remote GCC/Clang, nightly sanitizer/fuzz, and clean-room workflow conclusions remain pending. Extended reliability remains a scheduled/manual CI workflow. |
 
 Overall state: repository-actionable remediation is hardened and release
 artifacts are traceable, but the final campaign remains `PARTIAL / FAIL`

@@ -2,14 +2,24 @@
 
 Status: Authoritative (Phase 2 baselines plus later dated campaigns)
 Version: 1.1
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 This document records Concord's measurement **methodology** and the
 reproducible baseline commands. Headline performance claims require
 BEFORE/AFTER evidence on designed workloads with repeated runs (DEC-011).
 The Phase 2 section is baseline-only; the later Phase 6/7 sections preserve
-dated, environment-recorded campaigns. The final remediation pass adds no
-new comparable performance delta.
+dated, environment-recorded campaigns. A fresh candidate-bound native
+baseline is recorded in
+[`evidence/v1.0.1/native-benchmark.txt`](../evidence/v1.0.1/native-benchmark.txt);
+it is evidence for the `1.0.1` implementation candidate, not a published
+release. The final remediation pass does not claim a cross-version performance
+delta.
+
+Current candidate note (2026-09-14): the random-delete workload reports the
+configured `kRandomDeletes` denominator of 2,000 deleted units per run. The
+older tables below remain historical and retain their original environments,
+workloads, and run counts; they must not be read as reruns of the current
+candidate.
 
 ---
 

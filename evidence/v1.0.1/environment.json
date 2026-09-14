@@ -1,0 +1,33 @@
+{
+  "schema": "concord.release.environment/1",
+  "capturedAt": "2026-09-14",
+  "candidateCommit": "42dcb17dd26c11a05dd20109102f37ea3fb5135a",
+  "os": {
+    "platform": "darwin",
+    "version": "26.5",
+    "arch": "arm64",
+    "model": "Mac14,2"
+  },
+  "hardware": {
+    "cores": 8,
+    "memoryBytes": 8589934592
+  },
+  "toolchains": {
+    "node": "v24.20.0",
+    "npm": "11.19.0",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "cmake": "cmake version 4.2.1",
+    "ninja": "1.13.2",
+    "emscripten": "6.0.9-git",
+    "docker": "Docker version 29.7.2, build a7dcaa6",
+    "compose": "5.4.0"
+  },
+  "services": {
+    "postgres": "18.6",
+    "nats": "2.12",
+    "redis": "8.8.2",
+    "grafana": "12.3.0"
+  },
+  "secretsIncluded": false
+}

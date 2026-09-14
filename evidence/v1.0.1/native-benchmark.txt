@@ -1,0 +1,26 @@
+Concord 1.0.1 candidate native benchmark
+implementationCommit=42dcb17dd26c11a05dd20109102f37ea3fb5135a
+capturedAt=2026-09-14
+environment=evidence/v1.0.1/environment.json
+
+Command:
+  cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCONCORD_BUILD_BENCHMARKS=ON -DCMAKE_OSX_ARCHITECTURES=arm64
+  cmake --build build/native --target bench_core
+  ./build/native/crdt/benchmarks/bench_core
+
+Output:
+  sequential append                      median  137.400 ms  (     72.8 units/ms, 10000 units, 5 runs)
+  random-position insert                 median   93.456 ms  (     53.5 units/ms, 5000 units, 5 runs)
+  random delete                          median   23.768 ms  (     84.1 units/ms, 2000 units, 5 runs)
+  remote batch apply                     median 2530.292 ms  (      7.9 units/ms, 19998 units, 5 runs)
+  snapshot export                        median    1.215 ms  (      0.8 units/ms, 1 units, 5 runs)
+  snapshot import                        median    1.834 ms  (      0.5 units/ms, 1 units, 5 runs)
+  snapshot size                          snapshot bytes: 580045 (for 10000 items)
+  serialized op size                     47 bytes/op average
+
+Notes:
+  The random-delete denominator is the configured kRandomDeletes value of
+  2000 deleted units per run; the benchmark no longer reports the accumulated
+  10000-operation setup count as the deletion denominator. These numbers are a
+  fresh local candidate baseline, not a cross-version performance delta.

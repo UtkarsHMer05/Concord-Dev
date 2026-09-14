@@ -2,7 +2,7 @@
 
 Status: Authoritative (local dev + production runbooks)
 Version: 2.0 (P7-M013/M016-M019: graceful shutdown, migrations, backup/DR)
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 Deployment topology for staging/prod: `docs/DEPLOYMENT.md` +
 `docker-compose.cloud.yml`. Environment variable contract:
@@ -13,7 +13,7 @@ Deployment topology for staging/prod: `docs/DEPLOYMENT.md` +
 | Service | Start | Ports | Notes |
 |---|---|---|---|
 | PostgreSQL 18.6 | `docker compose up -d db` | 127.0.0.1:5433 | durable truth (docs, ACLs, op log) |
-| NATS 2.11 (JetStream) | `docker compose up -d nats` | 4222 / 8222 (monitor) | cross-gateway events; file storage |
+| NATS 2.12 (JetStream) | `docker compose up -d nats` | 4222 / 8222 (monitor) | cross-gateway events; file storage |
 | Redis 8.8 | `docker compose up -d redis` | 6379 | ephemeral: presence, rate limits |
 | Gateway cluster | `./scripts/gateway-cluster.sh start` | gw 8791-8793; LB 8890 | 3 host processes + nginx LB |
 | Web app | `npm run dev` | 3000 | Next.js (Phase 1 product) |
@@ -416,8 +416,9 @@ scripts/release/smoke-images.sh
 # (verification helper for staged-but-uncommitted release-file changes).
 ```
 
-Measured smoke results (2026-09-13, Docker Desktop linux/arm64):
-gateway PASS (SIGTERM→exit 0 in 2224 ms), web PASS (exit 143 in 200 ms),
+Candidate smoke results (2026-09-14, Docker Desktop linux/arm64,
+implementation commit `42dcb17dd26c11a05dd20109102f37ea3fb5135a`):
+gateway PASS (SIGTERM→exit 0 in 2194 ms), web PASS (exit 143 in 138 ms),
 worker PASS (probe status 0). All three used a clean source export with the
 verified generated WASM assets supplied separately because those files are
 git-ignored.

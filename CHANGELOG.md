@@ -10,14 +10,30 @@ measured benchmark in this repository. Deep dives live in
 [docs/](docs/README.md); the finding ledger for the hardening pass is
 [docs/audits/V1_HARDENING_FINDINGS.md](docs/audits/V1_HARDENING_FINDINGS.md).
 
+Current audit notice (2026-09-14): the dated entries below are historical
+release/campaign records tied to their named commits. They do not certify a
+current deployment or replace the fresh candidate evidence. Use the canonical
+handoff and machine-readable ledger for current status:
+[`docs/audits/CANONICAL_RELEASE_REPORT.md`](docs/audits/CANONICAL_RELEASE_REPORT.md)
+and [`CANONICAL_RELEASE_LEDGER.json`](docs/audits/CANONICAL_RELEASE_LEDGER.json).
+
 ## [Unreleased]
 
-### v1 hardening pass (branch `codex/9-5-hardening`, 2026-09-12)
+### 1.0.1 candidate (not published)
+
+The current compatibility-preserving hardening candidate is version 1.0.1.
+Its source, Rust workspace, CMake worker identity, package lock, and generated
+SBOM metadata are synchronized, but the candidate is not a release: the
+canonical tag and artifact set remain gated on fresh exact-SHA evidence,
+trusted Clerk browser credentials, and remote CI conclusions.
+
+### Historical v1 hardening pass (branch `codex/9-5-hardening`, 2026-09-12)
 
 Security fixes, portability repairs, and supply-chain hardening applied
 after the v1.0.0 release. Findings are tracked in
 [docs/audits/V1_HARDENING_FINDINGS.md](docs/audits/V1_HARDENING_FINDINGS.md);
-each closed finding carries a regression test.
+each historical closed finding carries a regression test. This entry is not a
+current release statement; current closure requires candidate-bound evidence.
 
 ### Fixed
 
@@ -80,22 +96,23 @@ each closed finding carries a regression test.
   scan-gated by `scripts/security/scan-gate.sh` (trivy; new critical/high
   findings fail except dated allowlist entries); cloud compose images are
   digest-pinned.
-- **License and provenance resolution** (HARD-LICENSE-001/002): the
-  repository is now MIT (`LICENSE`, copyright 2026 Utkarsh Khajuria) with
-  third-party attribution in `NOTICE`; all tutorial-inherited artwork,
-  fonts, and byte-identical source files were replaced with original
-  implementations; the remaining baseline-derived editor chrome was
-  rewritten. A CI provenance gate
+- **License and provenance work at the historical checkpoint**
+  (HARD-LICENSE-001/002): the repository recorded MIT metadata (`LICENSE`,
+  copyright 2026 Utkarsh Khajuria) with third-party attribution in `NOTICE`;
+  the historical pass recorded replacement of tutorial-inherited artwork,
+  fonts, and selected source, plus a rewritten editor chrome. A CI provenance gate
   (`scripts/security/provenance-check.sh`) fails on any shipped file
   byte-identical to the `antonio-original-baseline` tag without a
   verified, permissively-licensed allowlist entry — see
-  [docs/PROVENANCE.md](docs/PROVENANCE.md).
+  [docs/PROVENANCE.md](docs/PROVENANCE.md). This is not blanket authorship or
+  current legal-clearance evidence; the candidate-bound review remains
+  explicit there.
 
-## [1.0.0] - 2026-09-11
+## [1.0.0] - 2026-09-11 (historical tag record)
 
-First tagged release (`concord-v1.0.0`): a local-first collaborative
-document workspace with the entire synchronization engine built from
-scratch in this repository. Delivered as eight gated phases
+First historical tagged release (`concord-v1.0.0`): a local-first
+collaborative document workspace with the synchronization engine implemented
+in this repository. Delivered as eight gated phases
 (2026-09-06 → 2026-09-11); phase-by-phase milestones, gates, and
 decisions are recorded in [docs/ROADMAP.md](docs/ROADMAP.md) and
 [docs/DECISIONS.md](docs/DECISIONS.md) (DEC-001…DEC-050).
@@ -122,7 +139,7 @@ decisions are recorded in [docs/ROADMAP.md](docs/ROADMAP.md) and
   TipTap reconciliation adapter over the collaborative subset with
   honest whole-document fallback outside it.
 - Deterministic simulator, seeded property corpus, fuzz targets, and
-  ASan/UBSan/TSan-clean builds from the start.
+  ASan/UBSan/TSan-clean builds were recorded in the historical phase gates.
 
 ### Phase 3 — Rust sync gateway + wire protocol (2026-09-06 → 09-07)
 
@@ -161,43 +178,43 @@ decisions are recorded in [docs/ROADMAP.md](docs/ROADMAP.md) and
   reconstruction, and restore-as-forward-ops (owner-only, auditable,
   never discards acknowledged edits); lease-fenced maintenance jobs.
 
-### Phase 6 — Proof phase (2026-09-09)
+### Phase 6 — Historical proof phase (2026-09-09)
 
 - 32-row threat model fully mapped to controls, with executable tests or
   explicitly planned extended-fuzz coverage recorded for every row
   ([docs/SECURITY.md](docs/SECURITY.md) §8) — no unmapped rows.
-- 27/27 deterministic chaos scenarios (gateway, NATS, Redis, PostgreSQL,
-  worker, compound faults): **0 lost durable-ACKed operations,
-  0 divergent replicas**; 181/181 correctness scenarios; 130-seed
-  randomized campaign (1.06 M operations).
-- 5 M fuzz executions across 5 native targets + 5 Rust decoder targets,
-  zero crashes; every fixed crash pinned by a corpus regression
-  (including the CRITICAL broker off-by-one panic, FUZZ-2026-09-001).
-- ASan/UBSan and TSan green across the native matrix; secret scan
-  (tree + full history), dependency scan, deterministic SBOMs,
-  multi-stage non-root release images; OTel tracing, Prometheus
-  metrics, provisioned Grafana dashboards, live-proven; SHA-pinned
-  phase-6 CI workflows + regression comparator.
+- Historical records report 27/27 deterministic chaos scenarios (gateway,
+  NATS, Redis, PostgreSQL, worker, compound faults): **0 lost
+  durable-ACKed operations, 0 divergent replicas**; 181/181 correctness
+  scenarios; and a 130-seed randomized campaign (1.06 M operations).
+- Historical records report 5 M fuzz executions across 5 native targets + 5
+  Rust decoder targets, zero crashes, and corpus regressions for fixed
+  crashes (including FUZZ-2026-09-001).
+- Historical records report ASan/UBSan and TSan green across the native
+  matrix; secret/dependency scans, deterministic SBOMs, multi-stage non-root
+  release images, and observability evidence. No current sanitizer, fuzz,
+  deployment, or live-observability result is implied.
 
-### Phase 7 — Production release + deployment (2026-09-09 → 09-11)
+### Phase 7 — Historical production release + deployment record (2026-09-09 → 09-11)
 
 - Profiling-driven ingest optimization: durable-ACK p50 31.45 → 2.72 ms
   (−91.4 %), throughput 771 → 8,685 ops/s (11.3×) — replay digests
   identical before/after.
-- Staging → production on AWS EC2 (Graviton, one compose stack per
-  environment, ALB for TLS/WSS, no Kubernetes) with the 10-service
-  compose stack, SSM-delivered secrets, measured graceful drain
-  (~2.2–3 s), and live browser E2E on the release build.
+- Historical records describe staging → production on AWS EC2 (Graviton, one
+  compose stack per environment, ALB for TLS/WSS, no Kubernetes) with the
+  10-service compose stack, SSM-delivered secrets, measured graceful drain
+  (~2.2–3 s), and browser E2E on the release build. This is not current
+  runtime proof.
 - CSP/CSWSH live fixes found on production (pinned CSP incl.
   `wasm-unsafe-eval`; `GATEWAY_ALLOWED_ORIGINS` enforced at the WS
   upgrade); OpenSSL CVE patches in release images; final benchmark
   reruns on the exact shipped tree (recovery 98.4 % faster, 4th
   consecutive reproduction: 98.6/98.5/98.6/98.4 %).
-- Web tier subsequently hosted on Vercel + Neon PostgreSQL + Clerk
-  (free tier) at [concord-dev.vercel.app](https://concord-dev.vercel.app);
-  the AWS gateway stack was torn down to keep ongoing cost at zero —
-  the client detects the missing gateway and stays in truthful
-  local-first mode (documented in the README's honest-scope section).
+- A prior project state described the web tier as Vercel + Neon PostgreSQL +
+  Clerk (free tier) at
+  [concord-dev.vercel.app](https://concord-dev.vercel.app); it also records
+  the AWS gateway stack as torn down. Neither the URL nor a current deployed
+  version/auth/realtime state is claimed by this changelog.
 
 [Unreleased]: https://github.com/UtkarsHMer05/Concord-Dev/compare/concord-v1.0.0...HEAD
 [1.0.0]: https://github.com/UtkarsHMer05/Concord-Dev/releases/tag/concord-v1.0.0

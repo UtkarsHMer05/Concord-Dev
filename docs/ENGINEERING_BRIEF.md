@@ -12,21 +12,22 @@ capability is limited, the limitation is stated with its pointer.
 ## What Concord is
 
 Concord is a local-first collaborative document workspace — a
-Google-Docs-class editor UX — with the **entire synchronization engine
-built from scratch in this repository**: a sequence CRDT, the browser
-local-first runtime, the WebSocket sync gateways, the durability and
-recovery layer, and the wire protocol. No collaboration SaaS is
+Google-Docs-class editor UX — with its synchronization engine **implemented
+in this repository**: a sequence CRDT, the browser local-first runtime, the
+WebSocket sync gateways, the durability and recovery layer, and the wire
+protocol. The provenance record distinguishes Concord-developed code from
+third-party and generated material; no blanket authorship or legal claim is
+made. No collaboration SaaS is
 involved: Liveblocks and Convex were removed deliberately in Phases 0–1
 (smoke tests assert their old endpoints 404), and the tutorial baseline
-this project started from is preserved and audited at the immutable git
-tag `antonio-original-baseline` ([PROVENANCE.md](PROVENANCE.md)). The
+this project started from is preserved and audited at the historical git
+reference `antonio-original-baseline` ([PROVENANCE.md](PROVENANCE.md)). The
 system was built in eight gated phases (2026-09-06 → 2026-09-11), with the
-historical `concord-v1.0.0` tag preserved as the canonical v1 identity; the
-final hardening candidate and release state are recorded separately in the
-hardening report. The AWS 10-service deployment was exercised historically
-and is intentionally torn down now; the web tier's configured URL is
-[concord-dev.vercel.app](https://concord-dev.vercel.app) (current reachability
-was not independently reverified in this pass).
+historical `concord-v1.0.0` tag preserved as a v1 identity; the current
+`1.0.1` candidate and release state are recorded separately in the canonical
+report. The AWS 10-service deployment was exercised historically and is
+intentionally torn down now; any configured web URL is a reference only and
+was not independently verified in this pass.
 
 ## Why a CRDT — and why built, not adopted
 
@@ -182,13 +183,13 @@ are never blurred:
 
 Stated plainly, with pointers (also README "What the live demo runs"):
 
-- **The demo URL runs local-first CRDT mode only.** The multi-user
-  realtime fanout path (Rust gateways + nginx + NATS + Redis) is built,
-  tested locally, and deployable. It was exercised historically on AWS as a
-  10-service compose stack, then torn down to keep ongoing cost at zero. The
-  current repository's rendered-browser evidence is Chromium 12/12 (7 journey
-  + 5 accessibility), Firefox smoke 1/1, and WebKit smoke 1/1. The client detects the
-  missing gateway and degrades truthfully (no fake "collaborating" states).
+- **The configured demo URL is not a current runtime claim.** The multi-user
+  realtime fanout path (Rust gateways + nginx + NATS + Redis) is built and
+  tested locally, and was exercised historically on AWS before teardown. The
+  current candidate's rendered-browser evidence is limited to the secretless
+  public Chromium smoke; the historical Chromium/Firefox/WebKit results are
+  labeled in `docs/BROWSER_SUPPORT.md`. The client detects a missing gateway
+  and degrades truthfully (no fake "collaborating" states).
 - **Collaborative subset**: text, headings, basic formatting. Content
   outside the subset degrades that session to whole-document save,
   surfaced loudly in the UI, never silently.

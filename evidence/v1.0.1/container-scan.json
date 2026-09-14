@@ -1,0 +1,81 @@
+{
+  "schema": "concord.container.scan/1",
+  "capturedAt": "2026-09-14",
+  "candidateCommit": "42dcb17dd26c11a05dd20109102f37ea3fb5135a",
+  "scanner": "docker scout v1.24.0",
+  "docker": "Docker version 29.7.2, build a7dcaa6",
+  "platform": "linux/arm64",
+  "result": "FAIL_RELEASE_BLOCKER",
+  "allowlistEntries": 0,
+  "toolErrors": 0,
+  "totals": {
+    "critical": 44,
+    "high": 180,
+    "moderate": 158,
+    "low": 20
+  },
+  "npm": {
+    "production": {"critical": 0, "high": 0, "moderate": 0, "low": 0},
+    "fullTree": {"critical": 0, "high": 0, "moderate": 4, "low": 0},
+    "residual": "GHSA-67mh-4wv8-2f99 in the Drizzle/esbuild development-tool chain; no production dev server is started or reachable; npm audit fix --force would introduce a breaking Drizzle tooling downgrade"
+  },
+  "cargo": {
+    "critical": 0,
+    "high": 0,
+    "moderate": 0,
+    "low": 0
+  },
+  "images": [
+    {
+      "image": "postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
+      "critical": 6,
+      "high": 38,
+      "moderate": 21,
+      "low": 5,
+      "remediation": "Use a newer upstream digest when PostgreSQL/Alpine fixes are available, or build and validate a patched derivative."
+    },
+    {
+      "image": "nats:2.12-alpine@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6",
+      "critical": 3,
+      "high": 13,
+      "moderate": 4,
+      "low": 0,
+      "remediation": "The 2.12 refresh reduced the inventory; obtain a patched upstream digest or produce a validated derivative before release."
+    },
+    {
+      "image": "redis:8.8.2-alpine@sha256:96cb544fa0af5aa898d160cffb7dae70c3df117190fc123831c64712cda425ff",
+      "critical": 2,
+      "high": 10,
+      "moderate": 2,
+      "low": 0,
+      "remediation": "Use a patched upstream digest or a validated derivative; retain the exact image reference while unresolved."
+    },
+    {
+      "image": "nginx:1.31.5-alpine-slim@sha256:3b171d7224b669faa3cc2137fea0a65301791df1ec1f271ebd2a2b7461f7fade",
+      "critical": 0,
+      "high": 0,
+      "moderate": 0,
+      "low": 0,
+      "remediation": "No scanner finding at this exact digest. Keep the immutable reference and re-scan on release."
+    },
+    {
+      "image": "prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996",
+      "critical": 11,
+      "high": 38,
+      "moderate": 48,
+      "low": 3,
+      "remediation": "Test a patched Prometheus/base dependency release or a validated derivative; the attempted v3.6 refresh did not reduce the strict counts."
+    },
+    {
+      "image": "grafana/grafana:12.3.0@sha256:70d9599b186ce287be0d2c5ba9a78acb2e86c1a68c9c41449454d0fc3eeb84e8",
+      "critical": 22,
+      "high": 81,
+      "moderate": 83,
+      "low": 12,
+      "remediation": "The 12.3 refresh reduced the prior inventory but did not close it; obtain patched upstream dependencies or build and validate a derivative."
+    }
+  ],
+  "requiredAction": "No broad exception is permitted. Resolve with patched upstream images, custom images with documented validation, or exact advisory-level owner/legal disposition followed by a fresh strict scan.",
+  "owner": "release-lead",
+  "reviewDate": "2026-10-14"
+}
