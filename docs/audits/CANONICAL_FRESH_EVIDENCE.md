@@ -26,8 +26,9 @@ between the preceding candidate `8731dbe` and this SHA are:
 
 The canonical documents and `evidence/v1.0.1/` files are documentation-only
 descendants created after the candidate-bound runs. They do not change the
-implementation under test. The final report must identify the documentation
-commit separately from this implementation SHA.
+implementation under test. The initial canonical evidence bundle is committed
+at `d38541330909c063926eaa02c179ba6136004a43`; later remote-state updates, if any, remain descendants and must
+not replace the implementation SHA.
 
 ## Fresh local gates
 

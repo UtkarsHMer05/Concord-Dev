@@ -7,7 +7,7 @@
   "freshEvidence": "docs/audits/CANONICAL_FRESH_EVIDENCE.md",
   "candidate": {
     "implementationCommit": "42dcb17dd26c11a05dd20109102f37ea3fb5135a",
-    "canonicalEvidenceCommit": "PENDING_DOCUMENTATION_COMMIT",
+    "canonicalEvidenceCommit": "d38541330909c063926eaa02c179ba6136004a43",
     "sourceFenceBase": "8731dbe35c2ad03e8ed67ac21e04725574694aae",
     "sourceFenceChanges": [
       "Correct native benchmark random-delete denominator to the configured kRandomDeletes value.",
@@ -16,7 +16,7 @@
     ],
     "branch": "main",
     "localOriginMain": "a2b5125347b10c6c4d3fc0ff72cc33bab626f060",
-    "worktreeAtCapture": "DIRTY_DOCUMENTATION_ONLY",
+    "worktreeAtCapture": "CLEAN_AT_d38541330909c063926eaa02c179ba6136004a43",
     "reportCommitRelation": "Documentation-only descendant of implementationCommit; never substitute it for the executable candidate SHA."
   },
   "historicalCheckpoints": {
@@ -68,7 +68,7 @@
     "imagePins": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "19 immutable refs checked; 7 runtime inputs deferred by design"},
     "dependencyScan": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Production npm 0/0/0/0, full npm 0/0/4/0 Moderate, Cargo 0/0/0/0; containers 44 Critical/180 High/158 Moderate/20 Low; tool errors 0; no allowlist"},
     "remoteCi": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "Exact candidate conclusions absent at capture time; release workflow requires core, CodeQL, trusted browser, sanitizer, fuzz, and chaos checks"},
-    "releaseArtifacts": {"status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": null, "details": "No tag, manifest, checksum, attestation, registry push, or GitHub Release created while blockers remain"},
+    "releaseArtifacts": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "No tag, manifest, checksum, attestation, registry push, or GitHub Release created while remote, Clerk, and dependency blockers remain"},
     "liveRuntime": {"status": "NOT_CLAIMED", "verifiedSha": null, "details": "No AWS, Vercel, Neon, URL, TLS, deployed-SHA, live Clerk, or persistent realtime verification"}
   },
   "findings": [
@@ -76,11 +76,11 @@
       "id": "AUDIT-STATE-001",
       "severity": "HIGH",
       "category": "repository_state",
-      "status": "PENDING_DOCUMENTATION_COMMIT",
-      "blocking": true,
+      "status": "CLOSED",
+      "blocking": false,
       "title": "Candidate evidence is being committed separately from the implementation candidate",
-      "observedTruth": "Implementation candidate is 42dcb17dd26c11a05dd20109102f37ea3fb5135a; the canonical documentation/evidence files are currently uncommitted documentation-only changes.",
-      "requiredAction": "Commit the canonical documentation/evidence, verify clean status, and preserve the implementation SHA as the evidence identity.",
+      "observedTruth": "Implementation candidate is 42dcb17dd26c11a05dd20109102f37ea3fb5135a; the canonical documentation/evidence bundle was committed separately as d38541330909c063926eaa02c179ba6136004a43 and the implementation SHA remains the executable evidence identity.",
+      "requiredAction": "Keep later remote-state updates as documentation descendants and do not substitute them for the implementation SHA.",
       "owner": "release-lead",
       "evidence": ["docs/audits/CANONICAL_FRESH_EVIDENCE.md", "docs/audits/CANONICAL_RELEASE_REPORT.md"]
     },
@@ -292,9 +292,9 @@
     }
   ],
   "evidence": [
-    {"id": "EV-STATE-001", "category": "repository_state", "status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_RELEASE_REPORT.md"},
+    {"id": "EV-STATE-001", "category": "repository_state", "status": "CLOSED", "verifiedSha": "d38541330909c063926eaa02c179ba6136004a43", "artifact": "docs/audits/CANONICAL_RELEASE_REPORT.md"},
     {"id": "EV-TAGS-001", "category": "release_identity", "status": "PENDING_FRESH_EVIDENCE", "verifiedSha": null, "artifact": null},
-    {"id": "EV-HISTORY-001", "category": "historical_evidence", "status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": null, "artifact": "evidence/v1.0.0/ and preserved historical audit files"},
+    {"id": "EV-HISTORY-001", "category": "historical_evidence", "status": "CLOSED", "verifiedSha": "d38541330909c063926eaa02c179ba6136004a43", "artifact": "evidence/v1.0.0/ and preserved historical audit files"},
     {"id": "EV-PROV-001", "category": "provenance_licensing", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/PROVENANCE.md; scripts/security/provenance-check.sh; scripts/security/provenance-tests.sh"},
     {"id": "EV-LICENSE-001", "category": "provenance_licensing", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "Path-specific legal/permission record not present"},
     {"id": "EV-WEB-001", "category": "toolchain_build", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
@@ -312,7 +312,7 @@
     {"id": "EV-BENCH-001", "category": "benchmark_performance", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/native-benchmark.txt"},
     {"id": "EV-CHAOS-001", "category": "reliability", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/chaos-summary.json"},
     {"id": "EV-CLOUD-001", "category": "cloud_infrastructure", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": null},
-    {"id": "EV-DOC-001", "category": "documentation_claims", "status": "PENDING_DOCUMENTATION_COMMIT", "verifiedSha": null, "artifact": "git diff --check, JSON validation, historical-artifact diff, and full-history secret scan passed; final commit binding remains pending"},
+    {"id": "EV-DOC-001", "category": "documentation_claims", "status": "CLOSED", "verifiedSha": "d38541330909c063926eaa02c179ba6136004a43", "artifact": "git diff --check, JSON validation, historical-artifact diff, and full-history secret scan passed before the canonical evidence commit"},
     {"id": "EV-DEPENDABOT-001", "category": "security_supply_chain", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "GitHub API account-level settings readback"},
     {"id": "EV-PROD-001", "category": "production_runtime", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": null}
   ],

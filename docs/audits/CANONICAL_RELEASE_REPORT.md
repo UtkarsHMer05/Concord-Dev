@@ -35,7 +35,7 @@ decisions therefore cannot be certified as green.
 | Candidate version | `1.0.1` (synchronized package, Rust, CMake, and SBOM metadata) |
 | Canonical tag | None; no tag was created or moved |
 | Report/evidence relation | This report and `evidence/v1.0.1/` are documentation-only descendants of `releaseCommit`; the report commit must not be confused with the executable candidate SHA |
-| Final documentation commit | Resolved in Git history after this report is committed; not used as the implementation SHA |
+| Initial canonical evidence commit | `d38541330909c063926eaa02c179ba6136004a43` (documentation-only descendant; not used as the implementation SHA) |
 | Branch | `main` |
 | Local `origin/main` tracking ref | `a2b5125347b10c6c4d3fc0ff72cc33bab626f060` at capture time; this is not a fresh remote query |
 | Audit date | 2026-09-14 (Asia/Kolkata) |
