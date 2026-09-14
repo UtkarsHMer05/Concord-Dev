@@ -34,7 +34,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     }
     std::uint32_t snapshot_len = 0;
     for (std::size_t i = 0; i < 4; ++i) {
-        snapshot_len |= static_cast<std::uint32_t>(bytes[i]) << (8u * i);
+        snapshot_len |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[i]))
+                        << (8u * i);
     }
     if (snapshot_len > size - 4) {
         // Oversized declared length: treat as truncated input — import the

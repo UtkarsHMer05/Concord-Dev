@@ -8,7 +8,31 @@ project(concord-crdt-wasm LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_EXECUTABLE_SUFFIX ".js")
+
+# Keep the browser build under the same warning policy as native builds. The
+# WASM target is a separate CMake project because Emscripten supplies its own
+# toolchain file, so the native CONCORD_WARNING_FLAGS list is not in scope.
+option(CONCORD_WARNINGS_AS_ERRORS "Treat WASM compiler warnings as errors" ON)
+set(CONCORD_WARNING_FLAGS
+  -Wall
+  -Wextra
+  -Wpedantic
+  -Wshadow
+  -Wnon-virtual-dtor
+  -Wcast-align
+  -Wunused
+  -Woverloaded-virtual
+  -Wconversion
+  -Wsign-conversion
+  -Wdouble-promotion
+  -Wold-style-cast
+)
+if(CONCORD_WARNINGS_AS_ERRORS)
+  list(APPEND CONCORD_WARNING_FLAGS -Werror)
+endif()
 
 set(CRDT_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../cpp/crdt/src/doc.cpp
@@ -60,7 +84,7 @@ list(JOIN EXPORTED_FUNCTIONS "," EXPORTED_FUNCTIONSJoined)
 # C++ exceptions must be enabled for every translation unit: the engine uses
 # structured throws internally and the binding layer catches them at the ABI
 # boundary (they never reach JS).
-target_compile_options(concord-crdt PRIVATE -fexceptions)
+target_compile_options(concord-crdt PRIVATE ${CONCORD_WARNING_FLAGS} -fexceptions)
 
 target_link_options(concord-crdt PRIVATE
   "-sMODULARIZE=1"

@@ -162,6 +162,13 @@ function seedPmDoc(): PmNode {
     };
 }
 
+function pmDocWithText(text: string): PmNode {
+    return {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+    };
+}
+
 interface VisibleDoc {
     blocks: { runs: { t: string }[] }[];
 }
@@ -221,6 +228,78 @@ describe("editor bridge seed path (final gate)", () => {
         const restored = JSON.parse(restoredResp.json) as VisibleDoc;
         expect(restored.blocks[0].runs[0].t).toBe("hello world!!");
         expect(restored.blocks[1].runs[0].t).toBe("second");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Local reconciliation coalescing: typing must not lose a trailing update
+// while the prior transaction awaits the worker's stream export.
+// ---------------------------------------------------------------------------
+
+describe("local transaction coalescing", () => {
+    it("reconciles the newest editor state after an in-flight local transaction", async () => {
+        const documentId = "local-coalesce-doc";
+        const core = new CrdtWorkerCore({
+            documentId,
+            replicaId: 12n,
+            loadFactory,
+            persistence: new MemoryPersistence(),
+        });
+        const delegate = new CoreBackedClient(core, documentId);
+        let pauseNextExport = false;
+        let signalFirstExport: (() => void) | undefined;
+        let releaseFirstExport: (() => void) | undefined;
+        const firstExportStarted = new Promise<void>((resolve) => {
+            signalFirstExport = resolve;
+        });
+        const firstExportGate = new Promise<void>((resolve) => {
+            releaseFirstExport = resolve;
+        });
+        const client = {
+            init: (_documentId: string, replicaId: bigint) => delegate.init(replicaId),
+            localInsertText: (streamIndex: number, codepoint: number) =>
+                delegate.localInsertText(streamIndex, codepoint),
+            localInsertDelimiter: (streamIndex: number, blockType: string) =>
+                delegate.localInsertDelimiter(streamIndex, blockType),
+            localDelete: (streamIndex: number) => delegate.localDelete(streamIndex),
+            localSetAttr: (streamIndex: number, name: string, value: string | null) =>
+                delegate.localSetAttr(streamIndex, name, value),
+            exportStream: async () => {
+                if (pauseNextExport) {
+                    pauseNextExport = false;
+                    signalFirstExport?.();
+                    await firstExportGate;
+                }
+                return delegate.exportStream();
+            },
+            visibleJson: () => delegate.visibleJson(),
+        };
+        const editor = fakeEditor();
+        const bridge = new CrdtEditorBridge({
+            editor,
+            client: client as unknown as CrdtClient,
+            documentId,
+            seedPmDoc: null,
+        });
+        expect((await bridge.start()).mode).toBe("crdt");
+
+        // Start a reconciliation for an earlier DOM state and deliberately
+        // hold its worker export. This models rapid keypresses while a worker
+        // round trip is still outstanding.
+        editor.current = pmDocWithText("wave one from browser");
+        pauseNextExport = true;
+        const firstTransaction = bridge.onLocalTransaction(editor);
+        await firstExportStarted;
+
+        // TipTap invokes this handler without awaiting the first promise. The
+        // old early-return guard silently lost this final " A" suffix.
+        editor.current = pmDocWithText("wave one from browser A");
+        await bridge.onLocalTransaction(editor);
+        releaseFirstExport?.();
+        await firstTransaction;
+
+        const visible = JSON.parse(await delegate.visibleJson()) as VisibleDoc;
+        expect(visible.blocks[0].runs[0].t).toBe("wave one from browser A");
     });
 });
 // ---------------------------------------------------------------------------

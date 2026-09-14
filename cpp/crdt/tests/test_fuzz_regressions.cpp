@@ -44,6 +44,25 @@ namespace {
                                      std::istreambuf_iterator<char>()};
 }
 
+// The fuzz_op_decode entry point: one retained input is one strict operation
+// frame. The committed ops seeds are valid frames, so also apply the decoded
+// operation once to exercise the same core boundary as the target's parser
+// plus the first consumer.
+bool replay_operation(const std::vector<std::uint8_t>& bytes) {
+    if (bytes.size() > 4096) {
+        return true;  // matches fuzz_op_decode's bounded-input fast path
+    }
+    const std::string as_text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    try {
+        const Operation op = parse_operation(as_text);
+        Doc doc(ReplicaId{1});
+        (void)doc.apply_remote(op);
+    } catch (const CrdtError&) {
+        // Structured rejection is expected for malformed retained inputs.
+    }
+    return true;
+}
+
 // The fuzz_recovery_stream entry point (verbatim from the fuzz target).
 bool replay_recovery(const std::vector<std::uint8_t>& bytes) {
     const std::string as_text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
@@ -90,7 +109,8 @@ bool replay_worker(const std::vector<std::uint8_t>& bytes) {
     }
     std::uint32_t command = 0;
     for (std::size_t i = 0; i < 4; ++i) {
-        command |= static_cast<std::uint32_t>(frame[i]) << (8u * i);
+        command |= static_cast<std::uint32_t>(static_cast<unsigned char>(frame[i]))
+                   << (8u * i);
     }
     if (command != 3 && command != 5) {
         return true;  // non-snapshot commands covered by the fuzz target
@@ -101,7 +121,9 @@ bool replay_worker(const std::vector<std::uint8_t>& bytes) {
     }
     std::uint32_t snapshot_len = 0;
     for (std::size_t i = 0; i < 4; ++i) {
-        snapshot_len |= static_cast<std::uint32_t>(frame[offset + i]) << (8u * i);
+        snapshot_len |= static_cast<std::uint32_t>(
+                            static_cast<unsigned char>(frame[offset + i]))
+                        << (8u * i);
     }
     offset += 4;
     if (snapshot_len > frame.size() - offset) {
@@ -135,6 +157,7 @@ CONCORD_TEST(fuzz_regressions_recovery_corpus) {
         return;
     }
     const char* files[] = {
+        "ops/seed_0", "ops/seed_1", "ops/seed_2",
         "recovery/seed_valid", "recovery/seed_truncated", "recovery/seed_empty",
         "worker/seed_import", "worker/seed_reconstruct", "worker/seed_generate",
         "worker/seed_oversize_len",
@@ -146,8 +169,11 @@ CONCORD_TEST(fuzz_regressions_recovery_corpus) {
         const std::vector<std::uint8_t> bytes = read_file(root + "/" + file);
         CHECK(!bytes.empty());
         const std::string path(file);
-        if (path.rfind("recovery/", 0) == 0 || path.rfind("worker/", 0) == 0) {
+        if (path.rfind("ops/", 0) == 0) {
+            CHECK(replay_operation(bytes));
+        } else if (path.rfind("recovery/", 0) == 0) {
             CHECK(replay_recovery(bytes));
+        } else if (path.rfind("worker/", 0) == 0) {
             CHECK(replay_worker(bytes));
         }
         ++replayed;

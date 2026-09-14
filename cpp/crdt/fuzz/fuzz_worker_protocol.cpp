@@ -49,7 +49,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     std::size_t offset = 0;
     std::uint32_t frame_len = 0;
     for (std::size_t i = 0; i < 4; ++i) {
-        frame_len |= static_cast<std::uint32_t>(bytes[i]) << (8u * i);
+        frame_len |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[i]))
+                     << (8u * i);
     }
     offset = 4;
     if (frame_len == 0 || frame_len > kMaxFrameBytes) {
@@ -71,7 +72,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     std::size_t foffset = 0;
     std::uint32_t command = 0;
     for (std::size_t i = 0; i < 4; ++i) {
-        command |= static_cast<std::uint32_t>(frame[foffset + i]) << (8u * i);
+        command |= static_cast<std::uint32_t>(static_cast<unsigned char>(frame[foffset + i]))
+                   << (8u * i);
     }
     foffset += 4;
 
@@ -81,7 +83,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
             std::uint32_t batch_count = 0;
             if (foffset + 4 <= frame.size()) {
                 for (std::size_t i = 0; i < 4; ++i) {
-                    batch_count |= static_cast<std::uint32_t>(frame[foffset + i]) << (8u * i);
+                    batch_count |= static_cast<std::uint32_t>(
+                                       static_cast<unsigned char>(frame[foffset + i]))
+                                   << (8u * i);
                 }
                 foffset += 4;
             }
@@ -95,7 +99,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
                 }
                 std::uint32_t batch_len = 0;
                 for (std::size_t i = 0; i < 4; ++i) {
-                    batch_len |= static_cast<std::uint32_t>(frame[foffset + i]) << (8u * i);
+                    batch_len |= static_cast<std::uint32_t>(
+                                     static_cast<unsigned char>(frame[foffset + i]))
+                                 << (8u * i);
                 }
                 foffset += 4;
                 if (batch_len > frame.size() - foffset) {
@@ -132,7 +138,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
             }
             std::uint32_t snapshot_len = 0;
             for (std::size_t i = 0; i < 4; ++i) {
-                snapshot_len |= static_cast<std::uint32_t>(frame[foffset + i]) << (8u * i);
+                snapshot_len |= static_cast<std::uint32_t>(
+                                    static_cast<unsigned char>(frame[foffset + i]))
+                                << (8u * i);
             }
             foffset += 4;
             if (snapshot_len > kMaxFrameBytes || snapshot_len > frame.size() - foffset) {
@@ -158,10 +166,16 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
             std::uint32_t replica_count = 0;
             std::uint32_t shape = 0;
             for (std::size_t i = 0; i < 4; ++i) {
-                op_count |= static_cast<std::uint32_t>(frame[foffset + 8 + i]) << (8u * i);
+                op_count |= static_cast<std::uint32_t>(
+                                static_cast<unsigned char>(frame[foffset + 8 + i]))
+                            << (8u * i);
                 replica_count |=
-                    static_cast<std::uint32_t>(frame[foffset + 12 + i]) << (8u * i);
-                shape |= static_cast<std::uint32_t>(frame[foffset + 16 + i]) << (8u * i);
+                    static_cast<std::uint32_t>(
+                        static_cast<unsigned char>(frame[foffset + 12 + i]))
+                    << (8u * i);
+                shape |= static_cast<std::uint32_t>(
+                             static_cast<unsigned char>(frame[foffset + 16 + i]))
+                         << (8u * i);
             }
             if (op_count > kMaxOpCount || replica_count < 1 || replica_count > kMaxGenReplicas ||
                 shape > 3) {

@@ -1986,8 +1986,8 @@ CONCORD_TEST(restore_diff_history_collision_concurrent_before) {
 // ---------------------------------------------------------------------------
 // --version: the worker prints its release identity to stdout and exits 0
 // BEFORE reading stdin (argv short-circuit; zero frame impact). The line is
-// either "concord-worker 1.0.0 (<short-sha>)" or "concord-worker 1.0.0" —
-// a malformed "concord-worker 1.0.0 ()" (empty sha from a gitless archive
+// either "concord-worker 1.0.1 (<short-sha>)" or "concord-worker 1.0.1" —
+// a malformed "concord-worker 1.0.1 ()" (empty sha from a gitless archive
 // build, SA-NATV1) must NEVER appear; the build wires
 // CONCORD_EXPECT_GIT_SHA (0/1) so this test pins the EXACT form the
 // current configuration must produce.
@@ -2016,14 +2016,14 @@ CONCORD_TEST(version_flag_prints_and_exits_zero) {
     const std::string rest = line.substr(first_space);
     const std::size_t space_after_version = rest.find(' ');
     if (space_after_version == std::string::npos) {
-        // Plain form: "concord-worker 1.0.0" — version is non-empty,
+        // Plain form: "concord-worker 1.0.1" — version is non-empty,
         // printable, and starts with a digit. This is the ONLY legal form
         // when the build is configured without a git sha (source archives).
         CHECK(!rest.empty());
         CHECK(rest[0] >= '0' && rest[0] <= '9');
         CHECK_EQ(rest.find('('), std::string::npos);  // no trailing "()" junk
     } else {
-        // Sha form: "concord-worker 1.0.0 (<sha>)" — parens around a
+        // Sha form: "concord-worker 1.0.1 (<sha>)" — parens around a
         // non-empty sha. "()" (empty sha) is a hard failure: the CMake
         // layer must not wire an empty CONCORD_GIT_SHA (SA-NATV1).
         const std::string version = rest.substr(0, space_after_version);
@@ -2054,4 +2054,3 @@ CONCORD_TEST(version_flag_prints_and_exits_zero) {
 int main() {
     return ::concord::testing::run_all();
 }
-

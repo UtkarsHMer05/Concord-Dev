@@ -82,6 +82,13 @@ export function replicaIdForDocument(documentId: string): bigint {
 export class CrdtEditorBridge {
     private state: BridgeState = { mode: "idle" };
     private reconciling = false;
+    /**
+     * Local edits may arrive faster than the worker can export its stream and
+     * apply a diff. Preserve one trailing pass instead of returning early and
+     * silently dropping the newest editor state.
+     */
+    private reconcileRequested = false;
+    private pendingReconcileEditor: Editor | null = null;
     /** Transactions that arrived while start() was still in flight. */
     private startPromise: Promise<void> | null = null;
     /** Render coalescing (P7-M024): one render in flight, one trailing. */
@@ -258,33 +265,53 @@ export class CrdtEditorBridge {
     /** Shared reconciliation core — no start() coordination (re-entrant). */
     private async reconcileTransaction(editor: Editor): Promise<void> {
         if (this.reconciling) {
+            // TipTap's onUpdate does not await this handler. A burst of key
+            // presses can therefore enter while the first transaction is
+            // awaiting a worker RPC. Coalesce all of those updates into one
+            // trailing reconciliation against the editor's latest document.
+            this.reconcileRequested = true;
+            this.pendingReconcileEditor = editor;
             return;
         }
         if (this.state.mode !== "crdt") {
             return; // fallback path or not started
         }
-        const parsed = pmDocToBlocks(editor.getJSON() as PmNode);
-        if (!parsed.support.supported) {
-            // M041 honesty rule: degrade to the Phase 1 path for this
-            // session; existing CRDT state is retained.
-            this.state = {
-                mode: "fallback",
-                reason: `unsupported: ${parsed.support.unsupportedTypes.join(", ")}`,
-            };
-            this.init.onStatusChange?.(this.state);
-            return;
-        }
 
         this.reconciling = true;
+        let currentEditor = editor;
         try {
-            const stream = (await this.streamEntries()) as StreamEntryJson[];
-            const ops = reconcile(this.state.lastBlocks, parsed.blocks, stream);
-            if (ops.length > 0) {
-                await this.applyOps(ops);
-            }
-            this.state = { mode: "crdt", lastBlocks: parsed.blocks };
+            do {
+                // A request made while the preceding pass awaited the worker
+                // is represented by this flag. Reset it before reading the
+                // current editor so another edit during this pass schedules
+                // exactly one more pass.
+                this.reconcileRequested = false;
+                this.pendingReconcileEditor = null;
+
+                const parsed = pmDocToBlocks(currentEditor.getJSON() as PmNode);
+                if (!parsed.support.supported) {
+                    // M041 honesty rule: degrade to the Phase 1 path for this
+                    // session; existing CRDT state is retained.
+                    this.state = {
+                        mode: "fallback",
+                        reason: `unsupported: ${parsed.support.unsupportedTypes.join(", ")}`,
+                    };
+                    this.init.onStatusChange?.(this.state);
+                    return;
+                }
+
+                const stream = (await this.streamEntries()) as StreamEntryJson[];
+                const ops = reconcile(this.state.lastBlocks, parsed.blocks, stream);
+                if (ops.length > 0) {
+                    await this.applyOps(ops);
+                }
+                this.state = { mode: "crdt", lastBlocks: parsed.blocks };
+                currentEditor = this.pendingReconcileEditor ?? currentEditor;
+            } while (this.reconcileRequested && this.state.mode === "crdt");
         } finally {
             this.reconciling = false;
+            this.reconcileRequested = false;
+            this.pendingReconcileEditor = null;
         }
     }
 

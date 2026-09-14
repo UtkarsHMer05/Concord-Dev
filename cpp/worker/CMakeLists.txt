@@ -15,7 +15,7 @@ target_link_libraries(concord-worker PRIVATE concord::crdt)
 target_compile_options(concord-worker PRIVATE ${CONCORD_WARNING_FLAGS} ${CONCORD_SANITIZER_FLAGS})
 target_link_options(concord-worker PRIVATE ${CONCORD_SANITIZER_FLAGS})
 
-# Release identity (cpp/CMakeLists.txt project VERSION == 1.0.0): threaded
+# Release identity (cpp/CMakeLists.txt project VERSION == 1.0.1): threaded
 # to the binary as a compile definition so `--version` reports it without a
 # second hardcoded copy. CONCORD_GIT_SHA is OPTIONAL METADATA (SA-NATV1):
 # only a NON-EMPTY sha is embedded; gitless/source-archive builds get the

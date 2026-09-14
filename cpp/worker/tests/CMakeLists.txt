@@ -25,7 +25,7 @@ target_link_options(concord_worker_tests PRIVATE ${CONCORD_SANITIZER_FLAGS})
 # wiring so the --version test pins the EXACT output form this build must
 # produce — 1 = "concord-worker <version> (<sha>)" (git checkout),
 # 0 = "concord-worker <version>" (source archive / gitless tree). A build
-# can therefore never regress into the malformed "1.0.0 ()" middle ground
+# can therefore never regress into the malformed "1.0.1 ()" middle ground
 # unnoticed: whichever side the configuration is on, the test asserts it.
 if(DEFINED CONCORD_GIT_SHA AND NOT CONCORD_GIT_SHA STREQUAL "")
   set(CONCORD_WORKER_HAS_SHA 1)
@@ -38,4 +38,7 @@ target_compile_definitions(concord_worker_tests PRIVATE
 )
 
 add_test(NAME concord_worker_tests COMMAND concord_worker_tests)
-set_tests_properties(concord_worker_tests PROPERTIES LABELS "worker;smoke" TIMEOUT 120)
+set_tests_properties(concord_worker_tests PROPERTIES
+  LABELS "worker;smoke"
+  TIMEOUT ${CONCORD_WORKER_TEST_TIMEOUT}
+)
