@@ -65,7 +65,7 @@ recovery/history subsystem. Everything below is implemented and gated
 
 ```mermaid
 flowchart LR
-    subgraph PG[("PostgreSQL — durable truth")]
+    subgraph Durable["PostgreSQL — durable truth"]
         OP[("crdt_operations<br/>durable op log")]
         SN[("crdt_snapshots<br/>immutable finalized")]
         RV[("crdt_revisions")]

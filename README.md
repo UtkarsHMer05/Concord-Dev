@@ -150,7 +150,7 @@ sequenceDiagram
     G-->>W: Durable ACK
     G->>N: Publish after commit
     N-->>G: At-least-once delivery to other gateways
-    G-->>O: Fanout; peers apply idempotently
+    G-->>O: Fanout, peers apply idempotently
 ```
 
 The important ordering is **local durable intent → database commit → ACK →
