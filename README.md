@@ -1,354 +1,417 @@
 <p align="center">
-  <img src="public/logo.svg" alt="Concord" width="64" height="64" />
+  <img src="public/logo.svg" alt="Concord logo" width="72" height="72" />
 </p>
 
-<h1 align="center">Concord</h1>
+<h1 align="center">Concord — Local-First Collaborative Editor &amp; Distributed Sync Engine</h1>
 
 <p align="center">
-  A local-first collaborative document workspace — with the synchronization
-  engine implemented in this repository.
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/CRDT-C++20%20·%20WASM-00599C?logo=cplusplus&logoColor=white" alt="CRDT: C++20 + WASM" />
-  <img src="https://img.shields.io/badge/Gateway-Rust%20·%20tokio-DEA584?logo=rust&logoColor=black" alt="Gateway: Rust" />
-  <img src="https://img.shields.io/badge/Web-TypeScript%20·%20Next.js%2016-3178C6?logo=typescript&logoColor=white" alt="Web: TypeScript" />
-  <img src="https://img.shields.io/badge/Truth-PostgreSQL%2018-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
-  <img src="https://img.shields.io/badge/Transport-NATS%20JetStream-34A1C1?logo=nats&logoColor=white" alt="NATS" />
-  <img src="https://img.shields.io/badge/Cached-Redis-DC382D?logo=redis&logoColor=white" alt="Redis" />
-  <img src="https://img.shields.io/badge/license-MIT-black" alt="License: MIT" />
-  <img src="https://img.shields.io/badge/release-1.0.1--candidate-blue" alt="Candidate 1.0.1 (not published)" />
+  A document workspace where the browser owns a durable replica first, and a
+  Rust/PostgreSQL sync path makes shared edits converge.
 </p>
 
 <p align="center">
-  <strong>Configured demo URL (not currently verified) →
-  <a href="https://concord-dev.vercel.app">concord-dev.vercel.app</a></strong><br />
-  This link is retained as a configuration/historical reference. The current
-  audit makes no availability, deployed-SHA, live-auth, or live-realtime claim.
+  <a href="https://github.com/UtkarsHMer05/Concord-Dev/actions/workflows/phase6-pr-ci.yml"><img src="https://github.com/UtkarsHMer05/Concord-Dev/actions/workflows/phase6-pr-ci.yml/badge.svg?branch=main" alt="Phase 6 pull-request CI" /></a>
+  <a href="https://github.com/UtkarsHMer05/Concord-Dev/actions/workflows/codeql.yml"><img src="https://github.com/UtkarsHMer05/Concord-Dev/actions/workflows/codeql.yml/badge.svg?branch=main" alt="CodeQL analysis" /></a>
+  <img src="https://img.shields.io/badge/CRDT-C%2B%2B20%20%C2%B7%20WASM-00599C?logo=cplusplus&amp;logoColor=white" alt="CRDT: C++20 and WebAssembly" />
+  <img src="https://img.shields.io/badge/Gateway-Rust%20%C2%B7%20Tokio-DEA584?logo=rust&amp;logoColor=black" alt="Gateway: Rust and Tokio" />
+  <img src="https://img.shields.io/badge/Web-TypeScript%20%C2%B7%20Next.js-3178C6?logo=typescript&amp;logoColor=white" alt="Web: TypeScript and Next.js" />
+  <img src="https://img.shields.io/badge/License-MIT-black" alt="License: MIT" />
 </p>
 
-> Verification status (2026-09-14): historical release/browser/production
-> statements below remain tied to named checkpoints. Fresh credential-free
-> candidate results for implementation commit `42dcb17…` are recorded in the
-> canonical handoff; trusted Clerk, exact remote CI, release artifacts, and
-> live-runtime claims remain blocked or withheld. The canonical handoff is
-> [`docs/audits/CANONICAL_RELEASE_REPORT.md`](docs/audits/CANONICAL_RELEASE_REPORT.md)
-> and its machine-readable
-> [`CANONICAL_RELEASE_LEDGER.json`](docs/audits/CANONICAL_RELEASE_LEDGER.json).
-> The current package/runtime version is 1.0.1, but no v1.0.1 tag or release
-> has been published and no live deployment is claimed by this README.
+> Verification boundary — 2026-09-14: this page presents the checked-in
+> v1.0.1 implementation candidate and its traceable local evidence. It does
+> not claim a published v1.0.1 release, a live deployment, a current Vercel
+> runtime, or a production authenticated-browser result. The strict local
+> orchestrator recorded **25 passes, 1 release-blocking dependency-scan
+> failure, and 0 skips**; the container scan reported **44 critical** and
+> **180 high** findings. The failure is kept visible instead of being hidden
+> behind a green badge. See the [fresh evidence ledger](docs/audits/CANONICAL_FRESH_EVIDENCE.md).
 
----
+## The short version
 
-## The 30-second version
+Concord is a document editor built around the distributed-systems problem
+behind collaborative writing: many replicas must converge while users type,
+networks disappear, processes crash, and an acknowledgement must still mean
+that the operation is durable.
 
-Concord looks like a document editor — but the hard part of a
-Google-Docs-class product is **not the text box**. It is keeping many
-replicas of the same document converging while people type
-simultaneously, on unreliable networks, without ever losing an edit
-that was acknowledged as saved.
+The repository contains the complete candidate path:
 
-Concord's answer, all built in this repository:
+- a deterministic sequence CRDT implemented once in C++20 and compiled for
+  both native services and the browser's WebAssembly worker;
+- a local-first browser runtime that writes to an IndexedDB-backed replica
+  before it waits for the network;
+- Rust/Tokio WebSocket gateways that persist operations to PostgreSQL before
+  sending a durable acknowledgement;
+- NATS JetStream for at-least-once inter-gateway fanout and Redis for
+  intentionally ephemeral presence and rate-limit state.
 
-- a **sequence CRDT written once in C++20**, compiled twice — native
-  (server) and **WebAssembly** (browser) — so every replica runs the
-  same merge code;
-- **Rust WebSocket gateways** that acknowledge an edit *only after its
-  PostgreSQL commit*, backed by an at-least-once, idempotent transport
-  that survives crashes, duplicates, and partitions;
-- a **local-first client**: you type into a local replica inside a Web
-  Worker (IndexedDB op-log), online or offline, and sync when a
-  gateway is reachable.
+The visible product is intentionally familiar. The project’s identity is the
+replication, durability, recovery, and verification work underneath it.
 
-No collaboration SaaS is involved. Liveblocks and Convex were removed
-deliberately (Phases 0–1, asserted by historical smoke tests: their old
-endpoints 404). The sync stack — merge semantics, wire protocol, gateways,
-recovery — is implemented in this repo, and every retained number in this
-README is labeled and sourced in
-[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+![Concord editor with the canonical logo in the application header](docs/assets/readme/hero-editor.png)
 
-## What is hard about this (and how it is answered)
+## See it in the browser
 
-**1. Every replica must merge to the exact same document.**
-One C++20 core (YATA-style origin anchoring, tombstones, last-writer-wins
-attribute registers) is compiled to native *and* WASM; every
-correctness suite asserts the two produce byte-identical digests.
-Replicas converge under arbitrary reordering, duplication, and
-partition — as recorded by a historical 130-seed randomized campaign
-(**1.06 M operations, 0 divergent replicas**) and a 27-scenario chaos
-matrix (**0 lost durable-ACKed operations**). These are checkpoint results,
-not current-tree reruns.
+These are screenshots captured from the real application with the repository's
+authenticated browser harness. The harness used a clean disposable database,
+the real Rust gateway, the real Next.js app, and temporary Clerk test users;
+the editor text is synthetic and contains no personal or production data.
 
-**2. "Saved" must actually mean saved.**
-An operation is acknowledged only after its PostgreSQL WAL commit;
-delivery is at-least-once with idempotent ingestion (operation
-identity = canonical bytes; a unique index is the dedup boundary).
-Client crash mid-batch, gateway SIGKILL after commit-before-ACK, NATS
-redelivery storm — the historical test scenarios recorded no loss of an
-acknowledged operation. The exact claims (and non-claims) are written down in
-[`docs/FAILURE_MODEL.md`](docs/FAILURE_MODEL.md).
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/readme/dashboard.png" alt="Concord dashboard showing the template gallery and a project brief document" /></td>
+    <td width="50%"><img src="docs/assets/readme/hero-editor.png" alt="Concord editor showing a local-first project brief and the top-left Concord mark" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Dashboard and document templates</sub></td>
+    <td align="center"><sub>Editor surface and toolbar</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/readme/collaborative-a.png" alt="Concord editor showing converged edits from replicas A and B with the collaboration status connected" /></td>
+    <td width="50%"><img src="docs/assets/readme/offline-state.png" alt="Concord editor showing a disconnected edit and the message that edits are saved locally" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Two browser contexts converged</sub></td>
+    <td align="center"><sub>Offline edit saved locally</sub></td>
+  </tr>
+</table>
 
-**3. Local-first has to be real, not a marketing word.**
-The browser edits into its own replica (IndexedDB op-log + snapshots
-inside a Web Worker). Offline edits queue durably and re-send with
-stable identities on reconnect; a stale client past a compaction floor
-resyncs from a checksum-verified snapshot before trusting anything.
+The second collaboration context is captured separately in
+[`collaborative-b.png`](docs/assets/readme/collaborative-b.png). The browser
+journey that produced these states is reproducible with the command in
+[Browser verification](#browser-verification).
 
-## How the system fits together
+A matching [social-preview.png](docs/assets/readme/social-preview.png) is
+included for the repository owner to upload in GitHub’s Social preview
+settings; no account-side metadata was changed here.
+
+## What is interesting here
+
+| Boundary | Concord’s answer | Why it matters |
+|---|---|---|
+| Replica state | C++20 sequence CRDT, compiled to native and WebAssembly | Merge semantics stay aligned across the browser and server-side tooling. |
+| Local-first editing | Web Worker + IndexedDB operation log and snapshots | A network interruption does not have to stop typing or erase the pending work. |
+| Durable acknowledgement | PostgreSQL commit precedes the WebSocket ACK | “Saved” has a concrete durability boundary. |
+| Distributed fanout | NATS JetStream delivers post-commit batches to other gateways | Gateways can fan out without becoming the ordering authority. |
+| Recovery | Snapshot verification, operation replay, compaction, and resync floors | Slow or stale replicas have a bounded way back to a trusted state. |
+| Authorization | Clerk supplies identity; Concord re-checks document roles server-side | Authentication and authorization stay separate, with deny-by-default access. |
+
+## Architecture
+
+The current implementation candidate is a local-first web editor plus a
+separately runnable Rust sync tier. PostgreSQL is the durable source of truth;
+NATS is transport, and Redis is ephemeral state. A load balancer can sit in
+front of multiple gateways in a deployment-shaped environment, but no live
+deployment is claimed by this README.
 
 ```mermaid
 flowchart LR
     subgraph Browser["Browser"]
-        E["TipTap editor"] --> BR["CRDT bridge<br/>(diffs -> ops)"]
-        BR --> WK["Web Worker<br/>WASM CRDT + IndexedDB op-log"]
+        UI["TipTap editor"] --> Bridge["CRDT bridge<br/>diffs → ops"]
+        Bridge --> Worker["Web Worker<br/>WASM CRDT + IndexedDB"]
     end
 
-    WK <-->|"WebSocket · binary op batches"| LB["nginx load balancer"]
-    LB <--> G1["Sync gateway 1 · Rust"]
-    LB <--> G2["Sync gateway 2 · Rust"]
-    LB <--> G3["Sync gateway 3 · Rust"]
+    Browser -->|"REST / server actions"| Web["Next.js web tier<br/>documents · RBAC · audit"]
+    Web <--> PG[("PostgreSQL<br/>durable truth")]
 
-    Browser -.->|"loads app · REST · server actions"| WEB["Next.js web tier<br/>(documents, RBAC, audit)"]
-    WEB <--> PG[("PostgreSQL 18<br/>durable truth")]
+    Worker <-->|"WebSocket · binary op batches"| Gateway["Rust/Tokio sync gateways"]
+    Gateway --> PG
+    Gateway <--> NATS["NATS JetStream<br/>post-commit fanout"]
+    Gateway -.-> Redis[("Redis<br/>presence · rate limits")]
 
-    G1 --> PG
-    G2 --> PG
-    G3 --> PG
+    Recovery["Recovery worker<br/>snapshots · compaction"] <--> PG
+    Recovery --> Native["Native C++ CRDT verifier"]
 
-    G1 <--> NATS["NATS JetStream<br/>inter-gateway fanout"]
-    G2 <--> NATS
-    G3 <--> NATS
-
-    G1 -.-> RD[("Redis<br/>presence · rate limits")]
-    G2 -.-> RD
-    G3 -.-> RD
-
-    WK -.->|"gateway down?<br/>edits stay local, resync later"| WK
+    classDef durable fill:#e8f0ff,stroke:#4169e1,color:#102a56
+    classDef local fill:#e8fbf7,stroke:#168b78,color:#123b35
+    classDef transport fill:#fff3df,stroke:#c47c22,color:#5f3a0b
+    class PG,Recovery,Native durable
+    class Worker,Bridge,UI local
+    class Gateway,NATS,Redis transport
 ```
 
-| Layer | Language | Why |
-|---|---|---|
-| CRDT core, snapshots, hashing, verification worker | C++20 (native + Emscripten → WASM) | one deterministic merge engine, compiled twice; the server worker reuses it for snapshot/recovery verification |
-| Browser runtime: TipTap ⇄ CRDT bridge, Web Worker, IndexedDB, sync session | TypeScript | product UI + the client half of the wire protocol |
-| Sync gateways: WebSocket transport, authN/authZ, bounded queues, backpressure, graceful drain | Rust (tokio) | long-lived connections, strict frame budgets, measured SIGTERM draining |
-| Durable truth: operations, ACLs, snapshots, history, audit | PostgreSQL 18 | the only durable store; WAL commit precedes every ACK |
-| Inter-gateway fanout | NATS JetStream | event transport with msg-id dedup — explicitly *not* the ordering authority, *not* durable truth |
-| Presence, rate limits, caches | Redis | ephemeral only; safe to FLUSHALL by design |
-
-## The write path: keystroke → durable → everyone else
+### One operation, end to end
 
 ```mermaid
 sequenceDiagram
-    participant B as Browser (WASM CRDT in a Web Worker)
-    participant G as Rust sync gateway
+    participant E as Editor
+    participant W as WASM CRDT worker
+    participant G as Rust gateway
     participant P as PostgreSQL
     participant N as NATS JetStream
+    participant O as Other replicas
 
-    B->>G: Binary op batch over WebSocket
-    G->>G: Re-check authorization · enforce size/count budgets
-    G->>P: One multi-row INSERT (idempotent, single transaction)
-    P-->>G: WAL commit
-    G-->>B: Durable ACK — only after commit
-    G->>N: Publish batch (post-commit, msg-id dedup)
-    N-->>G: Other gateways receive (at-least-once)
-    G-->>B: Fanout to every other session (idempotent apply)
+    E->>W: Local transaction
+    W->>W: Diff canonical state and append to IndexedDB outbox
+    W->>G: Binary batch with stable operation identities
+    G->>G: Re-authenticate and enforce frame/count/size budgets
+    G->>P: Idempotent multi-row insert in one transaction
+    P-->>G: Commit
+    G-->>W: Durable ACK
+    G->>N: Publish after commit
+    N-->>G: At-least-once delivery to other gateways
+    G-->>O: Fanout; peers apply idempotently
 ```
 
-In words: a keystroke diffs against the replica's canonical state and
-emits CRDT operations with stable identities (`replica:counter`); the
-gateway ingests them in one `INSERT … ON CONFLICT DO NOTHING`; the ACK
-fires only after commit; on any failure the ops stay pending in the
-client outbox and re-send under the same identities — the server
-dedups.
+The important ordering is **local durable intent → database commit → ACK →
+fanout**. If the client, gateway, broker, or network fails before the ACK,
+the operation remains pending and can be retried with the same identity. If a
+message is delivered twice, the database and replicas have idempotent
+boundaries.
 
-## Historical snapshots, recovery, and compaction result
+### Failure and recovery shape
 
-History is the operation log; snapshots compress it. A historical campaign
-recorded recovery that could
-replay 100 k operations (65.2 s p50) or import a snapshot plus the 1 k
-tail after it (**0.96 s p50 — 98.4 % faster**, digest-verified on every
-run, reproduced four times: 98.6 / 98.5 / 98.6 / 98.4 %). Safe
-compaction prunes operations covered by a snapshot boundary (staged,
-crash-safe, integrity-checked): after fully compacting a 50 k-op
-document, **50.1 %** of durable bytes remain.
+```mermaid
+flowchart TD
+    Edit["User edits locally"] --> Outbox["IndexedDB outbox"]
+    Outbox --> Network{"Gateway reachable?"}
+    Network -->|No| Retry["Keep editing and retry later"]
+    Retry --> Network
+    Network -->|Yes| Commit["PostgreSQL commit"]
+    Commit --> Ack["Durable ACK"]
+    Ack --> Fanout["Post-commit fanout"]
+    Fanout --> Converged["Other replicas converge"]
+    Stale["Replica below compaction floor"] --> Snapshot["Verify snapshot"]
+    Snapshot --> Tail["Replay trusted operation tail"]
+    Tail --> Converged
+```
 
-## Recorded historical measurements
+## Current verification — candidate, not release verdict
 
-The values in this table are retained measurements from named historical
-campaigns. They are not current-tree measurements and must not be changed or
-reused as a fresh release result without a candidate-bound rerun.
+The following values are bound to implementation candidate
+`42dcb17dd26c11a05dd20109102f37ea3fb5135a`, run locally on 2026-09-14. They
+are reported with denominators and remain separate from historical phase
+records.
 
-| Claim | Measured |
-|---|---|
-| Durable-ACK ingest, 25-op batch | p50 31.45 → **2.72 ms** (−91.4 %) after replacing per-op INSERT round trips with one multi-row `unnest` INSERT; throughput 771 → **8 685 ops/s** (11.3×). Profiler-driven; replay digests identical before/after. |
-| Scale-out, 1 → 4 gateways (200 ops/s open-loop) | ack p95 13.19 → **15.23 ms**, **zero loss, 0.000 % errors** — a gateway costs ~2 ms |
-| Snapshot+tail recovery | **98.4 % faster** than full replay (65.2 → 0.96 s p50; 100 k history / 1 k tail; 5 runs) |
-| Historical correctness campaigns | **181/181 scenarios** on the cited Phase 6/7 campaign commits; 0 divergent replicas, 0 lost durable-ACKed ops |
-| Historical fuzzing campaign | **5 M executions, 0 crashes** (every fixed crash pinned by a corpus regression) |
-| Node-instrumented WASM/worker proxy | typing 0.003 ms/op; 5 k-op fanout batch 227 ms; runtime bundle 180 KB (not real-browser latency) |
+| Surface | Fresh result | Evidence |
+|---|---:|---|
+| TypeScript quality gates | `typecheck` pass; `lint` pass | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Web unit tests | **16 files / 209 tests** | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Web coverage | **86.96% statements**, **78.51% branches**, **88.20% functions**, **87.50% lines** | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Database project | **7 files / 69 tests** | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Realtime project | **3 files / 21 tests** | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Rust workspace | **258 passed / 1 ignored / 0 failed** | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Native CTest | **3/3 passed** | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| WASM | Smoke pass; **5 files / 31 CRDT tests** | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Property campaign | **30/30 seeds**, 60,000 operations, 5 replicas × 2,000 operations | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Native fuzz targets | **160,000 executions**, 0 reported crashes | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Sanitizers | ASan/UBSan CTest 3/3; TSan CTest 3/3 with no diagnostic | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
+| Chaos matrix | **27/27 passed**, 0 lost durable-ACKed operations, 0 divergent replicas | [chaos summary](evidence/v1.0.1/chaos-summary.json) |
+| Container dependency scan | **Release blocker:** 44 critical, 180 high, 158 moderate, 20 low | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
 
-Environments, run counts, denominators, and reproduction commands for
-every number: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+The fresh evidence also records image smoke **3/3**, immutable image pins
+**19**, SBOM inventories for Web/Rust/native, secret-history checks, and
+provenance assertions. Those checks do not override the container scan or
+turn a candidate into a release.
 
-The performance and chaos figures above are recorded historical campaigns
-with their source commits in `docs/BENCHMARKS.md`; the final remediation pass
-did not claim a new before/after performance delta. Fresh current-checkout
-evidence is pending in the canonical handoff; the older
-[`docs/audits/V1_HARDENING_FINAL_REPORT.md`](docs/audits/V1_HARDENING_FINAL_REPORT.md)
-is a historical report, not the current verdict.
+### Current native benchmark baseline
 
-## Historical proof campaign (not current release acceptance)
+These are fresh Release-mode measurements on the recorded local environment
+(Apple M2, 8 cores, 8 GB RAM). They are a baseline for this candidate, not a
+cross-version improvement claim.
 
-- **Chaos:** gateway SIGKILL / rolling restart, NATS pause / restart /
-  redelivery / lag / storage loss, Redis loss, Postgres outage, worker
-  faults, compound scenarios — **27/27 green, 0 acknowledged-op loss**.
-- **Graceful drain:** SIGTERM → stop accepting sessions → finish
-  in-flight durable writes → close, measured ~2.2–3 s; a rolling gateway
-  restart was verified during the historical production-shaped exercise
-  with both client sessions intact.
-- **Sanitizers:** ASan + UBSan and TSan were reported green in the historical
-  native matrix; no current sanitizer result is asserted here.
-- **Test suites:** the commands cover web unit/DB/realtime projects, native
-  core/worker CTest, WASM parity, the Rust workspace, and the rendered-browser
-  matrix. Historical counts remain tied to their checkpoints; fresh counts
-  belong in the canonical report.
+| Operation | Measurement |
+|---|---:|
+| Sequential append | **137.400 ms** median for 10,000 units, 5 runs |
+| Random-position insert | **93.456 ms** median for 5,000 units, 5 runs |
+| Random delete | **23.768 ms** median for 2,000 deletes, 5 runs |
+| Remote batch apply | **2,530.292 ms** median for 19,998 units, 5 runs |
+| Snapshot export / import | **1.215 ms / 1.834 ms** |
+| Snapshot size | **580,045 bytes** for 10,000 items; serialized op average **47 bytes** |
 
-## Security
+Full environment and command details live in
+[`evidence/v1.0.1/native-benchmark.txt`](evidence/v1.0.1/native-benchmark.txt).
 
-Deny-by-default server-side authorization with roles
-(OWNER / EDITOR / COMMENTER / VIEWER), re-checked on every batch and
-document read; read-denial is masked as not-found. A 32-row threat
-model maps every threat to a control; executable coverage and the scheduled/
-manual extended-fuzz jobs are listed in [`docs/SECURITY.md`](docs/SECURITY.md).
-Clerk handles identity **only** —
-all authorization is enforced against Concord-owned data. The public
-surface ships a pinned CSP (including `wasm-unsafe-eval` — its
-omission was caught during a historical production-shaped exercise,
-silently disabling the WASM engine in WebKit), hardened headers, rate
-limits, and strict
-frame/size budgets. Permission changes and revocations land in an
-append-only audit table. Details: [`docs/SECURITY.md`](docs/SECURITY.md).
+## Historical records are labeled separately
 
-## How it was built
+The repository contains earlier phase campaigns that are useful engineering
+history but are not current release acceptance. For example, the historical
+record includes a 98.4% faster snapshot-plus-tail recovery result, an
+8,685-ops/s ingest measurement after batching, a 27-scenario chaos campaign,
+and a multi-million-execution fuzz campaign. Those values remain tied to the
+commits, environments, and reproduction commands in
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md); they are not silently presented as
+fresh measurements above.
 
-The engineering history is organized as eight gated phases (milestone IDs,
-gates, and evidence in
-`.agent/`-linked docs and commit history):
+## Engineering highlights
 
-| Phase | What shipped |
-|---|---|
-| 0 | Modernized the product shell; removed Liveblocks (smoke tests assert its endpoints 404) |
-| 1 | PostgreSQL 18 + drizzle data layer; RBAC with deny-by-default, live revocation, IDOR-hardened routes; removed Convex |
-| 2 | C++20 sequence CRDT (one core → native + WASM); browser Web Worker runtime, IndexedDB durability, editor bridge |
-| 3 | Realtime transport: Rust WebSocket gateways, binary wire protocol, authN/authZ per batch, backpressure + graceful drain |
-| 4 | Distributed fanout: nginx LB over N gateways, NATS JetStream (msg-id dedup), Redis presence/rate limits; crash/storm/slow/lag E2E; 1→3 gateway scale-out, zero loss |
-| 5 | Snapshots, 98.6 % faster recovery, crash-safe compaction, restore-as-forward-ops, retention + audit hardening |
-| 6 | Historical proof phase: 32-row threat model mapped to controls with executable and scheduled/manual extended-fuzz coverage recorded, sanitizer evidence, historical fuzz executions, 27-scenario chaos, deterministic SBOMs, hardened images, and observability evidence |
-| 7 | Historical production polish + deployment preparation: browser E2E on release gateway/worker builds, CSP/CSWSH fixes, and deployment runbooks; the exercised AWS stack was later torn down |
+### One core, two runtimes
 
-The pristine tutorial baseline is preserved at the git tag
-`antonio-original-baseline` (see Provenance below).
+The sequence CRDT lives in `cpp/` and is compiled for both native tooling and
+the browser's WebAssembly worker. The TypeScript bridge translates TipTap
+transactions into canonical operations; the worker owns the local replica,
+IndexedDB persistence, and outbox. Native snapshot and recovery tooling reuse
+the same merge semantics.
+
+### Durable truth before fanout
+
+The gateway re-checks authorization, validates frame and batch budgets, and
+inserts operations idempotently into PostgreSQL. It sends the client ACK only
+after the transaction commits. NATS carries post-commit fanout; it is not the
+ordering authority and not the durable store.
+
+### Honest degradation
+
+The collaborative CRDT subset currently covers text, headings, and basic
+formatting. Unsupported content falls back to whole-document persistence and
+the UI reports the mode instead of pretending that realtime convergence is
+available. Offline edits show “saved locally” while they wait for reconnect.
+
+### Recovery as a first-class path
+
+Snapshots are checksum-verified, compaction is staged and crash-safe, and a
+stale client can resync from a snapshot plus a trusted operation tail. The
+failure model documents what happens across client crashes, gateway restarts,
+broker redelivery, data-service outages, and stale replicas.
+
+## Security and provenance
+
+- Clerk provides identity only. Concord owns document membership and
+  server-side roles: `OWNER`, `EDITOR`, `COMMENTER`, and `VIEWER`.
+- Reads and writes are re-authorized on every request/batch; denied document
+  reads are masked as not-found to reduce enumeration.
+- The browser surface uses a pinned CSP, hardened headers, CSWSH/origin
+  checks, rate limits, and explicit frame/size budgets.
+- Permission changes and revocations are recorded in an append-only audit
+  path. Credentials stay in environment/configuration boundaries and are not
+  written into screenshots, README text, or source.
+- The provenance record is path-specific. It distinguishes retained UI
+  primitives and tutorial ancestry from the Concord-owned CRDT, gateway,
+  recovery, and verification work. No blanket “100% original” claim is made.
+
+Details: [SECURITY](docs/SECURITY.md),
+[AUTHORIZATION](docs/AUTHORIZATION.md),
+[PROVENANCE](docs/PROVENANCE.md), [NOTICE](NOTICE), and
+[LICENSE](LICENSE).
 
 ## Quick start
 
+The web editor needs Node 24, PostgreSQL, and a matching Clerk development
+instance. Use a matching publishable/secret key pair; mixing keys from two
+Clerk instances produces an authentication redirect loop before the editor can
+load.
+
 ```bash
-nvm use 24                 # Node 24 (.nvmrc pins 24.20.0)
+nvm use 24
 npm ci
-docker compose up -d db    # PostgreSQL 18 on localhost:5433
-cp .env.example .env.local # then fill Clerk keys + DATABASE_URL
+cp .env.example .env.local
+# Fill .env.local with the matching Clerk keys and DATABASE_URL.
+docker compose up -d db
 npm run db:migrate
-npm run dev                # http://localhost:3000
+npm run dev
 ```
 
-The editor and the local-first CRDT runtime work out of the box (Web
-Worker + IndexedDB). Realtime sync additionally runs the Rust gateway
-stack — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Open `http://localhost:3000`. The local-first editor path is available with
+the Web Worker and IndexedDB. To exercise realtime sync with the local
+gateway/broker stack, see [DEPLOYMENT](docs/DEPLOYMENT.md) and
+[OPERATIONS](docs/OPERATIONS.md); those procedures are local runbooks, not
+evidence of a hosted runtime.
 
-### Tests
+## Verification commands
+
+### Browser verification
+
+The authenticated browser journey provisions disposable Clerk users, resets a
+dedicated `concord_e2e` database, starts the real gateway and Next app, and
+cleans up the temporary resources when it exits:
 
 ```bash
-npm run typecheck && npm run lint && npm test   # web suites
-npm run test:realtime                          # real gateways over real WS
-./scripts/verify-native.sh Release              # C++ core 64 + worker 52
-./scripts/verify-wasm.sh                       # WASM parity 26 + smoke
-cd rust && cargo test --workspace -- --test-threads=1 # Rust workspace
-npm run test:browser                            # Chromium browser journey + axe
-npm run test:browser:smoke:firefox              # Firefox browser smoke
-npm run test:browser:smoke:webkit               # WebKit browser smoke
+CONCORD_E2E_VERBOSE=1 \
+  npx playwright test \
+  --config=playwright.config.ts \
+  --project=chromium \
+  tests/browser/journey.spec.ts
 ```
 
-## Repository layout
+The fresh run used for this README completed **7 tests**. The local capture
+script is retained at
+[`scripts/readme/capture-screenshots.mjs`](scripts/readme/capture-screenshots.mjs)
+so the gallery can be refreshed from the same real application path.
 
+### Focused local gates
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run test:coverage
+npm run db:test:prepare && npm run db:migrate:test && npm run test:db
+npm run test:realtime
+bash scripts/verify-native.sh Release
+bash scripts/verify-wasm.sh
+cargo test --manifest-path rust/Cargo.toml --workspace -- --test-threads=1
+bash scripts/native/campaign.sh pr
+bash scripts/chaos/run-suite.sh all
 ```
-cpp/      C++20 CRDT core, native worker, tests, fuzz, campaign
-rust/     Rust sync gateway: auth, ingest, fanout, drain, chaos tests
-src/      Next.js app, CRDT client runtime, sync session
-wasm/     Emscripten build + smoke tests
-scripts/  verify / benchmark / deploy tooling
-tests/    web, realtime, and database test suites
-docs/     architecture, protocol, consistency, security, benchmarks, …
+
+The strict release orchestrator and the evidence ledger are the source of
+truth for the current candidate. Run the whole release-shaped suite before
+describing a future tag or deployment as ready.
+
+## Project map
+
+```text
+cpp/      C++20 sequence CRDT, native worker, CTest, fuzzers, campaigns
+rust/     Rust/Tokio sync gateway, auth, ingest, fanout, drain, chaos tests
+src/      Next.js editor, CRDT client, Web Worker bridge, server authorization
+wasm/     Emscripten build and parity/smoke tooling
+scripts/  build, browser, verification, benchmark, and operational tooling
+tests/    web unit, database, realtime, and rendered-browser suites
+docs/     architecture, protocol, consistency, security, recovery, evidence
+public/   canonical logo, template artwork, CRDT worker, and WASM assets
 ```
 
-Deep dives: [ARCHITECTURE](docs/ARCHITECTURE.md) ·
-[CONSISTENCY_MODEL](docs/CONSISTENCY_MODEL.md) ·
-[PROTOCOL](docs/PROTOCOL.md) ·
-[STORAGE](docs/STORAGE.md) ·
-[RECOVERY](docs/RECOVERY.md) ·
-[FAILURE_MODEL](docs/FAILURE_MODEL.md) ·
-[SECURITY](docs/SECURITY.md) ·
-[TESTING](docs/TESTING.md) ·
-[BENCHMARKS](docs/BENCHMARKS.md) ·
-[VERIFICATION](docs/VERIFICATION.md) ·
-[DECISIONS](docs/DECISIONS.md)
+## Documentation index
 
-## Demo configuration and deployment status
+Start with the [documentation index](docs/README.md), then choose the layer
+you want to inspect:
 
-The repository retains the configured URL
-[concord-dev.vercel.app](https://concord-dev.vercel.app) as a historical or
-owner-provided reference. It was not independently verified in this audit, so
-this README makes no current claim about URL reachability, deployed version,
-Clerk authentication, or live data durability.
+- [Architecture](docs/ARCHITECTURE.md) · [Engineering brief](docs/ENGINEERING_BRIEF.md)
+- [Consistency model](docs/CONSISTENCY_MODEL.md) · [Protocol](docs/PROTOCOL.md)
+- [Database and storage](docs/DATABASE.md) · [Recovery](docs/RECOVERY.md)
+- [Failure model](docs/FAILURE_MODEL.md) · [Operations](docs/OPERATIONS.md)
+- [Security](docs/SECURITY.md) · [Testing](docs/TESTING.md)
+- [Browser support](docs/BROWSER_SUPPORT.md) · [Configuration](docs/CONFIGURATION.md)
+- [Benchmarks](docs/BENCHMARKS.md) · [Verification](docs/VERIFICATION.md)
+- [Decisions](docs/DECISIONS.md) · [Deployment](docs/DEPLOYMENT.md)
+- [Fresh candidate evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) ·
+  [release ledger](docs/audits/CANONICAL_RELEASE_LEDGER.json)
 
-A prior project state described a Vercel + Neon + Clerk web-tier deployment
-and a separately exercised AWS realtime stack that was later torn down. Those
-are historical records. The former multi-user realtime path (Rust gateways,
-nginx, NATS, Redis, PostgreSQL, and worker) must not be represented as running
-on Vercel serverless functions without a separately verified architecture and
-runtime. The local repository still documents how to exercise that path with
-local services; local procedures are not live deployment proof.
+## Current limits and owner actions
 
-Remaining v1 limitations, stated plainly:
+The current state is deliberately bounded:
 
-- Single-node data services per environment (gateways scale
-  horizontally; the data tier does not, yet).
-- Collaborative subset: text, headings, basic formatting. Content
-  outside the subset degrades that session to whole-document save —
-  surfaced loudly in the UI, never silent.
-- History/restore UI is out of the v1 boundary (the revision/restore
-  machinery exists and is tested at the protocol layer).
-- Embedded-WebView browsers are not independently verified in this pass and
-  can need one event or a reload to converge live fanout visually. Historical
-  rendered-browser evidence recorded Chromium 12/12 (7 journey + 5
-  accessibility), Firefox smoke 1/1, and WebKit smoke 1/1; the data path is
-  separately covered by historical realtime transport E2E. These counts are
-  not current-checkout results.
+- No current AWS, Vercel, Neon, or other hosted runtime is claimed. The
+  historical AWS exercise was torn down; do not infer availability from old
+  deployment records or a configured URL.
+- No v1.0.1 tag or GitHub Release has been published. Release identity,
+  release artifacts, and account-side deployment still require owner action.
+- Authenticated browser CI was intentionally removed from the remote workflow;
+  local authenticated browser verification is available when the configured
+  Clerk instance and services are present.
+- The data tier is single-node per environment in this candidate. Gateways
+  can scale horizontally, but PostgreSQL/NATS/Redis topology and operating
+  contracts remain explicit work rather than an implicit scale claim.
+- History/restore UI is outside the v1 product boundary even though protocol
+  and recovery machinery are exercised.
+- Embedded WebViews and hosted production behavior need separate verification.
+
+Before publishing a portfolio link, an owner should resolve the dependency
+scan findings, complete the legal/provenance review, verify account-side CI
+and release settings, and independently verify any hosted runtime. This
+README intentionally does not perform those external actions.
 
 ## Provenance and attribution
 
-This project originated from the Code With Antonio "Google Docs Clone"
-tutorial (Next.js/React/Clerk/Convex/Liveblocks) and was rebuilt into a
-systems project in this repository. The provenance status is deliberately
-path-specific: a historical pass recorded replacement of baseline artwork,
-fonts, template copy, and selected source, while retained
-`src/components/ui/` primitives are described as shadcn/ui generator output
-with MIT attribution in [`NOTICE`](NOTICE). The synchronization stack is
-implemented in this repository, but no blanket “100% original” or final legal
-clearance claim is made. The pristine tutorial baseline is preserved for
-transparency at the git tag `antonio-original-baseline`, and CI enforces a
-mechanical byte-identity boundary; see the candidate-bound details in
-[`docs/PROVENANCE.md`](docs/PROVENANCE.md).
+Concord began from the Code With Antonio “Google Docs Clone” tutorial shape
+(Next.js, React, Clerk, Convex, and Liveblocks) and was rebuilt into a
+systems-focused project in this repository. That historical phrase is kept
+only for attribution; it is not the product identity. The pristine tutorial
+baseline is preserved at the `antonio-original-baseline` tag, and the
+path-specific evidence and retained third-party UI attribution are documented
+in [`docs/PROVENANCE.md`](docs/PROVENANCE.md) and [`NOTICE`](NOTICE).
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). Third-party components remain under
-their own licenses, summarized in [`NOTICE`](NOTICE).
+MIT — see [`LICENSE`](LICENSE). Third-party components remain under their own
+licenses, summarized in [`NOTICE`](NOTICE).

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">Concord — Local-First Collaborative Editor and Distributed Sync Engine</title>
+  <desc id="description">Concord combines a local-first editor, a deterministic C++20 and WebAssembly CRDT, Rust sync gateways, and durable PostgreSQL storage.</desc>
+  <rect width="1280" height="640" fill="#0d1117"/>
+  <rect x="88" y="116" width="184" height="184" rx="46" fill="#174b65"/>
+  <g transform="translate(88 116) scale(3.8333333)">
+    <path d="M31 11a15 15 0 1 0 0 26" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+    <path d="M29 18 21 24l8 6" fill="none" stroke="#aee4db" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="328" y="244" fill="#f0f6fc" font-family="Inter, system-ui, -apple-system, sans-serif" font-size="92" font-weight="700" letter-spacing="-3">Concord</text>
+  <text x="96" y="410" fill="#aee4db" font-family="Inter, system-ui, -apple-system, sans-serif" font-size="30" font-weight="600">Local-first editor · deterministic CRDT · durable sync</text>
+  <text x="96" y="474" fill="#8b949e" font-family="Inter, system-ui, -apple-system, sans-serif" font-size="26">C++20 + WASM · Rust/Tokio gateways · PostgreSQL truth</text>
+  <rect x="96" y="542" width="188" height="6" rx="3" fill="#aee4db"/>
+</svg>
