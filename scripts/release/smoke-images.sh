@@ -70,8 +70,8 @@ smoke_gateway() {
     --build-arg "CONCORD_VERSION=$version" \
     --build-arg "CONCORD_GIT_SHA=$revision" \
     -f docker/gateway.Dockerfile -t "$tag" "$WORK" >/dev/null
-  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}' "$tag")" = "$version"
-  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' "$tag")" = "$revision"
+  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$tag")" = "$version"
+  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$tag")" = "$revision"
   note "starting gateway (loopback, configured smoke DB → it must boot + serve health)…"
   local cid=""
   local -a host_args=()
@@ -144,8 +144,8 @@ smoke_web() {
     --build-arg "CONCORD_VERSION=$version" \
     --build-arg "CONCORD_GIT_SHA=$revision" \
     -f docker/web.Dockerfile -t "$tag" "$WORK" >/dev/null
-  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}' "$tag")" = "$version"
-  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' "$tag")" = "$revision"
+  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$tag")" = "$version"
+  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$tag")" = "$revision"
   note "starting web (dummy DB URL; process liveness via HTTP)…"
   local cid=""
   # No --rm: the stopped container's exit code must be inspectable.
@@ -207,8 +207,8 @@ smoke_worker() {
     --build-arg "CONCORD_VERSION=$version" \
     --build-arg "CONCORD_GIT_SHA=$revision" \
     -f docker/worker.Dockerfile -t "$tag" "$WORK" >/dev/null
-  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}' "$tag")" = "$version"
-  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' "$tag")" = "$revision"
+  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$tag")" = "$version"
+  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$tag")" = "$revision"
   note "probing worker image (generate_ops stdin probe: cmd 6 → status 0 + digest + ≥1 batch)…"
   # Probe frame — the exact bytes proven by the phase6 release-artifacts
   # workflow: [u32 24 payload][u32 6 cmd][u64 1 seed][u32 10 ops]
