@@ -75,12 +75,12 @@ jobs:
           # is exactly what should be released.
           fetch-depth: 1
       # A tag is never enough: a release candidate must have succeeded at
-      # the exact tagged commit in every protected CI lane, including the
-      # trusted real-Clerk browser matrix. Query every check-run page by SHA
+      # the exact tagged commit in every protected CI lane. Query every
+      # check-run page by SHA
       # rather than workflow/run name so a successful run on a different
       # commit, a skipped lane, or an in-progress/cancelled result cannot
       # satisfy this release.
-      - name: Require exact-commit CI and trusted browser gates
+      - name: Require exact-commit CI and reliability gates
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -114,10 +114,6 @@ jobs:
             "native (clang++)"
             "Analyze (javascript-typescript)"
             "Analyze (cpp)"
-            "browser gate"
-            "browser (trusted chromium)"
-            "browser (trusted firefox)"
-            "browser (trusted webkit)"
             "native-sanitizers"
             "native-fuzz"
             "rust-fuzz"
@@ -404,7 +400,7 @@ jobs:
           printf '%s\n' \
             "Concord ${GITHUB_REF_NAME}" \
             "" \
-            "This release was published only after the exact-commit CI, trusted browser, reliability, security, provenance, image-scan, SBOM, manifest, and checksum gates succeeded." \
+            "This release was published only after the exact-commit CI, reliability, security, provenance, image-scan, SBOM, manifest, and checksum gates succeeded." \
             "Production deployment is intentionally separate and is not implied by this release." \
             > release-notes.md
           gh release create "$GITHUB_REF_NAME" \

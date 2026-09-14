@@ -4,9 +4,11 @@
 > This campaign completed the repository-side remediation and the fresh local
 > evidence that does not require external credentials, but it did not reach a
 > releasable state. The exact candidate is blocked by unaccepted container
-> Critical/High findings, missing dedicated Clerk Environment configuration,
-> the failed exact-SHA trusted-browser preflight, pending nightly gates, and unresolved external
-> provenance/account actions. No credential, tag, GitHub Release, deployment,
+> Critical/High findings, pending nightly gates, and unresolved external
+> provenance/account actions. The secret-backed authenticated browser jobs
+> were removed from CI by explicit owner request; their earlier failed
+> preflight is historical, not a current gate. No credential, tag, GitHub
+> Release, deployment,
 > or live-runtime result is fabricated here.
 
 ## 1. Verdict
@@ -21,10 +23,11 @@
 The work is complete up to the real blockers that cannot be bypassed safely.
 The strict local dependency scan is red with `44 Critical / 180 High` image
 findings and no broad allowlist. The exact remote candidate run
-`34807277532` reached the trusted browser preflight and failed closed because
-the GitHub `concord-e2e` Environment has no `pk_test_` Clerk publishable key;
-the remaining nightly/release checks, artifacts, and account/legal decisions
-therefore cannot be certified as green.
+`34807277532` is historical evidence from before the authenticated browser
+jobs were removed; its core non-browser checks passed and its then-existing
+trusted browser preflight failed closed because the GitHub `concord-e2e`
+Environment was empty. The remaining nightly/release checks, artifacts, and
+account/legal decisions therefore cannot be certified as green.
 
 ## 2. Identity
 
@@ -70,10 +73,10 @@ outputs or remote check conclusions.
 
 | Inherited issue | Reproduced/root cause | Repository work completed | Current status |
 |---|---|---|---|
-| Trusted browser jobs stopped before Clerk authentication | GitHub `concord-e2e` has no dedicated publishable key, secret key, or audience variable | Split public secretless and trusted lanes; scoped the Clerk secret to the final Playwright/global-setup path; enforced audience, authorized-party, and exact-origin policy | `OWNER_ACTION` / blocking |
-| Browser CI was unsafe for public fork PRs | Secret-backed jobs were treated as universally required | Added `browser (public chromium)`, trusted Chromium/Firefox/WebKit jobs, and aggregate `browser gate`; fork lane receives no secrets | `PASS_REMOTE` architecture; exact trusted run fails closed on missing Clerk |
-| Main branch protection still required obsolete browser contexts | Protection readback required `browser (chromium)`, `browser (firefox)`, and `browser (webkit)` after the workflow split | Replaced those contexts with `browser (trusted chromium)`, `browser (trusted firefox)`, `browser (trusted webkit)`, and `browser gate`, preserving strict protection and existing non-status settings | `CLOSED` by GitHub API readback on 2026-09-14 |
-| Release workflow could rely on a different SHA | Artifact workflow lacked strict exact-check-run identity | Release workflow now validates normal SemVer, event SHA, check-run name/head SHA/Actions app, trusted browsers, fuzz/sanitizer/chaos, CodeQL, and core gates | `PASS_LOCAL` static review; exact PR run recorded below, release gate still blocked |
+| Secret-backed browser jobs failed before Clerk authentication | GitHub `concord-e2e` had no dedicated publishable key, secret key, or audience variable | Removed the authenticated Chromium/Firefox/WebKit matrix and aggregate `browser gate`; retained the public secretless Chromium smoke and local harness | `CLOSED` as a current CI blocker; no remote authenticated-browser claim |
+| Browser CI was unsafe for public fork PRs | Secret-backed jobs were treated as universally required | Current CI exposes only `browser (public chromium)` to untrusted fork pull requests; no job receives Clerk secrets | `CLOSED` by workflow review |
+| Main branch protection required browser contexts that no longer exist | Protection previously required split trusted browser names and `browser gate` | Removed all browser contexts from protected `main`, preserving strict protection and existing non-status settings | `CLOSED` by GitHub API readback on 2026-09-14 |
+| Release workflow could rely on a different SHA | Artifact workflow lacked strict exact-check-run identity | Release workflow now validates normal SemVer, event SHA, check-run name/head SHA/Actions app, non-browser reliability gates, CodeQL, and core gates | `PASS_LOCAL` static review; post-change exact run pending |
 | Web/gateway trust-boundary drift | Origin, CSP, Clerk party, TLS mode, and internal-service assumptions were not all exact | Added shared security configuration, per-request CSP nonce, HTTPS-only HSTS, exact `authorizedParties`, fail-closed TLS and internal-service requirements | Local tests/build pass; live/cloud auth remains unverified |
 | Native parity/sanitizer/fuzz evidence was incomplete or weakly bound | Sanitizer exclusivity, timeout, signed-byte, and campaign issues | Hardened CMake/worker/fuzz paths and reran Release, ASan/UBSan, TSan, property, and bounded fuzz campaigns | Fresh local pass; remote nightly still required |
 | Dev-container CVE inventory was high | Old pinned NATS/nginx/Grafana refs and no strict current inventory | Refreshed NATS, nginx, Grafana pins; retained exact Postgres/Redis/Prometheus refs after comparison; removed broad allowlist behavior | `FAIL_RELEASE_BLOCKER`; exact counts in §15 |
@@ -99,31 +102,26 @@ implementation commits. The machine-readable finding registry in
 [`CANONICAL_RELEASE_LEDGER.json`](CANONICAL_RELEASE_LEDGER.json) is the
 authoritative status map.
 
-## 6. Clerk and trusted-auth result
+## 6. Clerk and authenticated-browser result
 
-Repository-side policy is now exact and fail-closed:
+Repository-side policy remains exact and fail-closed for any explicitly
+provisioned local/developer run:
 
 - the gateway requires the configured Clerk issuer and audience;
 - the web middleware uses exact `authorizedParties` and
   `CONCORD_APP_ORIGIN` values;
-- trusted E2E requires the dedicated audience `concord-e2e`, exact allocated
-  web origin, and `CONCORD_E2E_REQUIRE_CLAIM_POLICY=1`;
-- the secret key is scoped to the minimum Playwright/global-setup execution
-  path in CI; checkout, dependency installation, tool setup, and browser
-  installation do not inherit it; and
+- authenticated E2E requires the dedicated audience `concord-e2e`, exact
+  allocated web origin, and `CONCORD_E2E_REQUIRE_CLAIM_POLICY=1` when run
+  locally with explicit credentials; and
 - NATS/Redis internal-auth mode and negative authorization checks are enabled
   by explicit E2E flags.
 
-The external GitHub Environment `concord-e2e` was observed without the
-required values. No Clerk secret is reproduced in this report. The required
-owner configuration is:
-
-```text
-CONCORD_E2E_CLERK_PUBLISHABLE_KEY  Environment variable (pk_test_...)
-CONCORD_E2E_CLERK_AUDIENCE         Environment variable (exactly concord-e2e)
-CONCORD_E2E_CLERK_ISSUER           optional Environment variable
-CONCORD_E2E_CLERK_SECRET_KEY       Environment secret (sk_test_...)
-```
+The secret-backed authenticated browser jobs and the aggregate `browser gate`
+were removed from GitHub Actions by explicit owner request. The external
+`concord-e2e` Environment is therefore not a current CI prerequisite, and no
+Clerk secret is reproduced in this report. The local harness documentation
+still describes how an authorized developer may provision a disposable
+non-production instance when authenticated browser diagnostics are needed.
 
 The local public-browser smoke uses inert values and proves only the compiled
 anonymous surface. It is not a real Clerk authentication result.
@@ -134,16 +132,14 @@ anonymous surface. It is not a real Clerk authentication result.
 |---|---|---|
 | Public secretless Chromium | `PASS` · 1/1 | Production surface smoke with no DB, gateway, broker, or Clerk secret |
 | Local dev-mode browser matrix | `PASS_LOCAL` | The full strict local run completed its Chromium journey/accessibility and Firefox/WebKit smoke jobs; it used local `.env.local` and default dev mode, so it is not trusted production-mode evidence |
-| Authenticated production-mode Chromium | `BLOCKED` | Dedicated Clerk Environment is empty |
-| Authenticated Firefox | `BLOCKED` | Same missing prerequisite; no retry-only evidence accepted |
-| Authenticated WebKit | `BLOCKED` | Same missing prerequisite; no retry-only evidence accepted |
-| Current accessibility journey | `BLOCKED` | Requires the trusted authenticated production-mode path; old 5/5 result is historical |
-| Local realtime convergence | `PASS_LOCAL` | Realtime suite 3 files / 21 tests; two-context trusted browser convergence still pending |
-| Remote GitHub browser gate | `FAIL_RELEASE_BLOCKER` | Exact run `34807277532` failed all three trusted browser jobs and `browser gate` at the missing `pk_test_` Clerk preflight |
+| Authenticated production-mode Chromium/Firefox/WebKit | `NOT_CLAIMED` | Secret-backed CI matrix was intentionally removed; local diagnostics remain available with explicit credentials |
+| Current accessibility journey | `NOT_CLAIMED` | No current remote authenticated-browser claim is made; old 5/5 result is historical |
+| Local realtime convergence | `PASS_LOCAL` | Realtime suite 3 files / 21 tests; authenticated browser convergence is optional local diagnostic coverage |
+| Remote GitHub browser gate | `NOT_CLAIMED` | The aggregate gate and trusted browser jobs no longer exist in current CI; run `34807277532` is historical pre-removal evidence |
 
-The dev-mode and secretless browser paths remain useful diagnostics. Neither
-is labeled as the required trusted authenticated browser acceptance gate. The
-aggregate local strict result was 25 PASS / 1 FAIL / 0 SKIP, with only the
+The dev-mode and secretless browser paths remain useful diagnostics. No
+authenticated remote-browser result is labeled as current release evidence.
+The aggregate local strict result was 25 PASS / 1 FAIL / 0 SKIP, with only the
 strict dependency scan failing.
 
 ## 8. Internal service authentication
@@ -297,24 +293,25 @@ implementation candidate and passed gateway, web, and worker probes with
 non-root IDs. This proves the source-export path used by that smoke helper.
 
 A separately cloned, fully clean working tree with all required release gates
-is not certified by the push workflows alone: the exact candidate PR run
-completed its core jobs, but the trusted browsers failed closed at the Clerk
-preflight and the nightly/release artifact gates remain pending. No generated
-artifact is treated as a release artifact yet.
+is not certified by the push workflows alone: the historical candidate run
+completed its core non-browser jobs, while the then-existing trusted browsers
+failed closed at the Clerk preflight; the post-change and nightly/release
+artifact gates remain pending. No generated artifact is treated as a release
+artifact yet.
 
 ## 18. GitHub CI on `releaseCommit`
 
 The exact pushed candidate `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` was
-observed remotely. Push run `34807277532` concluded `failure`: `web`, `rust`,
-`wasm`, `security`, native GCC/Clang, and the source-side checks completed
-successfully, while `browser (trusted chromium)`, `browser (trusted firefox)`,
-`browser (trusted webkit)`, and `browser gate` failed closed before any
-authenticated browser test because `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` was
-empty and therefore did not satisfy the required `pk_test_` preflight. The
-separate exact-SHA CodeQL run `34807277478` and the phase2/3/4/5/6 supporting
-runs also concluded success. The nightly `native-sanitizers`, `native-fuzz`,
-`rust-fuzz`, and `chaos` contexts required by the release workflow have not
-yet produced current conclusions.
+observed remotely before the CI-policy change. Push run `34807277532`
+concluded `failure`: `web`, `rust`, `wasm`, `security`, native GCC/Clang, and
+the source-side checks completed successfully, while the then-existing
+trusted browser jobs failed closed before authentication because the Clerk
+Environment was empty. That run is historical; a post-change exact-SHA run
+must be observed for the current check set. The separate exact-SHA CodeQL run
+`34807277478` and the phase2/3/4/5/6 supporting runs also concluded success.
+The nightly `native-sanitizers`, `native-fuzz`, `rust-fuzz`, and `chaos`
+contexts required by the release workflow have not yet produced current
+conclusions.
 
 The release workflow is configured to require exact successful check runs for:
 
@@ -327,56 +324,47 @@ native (g++)
 native (clang++)
 Analyze (javascript-typescript)
 Analyze (cpp)
-browser gate
-browser (trusted chromium)
-browser (trusted firefox)
-browser (trusted webkit)
 native-sanitizers
 native-fuzz
 rust-fuzz
 chaos
 ```
 
-The candidate cannot receive a green remote verdict until the trusted Clerk
-Environment is populated, the strict container gate is resolved, and the
-nightly/release contexts conclude successfully. The observed preflight failure
-is retained as a blocker, not treated as a retry-only infrastructure failure.
+The candidate cannot receive a green remote verdict until the strict container
+gate is resolved and the nightly/release contexts conclude successfully. The
+observed browser preflight failure is retained only as historical evidence of
+the pre-removal workflow, not as a current blocker.
 
-The protected `main` branch now requires the current status contexts
-`web`, `rust`, `wasm`, `security`, `native (g++)`, `native (clang++)`,
-`Analyze (javascript-typescript)`, `Analyze (cpp)`, the three trusted browser
-contexts, and `browser gate`. The readback preserved strict checks, linear
-history, conversation resolution, force-push/deletion protections, and the
-existing review/signature settings.
+The protected `main` branch now requires only the current non-browser status
+contexts `web`, `rust`, `wasm`, `security`, `native (g++)`, `native (clang++)`,
+`Analyze (javascript-typescript)`, and `Analyze (cpp)`. The readback preserved
+strict checks, linear history, conversation resolution, force-push/deletion
+protections, and the existing review/signature settings.
 
 ## 19. Release integrity
 
 No canonical stable tag, manifest, `SHA256SUMS`, artifact attestation,
 registry push, or GitHub Release was created. This is intentional: the
-release workflow must first see the exact candidate check-runs, trusted
-production-mode browsers, release-image policy pass, supply-chain evidence,
-and the remaining owner/legal decisions. Historical tags and evidence remain
-preserved and are not moved.
+release workflow must first see the exact candidate non-browser check-runs,
+release-image policy pass, supply-chain evidence, and the remaining
+owner/legal decisions. Historical tags and evidence remain preserved and are
+not moved.
 
 ## 20. Owner actions
 
 The remaining actions are explicit and structured in the JSON ledger:
 
-1. Configure the dedicated non-production Clerk Environment shown in §6;
-   rerun trusted production-mode Chromium/Firefox/WebKit plus accessibility,
-   wrong-audience/party/origin rejection, realtime convergence, reconnect,
-   and exact remote checks.
-2. Resolve the strict container inventory with patched upstream/custom
+1. Resolve the strict container inventory with patched upstream/custom
    validated images or exact advisory-level owner disposition. No broad
    allowlist is allowed.
-3. Enable and read back GitHub Dependabot vulnerability alerts and automated
+2. Enable and read back GitHub Dependabot vulnerability alerts and automated
    security fixes, or record the platform failure after bounded retries.
-4. Complete path-specific provenance/licensing review and any permission/legal
+3. Complete path-specific provenance/licensing review and any permission/legal
    decisions. Mechanical scanner cleanliness is not legal clearance.
-5. After all blockers close, run the clean-room candidate workflow, generate
+4. After all blockers close, run the clean-room candidate workflow, generate
    manifest/SBOM/checksum/attestation artifacts, verify them independently,
    and only then create/publish `v1.0.1`.
-6. If a live deployment is desired, choose and explicitly authorize a provider
+5. If a live deployment is desired, choose and explicitly authorize a provider
    that supports persistent Rust gateways, the worker, PostgreSQL,
    NATS/JetStream, Redis, and the proxy. Do not reprovision AWS merely to
    manufacture evidence.
@@ -404,11 +392,11 @@ Repository engineering made substantial progress: the implementation
 candidate is synchronized and passes the credential-free local build,
 database/realtime, Rust, native, WASM, property, fuzz, sanitizer, chaos,
 secret, provenance, SBOM, image-pin, and image-smoke checks. The result is
-not a canonical release because the strict container gate is red, the trusted
-Clerk browser gate is externally unconfigured, exact remote/nightly results
-are absent, Dependabot/account settings are not enabled, and provenance/legal
-disposition is not an automated fact. These blockers are recorded rather than
-silently lowered or relabeled.
+not a canonical release because the strict container gate is red, current
+remote/nightly results are absent, Dependabot/account settings are not
+enabled, and provenance/legal disposition is not an automated fact. The
+pre-removal browser failure is retained as historical evidence rather than
+silently relabeled as a current green result.
 
 Live production deployment: `NOT DEPLOYED / NOT CLAIMED`. No AWS or Vercel
 runtime, URL, deployed SHA, TLS, live Clerk, or persistent realtime claim is

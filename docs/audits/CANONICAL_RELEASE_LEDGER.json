@@ -51,8 +51,8 @@
     "browserPublic": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Secretless production Chromium smoke 1/1 passed"},
     "browserLocalDev": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Full local dev-mode Chromium journey/accessibility plus Firefox/WebKit smoke jobs passed under the strict orchestrator; local .env.local and default dev configuration were used, so this does not substitute for trusted production-mode Clerk evidence"},
     "strictLocal": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "25 PASS / 1 FAIL / 0 SKIP / 0 required SKIP; the sole failing sub-gate was security/dependency-scan"},
-    "branchProtection": {"status": "CLOSED", "verifiedSha": null, "details": "GitHub API readback confirms strict main protection now requires the current trusted browser contexts plus browser gate; obsolete unsplit browser contexts were removed and other protection settings were preserved"},
-    "browserTrusted": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "details": "Exact push run 34807277532 failed the authenticated production-mode Chromium/Firefox/WebKit preflight because GitHub concord-e2e supplied no pk_test_ publishable key; owner configuration is required before rerun"},
+    "branchProtection": {"status": "CLOSED", "verifiedSha": null, "details": "GitHub API readback confirms strict main protection now requires only the web, Rust, WASM, security, native GCC/Clang, and CodeQL contexts; all browser contexts were removed and other protection settings were preserved"},
+    "browserTrusted": {"status": "NOT_CLAIMED", "verifiedSha": null, "details": "Secret-backed authenticated Chromium/Firefox/WebKit jobs and browser gate were intentionally removed from current CI by owner request; no current remote authenticated-browser result is claimed"},
     "nativeClang": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Apple Clang Release CTest 3/3 and worker smoke passed"},
     "nativeGcc": {"status": "PASS_REMOTE", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "details": "Exact candidate phase6-pr-ci run 34807277532 native (g++) job passed"},
     "wasm": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "WASM smoke plus 5 files/31 CRDT tests passed"},
@@ -68,8 +68,8 @@
     "findingsValidation": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Historical findings registry validates with unique IDs and no historical OPEN Critical/High"},
     "imagePins": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "19 immutable refs checked; 7 runtime inputs deferred by design"},
     "dependencyScan": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Production npm 0/0/0/0, full npm 0/0/4/0 Moderate, Cargo 0/0/0/0; containers 44 Critical/180 High/158 Moderate/20 Low; tool errors 0; no allowlist"},
-    "remoteCi": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "details": "phase6-pr-ci run 34807277532: web/rust/wasm/security/native GCC/Clang passed, trusted Chromium/Firefox/WebKit and browser gate failed closed because the concord-e2e pk_test_ Clerk publishable key was empty; CodeQL 34807277478 and phase2/3/4/5/6 supporting runs passed; nightly sanitizer/fuzz/chaos conclusions remain pending"},
-    "releaseArtifacts": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "No tag, manifest, checksum, attestation, registry push, or GitHub Release created while remote, Clerk, and dependency blockers remain"},
+    "remoteCi": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "The current workflow no longer includes secret-backed browser jobs or browser gate. Prior run 34807277532 is historical pre-removal evidence: web/rust/wasm/security/native GCC/Clang passed while the then-existing trusted browser jobs failed at the empty Clerk preflight; post-change exact-SHA and nightly sanitizer/fuzz/chaos conclusions remain pending"},
+    "releaseArtifacts": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "No tag, manifest, checksum, attestation, registry push, or GitHub Release created while post-change remote, nightly, and dependency blockers remain"},
     "liveRuntime": {"status": "NOT_CLAIMED", "verifiedSha": null, "details": "No AWS, Vercel, Neon, URL, TLS, deployed-SHA, live Clerk, or persistent realtime verification"}
   },
   "findings": [
@@ -135,23 +135,23 @@
       "id": "AUDIT-AUTH-001",
       "severity": "HIGH",
       "category": "web_auth_clerk",
-      "status": "OWNER_ACTION",
-      "blocking": true,
-      "title": "Dedicated Clerk E2E Environment is empty",
-      "observedTruth": "Repository API state showed no dedicated publishable key, secret key, or audience variable in GitHub Environment concord-e2e.",
-      "requiredAction": "Configure the dedicated non-production Clerk instance and exact audience/origin policy, without exposing credentials, then rerun trusted auth.",
-      "owner": "external-owner",
+      "status": "NOT_CLAIMED",
+      "blocking": false,
+      "title": "Dedicated Clerk E2E Environment is not a current CI prerequisite",
+      "observedTruth": "Repository API state showed no dedicated publishable key, secret key, or audience variable in GitHub Environment concord-e2e; the secret-backed CI jobs that depended on it were removed by owner request.",
+      "requiredAction": "No current CI action. Keep authenticated browser credentials local and explicitly provisioned if a developer diagnostic is later requested.",
+      "owner": "release-lead",
       "evidence": ["docs/TESTING.md", "docs/audits/CANONICAL_FRESH_EVIDENCE.md"]
     },
     {
       "id": "AUDIT-BROWSER-001",
       "severity": "HIGH",
       "category": "browser_e2e",
-      "status": "OWNER_ACTION",
-      "blocking": true,
-      "title": "Trusted authenticated browser matrix cannot provision",
-      "observedTruth": "The full local dev-mode Chromium journey/accessibility and Firefox/WebKit smoke jobs passed in the strict orchestrator, while authenticated production-mode Chromium, Firefox, WebKit, accessibility, and two-context trusted journeys remain blocked by missing Clerk configuration.",
-      "requiredAction": "Run the no-retry trusted browser matrix with the exact candidate and record browser versions, accessibility, realtime, reconnect, and negative auth results.",
+      "status": "NOT_CLAIMED",
+      "blocking": false,
+      "title": "Authenticated browser matrix is intentionally outside current CI",
+      "observedTruth": "The full local dev-mode Chromium journey/accessibility and Firefox/WebKit smoke jobs passed in the strict orchestrator; the authenticated production-mode matrix is retained only as explicitly provisioned local/developer coverage.",
+      "requiredAction": "Do not treat the removed remote matrix as current release evidence. Run it only when an authorized local diagnostic is needed.",
       "owner": "release-lead"
     },
     {
@@ -161,7 +161,7 @@
       "status": "CLOSED",
       "blocking": false,
       "title": "Protected main required obsolete browser contexts",
-      "observedTruth": "GitHub API readback initially showed browser (chromium), browser (firefox), and browser (webkit); the protected branch now requires the three trusted browser contexts and browser gate, with strict protection and non-status settings preserved.",
+      "observedTruth": "GitHub API readback now shows only web, Rust, WASM, security, native GCC/Clang, and CodeQL contexts; all browser contexts were removed from protected main, with strict protection and non-status settings preserved.",
       "requiredAction": "Recheck required contexts if workflow job names change.",
       "owner": "release-lead"
     },
@@ -215,11 +215,11 @@
       "id": "AUDIT-CI-001",
       "severity": "HIGH",
       "category": "ci_remote",
-      "status": "FAIL_RELEASE_BLOCKER",
+      "status": "PENDING_REMOTE",
       "blocking": true,
-      "title": "Exact-candidate remote CI is blocked by the trusted-browser preflight",
-      "observedTruth": "Exact pushed candidate 110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a was observed in phase6-pr-ci run 34807277532; core jobs passed, but all trusted browser jobs and browser gate failed closed at the missing pk_test_ Clerk preflight. Nightly release-required contexts remain pending.",
-      "requiredAction": "Configure the dedicated Clerk Environment, resolve the strict container blocker, rerun exact candidate trusted browsers, and observe the required nightly/release check names by exact head SHA and Actions app.",
+      "title": "Post-change exact-candidate remote CI is pending",
+      "observedTruth": "The current workflow removes the secret-backed browser matrix and browser gate. Prior exact run 34807277532 on 110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a is retained as historical pre-removal evidence; the post-change non-browser check conclusions and nightly release-required contexts remain pending.",
+      "requiredAction": "Observe the current required check names by exact head SHA and Actions app, and resolve the independent strict container blocker.",
       "owner": "release-lead"
     },
     {
@@ -305,10 +305,10 @@
     {"id": "EV-SAN-001", "category": "sanitizer_native", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
     {"id": "EV-FUZZ-001", "category": "fuzz_property", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
     {"id": "EV-STRICT-001", "category": "orchestration", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "25 PASS / 1 FAIL / 0 SKIP / 0 required SKIP; only security/dependency-scan failed"},
-    {"id": "EV-BROWSER-001", "category": "browser_e2e", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "artifact": "Run 34807277532 trusted Chromium/Firefox/WebKit and browser gate failed closed at the empty Clerk pk_test_ preflight; local dev-mode browser jobs pass in docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
+    {"id": "EV-BROWSER-001", "category": "browser_e2e", "status": "HISTORICAL_ONLY", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "artifact": "Historical pre-removal run 34807277532 trusted Chromium/Firefox/WebKit and browser gate failed closed at the empty Clerk pk_test_ preflight; those jobs are not in current CI and local dev-mode/public browser evidence remains documented"},
     {"id": "EV-BRANCH-001", "category": "ci_remote", "status": "CLOSED", "verifiedSha": null, "artifact": "GitHub API branch-protection readback"},
-    {"id": "EV-CLERK-001", "category": "web_auth_clerk", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "GitHub concord-e2e Environment is empty"},
-    {"id": "EV-CI-001", "category": "ci_remote", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "artifact": "https://github.com/UtkarsHMer05/Concord-Dev/actions/runs/34807277532; CodeQL run 34807277478 and supporting exact-SHA workflow runs passed"},
+    {"id": "EV-CLERK-001", "category": "web_auth_clerk", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": "GitHub concord-e2e Environment is not required by current CI after removal of the secret-backed browser jobs"},
+    {"id": "EV-CI-001", "category": "ci_remote", "status": "PENDING_REMOTE", "verifiedSha": null, "artifact": "Current post-removal exact-SHA run pending; historical pre-removal run https://github.com/UtkarsHMer05/Concord-Dev/actions/runs/34807277532 and CodeQL run 34807277478 remain recorded"},
     {"id": "EV-SUPPLY-001", "category": "security_supply_chain", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/container-scan.json"},
     {"id": "EV-BENCH-001", "category": "benchmark_performance", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/native-benchmark.txt"},
     {"id": "EV-CHAOS-001", "category": "reliability", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/chaos-summary.json"},
@@ -318,14 +318,6 @@
     {"id": "EV-PROD-001", "category": "production_runtime", "status": "NOT_CLAIMED", "verifiedSha": null, "artifact": null}
   ],
   "ownerActions": [
-    {
-      "id": "OA-CLERK-001",
-      "category": "web_auth_clerk",
-      "owner": "external-owner",
-      "status": "OWNER_ACTION",
-      "action": "Configure concord-e2e with a dedicated non-production Clerk publishable key, secret key, exact audience concord-e2e, optional issuer, and the matching token template/origin policy.",
-      "acceptance": "Secret-free metadata plus exact-candidate trusted Chromium/Firefox/WebKit, accessibility, negative-auth, realtime, and reconnect results."
-    },
     {
       "id": "OA-CONTAINER-001",
       "category": "security_supply_chain",
@@ -339,8 +331,8 @@
       "category": "ci_remote",
       "owner": "release-lead",
       "status": "FAIL_RELEASE_BLOCKER",
-      "action": "Configure the dedicated Clerk Environment and resolve the strict container blocker, then rerun the exact candidate trusted browsers and required nightly/release contexts while retaining run 34807277532 as the failed preflight record.",
-      "acceptance": "All release-required check names conclude success for one exact candidate SHA, including trusted browsers, CodeQL, fuzz, sanitizer, and chaos."
+      "action": "Resolve the strict container blocker, then observe the current exact candidate non-browser and required nightly/release contexts while retaining run 34807277532 as historical pre-removal evidence.",
+      "acceptance": "All current release-required check names conclude success for one exact candidate SHA, including CodeQL, fuzz, sanitizer, and chaos."
     },
     {
       "id": "OA-DEPENDABOT-001",
@@ -383,7 +375,8 @@
     "noLiveDeploymentClaim": true,
     "awsReprovisioning": "FORBIDDEN_BY_CURRENT_SCOPE",
     "releaseRequiresExactCandidateRemoteChecks": true,
-    "releaseRequiresTrustedClerkBrowser": true,
+    "releaseRequiresTrustedClerkBrowser": false,
+    "trustedClerkBrowserCi": "REMOVED_BY_OWNER_REQUEST",
     "releaseRequiresStrictContainerSecurity": true,
     "documentationOnlyDescendantDoesNotChangeImplementationIdentity": true
   }

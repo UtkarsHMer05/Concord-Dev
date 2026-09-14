@@ -12,10 +12,11 @@ Candidate evidence bundle: [`evidence/v1.0.1/`](../evidence/v1.0.1/)
 This document is the release-state boundary. The current implementation
 candidate has passed the credential-free local gates that were run, but the
 campaign has not produced a canonical release. The strict container scan is
-red (`44 Critical / 180 High`, no broad allowlist), the trusted Clerk browser
-Environment is empty, and exact candidate run `34807277532` failed closed at
-the trusted-browser preflight. Nightly/release checks and external
-provenance/account actions remain open.
+red (`44 Critical / 180 High`, no broad allowlist), and the independent
+nightly/release checks and external provenance/account actions remain open.
+The secret-backed authenticated browser jobs were removed from CI by explicit
+owner request; the earlier failed browser run is historical and is not a
+current release gate.
 
 No credential, tag, GitHub Release, registry push, AWS deployment, Vercel
 deployment, URL reachability, live Clerk session, or persistent realtime
@@ -51,9 +52,9 @@ gates are real blockers.
 - Web typecheck, lint, 209 unit tests, coverage, 69 DB tests, 21 realtime
   tests, and the Next production build passed.
 - The full strict local orchestrator completed 25 PASS / 1 FAIL / 0 SKIP / 0
-  required SKIP; every local browser job passed in dev mode using `.env.local`,
-  while the trusted production-mode Clerk lane remains a separate unresolved
-  gate.
+  required SKIP; every local browser job passed in dev mode using `.env.local`.
+  Authenticated production-mode browser coverage is retained as optional local
+  diagnostics, not an unresolved CI gate.
 - Apple Clang native Release/CTest 3/3, WASM smoke/parity, Rust format/lint
   and 258-test workspace run, 30/30 property seeds, and 160,000 bounded
   fuzz executions passed.
@@ -76,13 +77,12 @@ The complete command/result table is in
   `0/0`, Prometheus `11/38`, and Grafana `22/81` Critical/High findings at
   exact digest-pinned refs. These are unaccepted until fixed or resolved by
   exact advisory-level evidence. See [`docs/SECURITY.md`](SECURITY.md) §9.2.
-- Trusted authenticated Chromium/Firefox/WebKit production-mode browser
-  matrix: blocked by the empty GitHub `concord-e2e` Environment.
-- Exact remote CI/nightly results: push run `34807277532` observed candidate
-  `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a`; core jobs passed, but all
-  trusted browsers and `browser gate` failed closed because the dedicated
-  Clerk Environment supplied no `pk_test_` publishable key. Nightly release
-  contexts remain pending.
+- Exact remote CI/nightly results: push run `34807277532` on
+  `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` is historical pre-removal
+  evidence. Its non-browser core jobs passed; the then-existing trusted
+  browser jobs failed closed because the dedicated Clerk Environment was
+  empty. A post-change CI run is required for the current non-browser check
+  set, and nightly release contexts remain pending.
 - Release identity: no tag, manifest, checksum set, attestation, or GitHub
   Release may be created while required gates are unresolved.
 - Dependabot vulnerability-alert and automated-fix account settings: the GitHub
@@ -91,23 +91,16 @@ The complete command/result table is in
 - Provenance/licensing: mechanical scan is clean, but path-specific owner/legal
   disposition is not the same as automated authorship or legal clearance.
 
-## Required Clerk Environment
+## Clerk browser CI policy
 
-The trusted browser workflow uses GitHub Environment `concord-e2e`. Configure
-these values only in that environment; never commit or paste the secret:
-
-```text
-CONCORD_E2E_CLERK_PUBLISHABLE_KEY  Environment variable (pk_test_...)
-CONCORD_E2E_CLERK_AUDIENCE         Environment variable (exactly concord-e2e)
-CONCORD_E2E_CLERK_ISSUER           optional Environment variable
-CONCORD_E2E_CLERK_SECRET_KEY       Environment secret (sk_test_...)
-```
-
-The token template must emit the exact `concord-e2e` audience. The browser
-harness then binds the authorized party and `CONCORD_APP_ORIGIN` to the exact
-per-run origin, and the secret is supplied only to the final Playwright/global
-setup execution path. Missing values fail closed; they are not converted to a
-public-browser pass.
+The secret-backed authenticated Chromium/Firefox/WebKit jobs and the
+aggregate `browser gate` were removed from GitHub Actions at the owner's
+request. No Clerk secret or `concord-e2e` Environment configuration is
+required by current CI. The public secretless Chromium smoke remains in the
+workflow for untrusted fork pull requests, and the authenticated harness
+remains available for explicitly provisioned local/developer runs documented
+in [`docs/TESTING.md`](TESTING.md). No remote authenticated-browser result is
+claimed.
 
 ## Candidate verification procedure
 
@@ -128,14 +121,14 @@ The full matrix also includes:
   and gitless archive verification;
 - Rust fmt, Clippy, workspace/integration/reliability tests, `cargo audit`,
   and `cargo deny`;
-- no-retry trusted Chromium/Firefox/WebKit production-mode browser journeys,
-  accessibility, realtime convergence, reconnect, local persistence, and
-  negative auth-policy checks;
+- the public secretless Chromium smoke for untrusted fork pull requests; any
+  authenticated Chromium/Firefox/WebKit journey is an explicitly provisioned
+  local/developer diagnostic rather than a CI release gate;
 - fresh ASan/UBSan/TSan, property, corpus/fuzz, recovery, and chaos runs;
 - secret/history, provenance, dependency, image-pin, SBOM, image smoke,
   CodeQL, release Trivy, manifest, checksum, and attestation checks; and
-- exact GitHub check-run conclusions for the candidate SHA, including
-  `browser gate`, trusted browser jobs, `native-sanitizers`, `native-fuzz`,
+- exact GitHub check-run conclusions for the candidate SHA, including the
+  current non-browser checks plus `native-sanitizers`, `native-fuzz`,
   `rust-fuzz`, and `chaos`.
 
 No missing credential, service, browser, scanner, or remote result may be
@@ -148,8 +141,8 @@ Only after all required gates are green may the release lead:
 
 1. freeze the exact `releaseCommit` and verify synchronized version metadata;
 2. verify every required GitHub check-run on that SHA;
-3. confirm trusted Clerk production-mode browser success and release-image
-   security policy;
+3. confirm the configured non-browser CI/reliability checks and release-image
+   security policy; no authenticated remote-browser success is implied;
 4. generate artifacts, SBOMs, a manifest, and `SHA256SUMS` from that exact
    commit/tag;
 5. independently verify artifact hashes and any supported attestation;

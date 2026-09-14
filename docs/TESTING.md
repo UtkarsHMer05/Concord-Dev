@@ -274,30 +274,13 @@ visible keyboard focus; no axe rules are globally disabled. Playwright stores
 traces/screenshots only on failure. Firefox and WebKit intentionally run the
 short smoke path; they are not claimed to pass the full realtime journey.
 
-CI runs a safe two-tier browser design in
-`.github/workflows/phase6-pr-ci.yml`: untrusted fork PRs execute only the
-anonymous, non-secret `browser (public chromium)` check, while trusted pushes
-and same-repository PRs execute the credentialed production matrix and the
-aggregate `browser gate` check. The GitHub Environment is named
-`concord-e2e`. Configure these **Environment variables**:
-
-```text
-CONCORD_E2E_CLERK_PUBLISHABLE_KEY  public Clerk publishable key
-CONCORD_E2E_CLERK_ISSUER           optional explicit issuer (otherwise derived)
-CONCORD_E2E_CLERK_AUDIENCE         exact dedicated audience: concord-e2e
-```
-
-and this **Environment secret**:
-
-```text
-CONCORD_E2E_CLERK_SECRET_KEY       dedicated development/test Clerk secret
-```
-
-The workflow maps them into the application names only on its final
-Playwright/global-setup step. Checkout, dependency installation, Rust/CMake
-builds, and Playwright-browser installation do not receive the Clerk secret.
-Missing or malformed trusted values fail explicitly; a public fork must never
-receive them. Clean up the exact local E2E compose project when finished:
+CI keeps only the anonymous, non-secret `browser (public chromium)` smoke for
+untrusted fork pull requests. The former authenticated Chromium/Firefox/WebKit
+matrix and aggregate `browser gate` were intentionally removed from
+`.github/workflows/phase6-pr-ci.yml`, so no GitHub Environment or Clerk secret
+is required by current CI. The authenticated harness above remains available
+for an explicitly provisioned local/developer run; it is not a current remote
+release gate. Clean up the exact local E2E compose project when finished:
 
 ```bash
 docker compose -p concord-e2e-local -f docker-compose.e2e.yml down --volumes
@@ -316,10 +299,11 @@ It runs each selected web, DB/realtime, GCC/Clang native, Rust, WASM,
 provenance, and security gate independently and prints `PASS`, `FAIL`, `SKIP`,
 and `required SKIP` totals. Release acceptance is `FAIL: 0` and `required
 SKIP: 0`; a missing required service/tool is never converted into a green
-parent gate. The standalone strict command does not substitute for the
-dedicated Clerk production-mode matrix: canonical release acceptance also
-requires the exact-release-commit `browser gate` plus the three trusted
-browser checks in GitHub Actions.
+parent gate. The standalone strict command does not claim authenticated Clerk
+coverage. That coverage can still be run locally with explicitly provisioned
+development credentials, but it is not part of the current GitHub release
+check set. The public secretless Chromium smoke remains the only browser job
+kept in CI.
 
 The release workflow writes `release-manifest.json` before `SHA256SUMS` using
 `scripts/release/write-manifest.mjs`. The manifest records the checked-out

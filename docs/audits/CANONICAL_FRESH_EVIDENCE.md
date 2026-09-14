@@ -77,20 +77,22 @@ accepted and prevent a canonical release.
 
 ## External and unresolved gates
 
-1. **Trusted Clerk browser CI — blocked / owner action.** The GitHub
-   Environment `concord-e2e` currently has no dedicated publishable key,
-   backend secret, or audience variable. The trusted job therefore fails
-   closed before the authenticated Chromium/Firefox/WebKit production-mode
-   journey. The required names are documented in `docs/TESTING.md`; values
-   must never be pasted into this repository or chat.
-2. **Remote exact-SHA CI — failed closed / release blocker.** Candidate
-   `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` was pushed and observed in
-   phase6-pr-ci run `34807277532`. Web, Rust, WASM, security, and native
-   GCC/Clang jobs passed; the three trusted browser jobs and `browser gate`
-   failed at the explicit Clerk preflight because the dedicated Environment
-   supplied no `pk_test_` publishable key. CodeQL run `34807277478` and the
-   phase2/3/4/5/6 supporting runs passed. Nightly `native-sanitizers`,
-   `native-fuzz`, `rust-fuzz`, and `chaos` conclusions remain pending.
+1. **Secret-backed authenticated browser CI — intentionally removed.** Per
+   the current owner request, the CI jobs that provisioned Clerk-backed
+   Chromium/Firefox/WebKit coverage and the aggregate `browser gate` were
+   deleted. The GitHub `concord-e2e` Environment is therefore no longer a CI
+   prerequisite. The public secretless Chromium smoke and the local
+   explicitly provisioned browser matrix remain available; no current remote
+   authenticated-browser result is claimed.
+2. **Remote exact-SHA CI — pending after the CI-policy change.** The earlier
+   candidate run `34807277532` on `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a`
+   is retained as historical pre-removal evidence: web, Rust, WASM, security,
+   and native GCC/Clang passed, while the then-existing trusted browser jobs
+   failed closed at the empty Clerk preflight. A new workflow commit must
+   produce the current non-browser check conclusions; CodeQL and the
+   phase2/3/4/5/6 supporting runs remain separate evidence. Nightly
+   `native-sanitizers`, `native-fuzz`, `rust-fuzz`, and `chaos` conclusions
+   remain pending.
 3. **Release identity/artifacts — pending.** No `v1.0.1` tag, release manifest,
    checksum set, artifact attestation, registry push, or GitHub Release exists.
    These cannot be produced honestly while required gates remain unresolved.
@@ -106,22 +108,16 @@ accepted and prevent a canonical release.
    SHA, live Clerk, or persistent realtime verification was performed. AWS is
    not to be reprovisioned as a documentation shortcut.
 
-The stale browser contexts on protected `main` were corrected during this
-campaign. GitHub API readback now shows strict required contexts for the three
-trusted browser jobs and `browser gate`, with the previous unsplit browser
-contexts removed; no other branch-protection settings were changed.
+The stale browser contexts on protected `main` were removed during this
+campaign. GitHub API readback now shows strict required contexts only for the
+web, Rust, WASM, security, native GCC/Clang, and CodeQL checks; no browser
+context is required and no other branch-protection settings were changed.
 
-## Credential action required
+## Credential action
 
-Configure the dedicated GitHub Environment `concord-e2e` with:
-
-```text
-CONCORD_E2E_CLERK_PUBLISHABLE_KEY  Environment variable (pk_test_...)
-CONCORD_E2E_CLERK_AUDIENCE         Environment variable (exactly concord-e2e)
-CONCORD_E2E_CLERK_ISSUER           optional Environment variable
-CONCORD_E2E_CLERK_SECRET_KEY       Environment secret (sk_test_...)
-```
-
-After the owner supplies that configuration, rerun the trusted production-mode
-browser matrix, inspect the exact candidate check-runs, and update the ledger.
-Until then, the correct verdict is `CANDIDATE_PENDING`, not green.
+No Clerk secret or `concord-e2e` Environment configuration is required for
+the current GitHub CI policy. Authenticated browser coverage remains an
+explicitly provisioned local/developer option, but it is not represented as
+current remote release evidence. The candidate remains `CANDIDATE_PENDING`
+for the independent container, nightly, account, provenance, and release
+artifact gates documented above.
