@@ -24,6 +24,7 @@ async fn test_db() -> Option<Db> {
         clerk_issuer: "https://fun-blowfish-5798.clerk.accounts.dev".into(),
         clerk_audience: None,
         clerk_authorized_party: None,
+        require_internal_services: false,
         allowed_origins: vec![],
         trusted_proxy_cidrs: vec![],
         connect_rate_per_min: 240,

@@ -18,18 +18,22 @@
 #   - Redis requires an ACL user (concord) with ONLY the commands the
 #     gateway actually issues: INCR, EXPIRE, DEL, SCAN, HSET
 #     (derived from rust/sync-gateway/src/ephemeral — verified, not
-#     guessed); wrong credentials degrade to the documented local
-#     limiter/no-presence path (Phase 6 chaos semantics);
+#     guessed); cloud gateways set GATEWAY_REQUIRE_INTERNAL_SERVICES=true,
+#     so wrong credentials fail startup instead of silently degrading;
 #   - Grafana cloud mode requires a real admin login (anonymous auth
 #     is a local-dev-only affordance; here it is disabled);
 #   - explicit segmented networks: edge (web+lb), gateway (lb↔gw),
 #     durable (db), event (nats+redis), observability — gateways span
 #     gateway/durable/event/observability because they must reach all
 #     three plus JWKS egress over the default outbound network;
-#   - digest-pinned third-party images (E6): every `image:` resolves
-#     the exact audited content of the tag; Dependabot (docker
-#     ecosystem) opens refresh PRs when a tag moves — each refresh is
-#     rebuilt, SBOM-regenerated, and trivy-gated;
+#   - digest-pinned images (E6): every literal infrastructure `image:`
+#     resolves the exact audited content of the tag. CONCORD_WEB_IMAGE and
+#     CONCORD_GATEWAY_IMAGE are deployment inputs and MUST be full
+#     `name:tag@sha256:<64 hex>` references; run
+#     `scripts/security/validate-image-pins.sh --require-runtime-images`
+#     after concord.env interpolation. Dependabot (docker ecosystem) opens
+#     refresh PRs when a tag moves — each refresh is rebuilt,
+#     SBOM-regenerated, and trivy-gated;
 #   - runtime hardening (E5): no-new-privileges, cap-drop ALL, bounded
 #     pids/memory where the service supports it, explicit stop grace
 #     periods (drain was measured at ~2.2 s in P7-M016 — 15 s is a
@@ -89,6 +93,14 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+    pids_limit: 200
+    mem_limit: 768m
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Drizzle migration runner (P7-M022): runs ONCE at bootstrap from the
   # SAME web image (node runtime + scripts/db/migrate.mjs + drizzle/ are
@@ -110,6 +122,19 @@ services:
         condition: service_healthy
     restart: "no"
     profiles: ["migrate"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 100
+    mem_limit: 384m
+    cpus: "1.0"
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   nats:
     # Digest-pinned (E6). nats:2.11.6-alpine
@@ -134,6 +159,14 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+    pids_limit: 100
+    mem_limit: 192m
+    cpus: "0.50"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     # Digest-pinned (E6). redis:8.8.2-alpine
@@ -152,7 +185,7 @@ services:
     # scripts/deploy/push-bundle.sh (never committed). The gateway
     # connects as the ACL user via
     # GATEWAY_REDIS_URL=redis://concord:${REDIS_PASSWORD}@redis:6379;
-    # wrong credentials degrade to the documented local-limiter path.
+    # cloud gateways fail startup when these credentials cannot connect.
     command:
       ["redis-server", "--aclfile", "/etc/redis/users.acl"]
     volumes:
@@ -162,6 +195,14 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+    pids_limit: 100
+    mem_limit: 128m
+    cpus: "0.50"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   web:
     image: ${CONCORD_WEB_IMAGE:?set in concord.env}
@@ -193,6 +234,16 @@ services:
     cap_drop: [ALL]
     pids_limit: 200
     stop_grace_period: 15s
+    mem_limit: 384m
+    cpus: "1.0"
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   gw1:
     image: ${CONCORD_GATEWAY_IMAGE:?set in concord.env}
@@ -205,6 +256,7 @@ services:
       GATEWAY_BIND_HOST: 0.0.0.0
       GATEWAY_BIND_PORT: 8791
       GATEWAY_WORKER_BINARY: /app/concord-worker
+      GATEWAY_REQUIRE_INTERNAL_SERVICES: "true"
       # E1/E2: authenticated broker + ephemeral URLs (password via
       # concord.env interpolation; values never committed).
       GATEWAY_NATS_URL: nats://concord:${NATS_PASSWORD}@nats:4222
@@ -234,6 +286,16 @@ services:
     cap_drop: [ALL]
     pids_limit: 200
     stop_grace_period: 15s
+    mem_limit: 384m
+    cpus: "1.0"
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   gw2:
     image: ${CONCORD_GATEWAY_IMAGE:?}
@@ -246,6 +308,7 @@ services:
       GATEWAY_BIND_HOST: 0.0.0.0
       GATEWAY_BIND_PORT: 8792
       GATEWAY_WORKER_BINARY: /app/concord-worker
+      GATEWAY_REQUIRE_INTERNAL_SERVICES: "true"
       GATEWAY_NATS_URL: nats://concord:${NATS_PASSWORD}@nats:4222
       GATEWAY_REDIS_URL: redis://concord:${REDIS_PASSWORD}@redis:6379
     networks:
@@ -270,6 +333,16 @@ services:
     cap_drop: [ALL]
     pids_limit: 200
     stop_grace_period: 15s
+    mem_limit: 384m
+    cpus: "1.0"
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   gw3:
     image: ${CONCORD_GATEWAY_IMAGE:?}
@@ -282,6 +355,7 @@ services:
       GATEWAY_BIND_HOST: 0.0.0.0
       GATEWAY_BIND_PORT: 8793
       GATEWAY_WORKER_BINARY: /app/concord-worker
+      GATEWAY_REQUIRE_INTERNAL_SERVICES: "true"
       GATEWAY_NATS_URL: nats://concord:${NATS_PASSWORD}@nats:4222
       GATEWAY_REDIS_URL: redis://concord:${REDIS_PASSWORD}@redis:6379
     networks:
@@ -306,6 +380,16 @@ services:
     cap_drop: [ALL]
     pids_limit: 200
     stop_grace_period: 15s
+    mem_limit: 384m
+    cpus: "1.0"
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   lb:
     # Digest-pinned (E6). nginx:1.29-alpine
@@ -333,6 +417,24 @@ services:
     cap_drop: [ALL]
     pids_limit: 100
     stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8890/api/v1/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 96m
+    cpus: "0.50"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   prometheus:
     # Digest-pinned (E6). prom/prometheus:v3.5.0
@@ -352,6 +454,19 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     pids_limit: 100
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 256m
+    cpus: "0.50"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   grafana:
     # Digest-pinned (E6). grafana/grafana:12.2.0
@@ -384,6 +499,19 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     pids_limit: 100
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: 256m
+    cpus: "0.50"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   concord_pgdata_cloud:

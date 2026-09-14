@@ -54,8 +54,10 @@ async fn main() {
         .expect("bind host/port are validated by Config");
 
     // Distributed mode (P4-M011..M014): GATEWAY_NATS_URL set ⇒ connect the
-    // broker (fail-soft: local clients still served — M019) + spawn the
-    // subscription manager. Absent ⇒ Phase 3 single-gateway mode.
+    // broker and spawn the subscription manager. Initial connection failure
+    // degrades to local-only (M019) unless GATEWAY_REQUIRE_INTERNAL_SERVICES
+    // is true, in which case startup exits before serving clients. Absent ⇒
+    // Phase 3 single-gateway mode.
     let gateway_id = config.gateway_id;
     let registry = SessionRegistry::new();
     let (bus, broker_handle): (
@@ -79,16 +81,24 @@ async fn main() {
                     Some(broker),
                 )
             }
-            Err(e) => {
-                tracing::warn!(error = %e, error_class = "broker", "NATS unavailable; running local-only (cross-gateway degraded)");
+            Err(_e) if config.require_internal_services => {
+                eprintln!("required internal service unavailable: NATS; refusing to start");
+                std::process::exit(4);
+            }
+            Err(_e) => {
+                tracing::warn!(
+                    error_class = "broker",
+                    "NATS unavailable; running local-only (cross-gateway degraded)"
+                );
                 (Arc::new(sync_gateway::bus::LocalOnlyPublisher), None)
             }
         },
         None => (Arc::new(sync_gateway::bus::LocalOnlyPublisher), None),
     };
 
-    // Ephemeral tier (P4-M021..M024): Redis-backed when configured;
-    // absence degrades to local rate limiting + disabled presence.
+    // Ephemeral tier (P4-M021..M024): Redis-backed when configured; absence
+    // or initial connection failure degrades to local rate limiting +
+    // disabled presence unless GATEWAY_REQUIRE_INTERNAL_SERVICES is true.
     let redis_handle = match &config.redis_url {
         Some(url) => {
             match sync_gateway::ephemeral::RedisHandle::connect(
@@ -103,8 +113,15 @@ async fn main() {
                     tracing::info!("redis ephemeral tier connected");
                     Some(handle)
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, error_class = "redis", "redis unavailable; local rate limiting + presence disabled");
+                Err(_e) if config.require_internal_services => {
+                    eprintln!("required internal service unavailable: Redis; refusing to start");
+                    std::process::exit(4);
+                }
+                Err(_e) => {
+                    tracing::warn!(
+                        error_class = "redis",
+                        "redis unavailable; local rate limiting + presence disabled"
+                    );
                     None
                 }
             }

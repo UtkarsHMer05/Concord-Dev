@@ -24,6 +24,10 @@
 # Required local env (read from .env.local — names only):
 #   DATABASE_URL, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY,
 #   CLERK_JWT_ISSUER_DOMAIN
+# Optional TLS mode (must be explicit when enabled):
+#   CONCORD_REQUIRE_TLS=1
+#   CONCORD_APP_ORIGIN=https://app.example.com
+#   NEXT_PUBLIC_SYNC_GATEWAY_URL=wss://sync.example.com/api/v1/sync
 # The STAGING/PROD database URLs are DERIVED from DATABASE_URL by
 # swapping host:port to db:5432 (the compose service) — the cloud DB
 # password is PG_PASSWORD (generated per environment if unset, stored in
@@ -148,7 +152,10 @@ IMG_TAG="${COMMIT}-${ENV}"
 WEB_IMAGE="${REGISTRY}/concord-web:${IMG_TAG}"
 GW_IMAGE="${REGISTRY}/concord-gateway:${IMG_TAG}"
 
-# Resolve the sync URL from the ALB DNS name for this environment.
+# Resolve the ALB DNS name for this environment. Plaintext mode keeps the
+# documented no-domain staging shape; secure mode MUST use explicitly owned
+# HTTPS/WSS origins rather than assuming an ACM certificate covers the ALB's
+# generated DNS name.
 ALB_DNS=$(aws elbv2 describe-load-balancers --region "$REGION" \
   --names "concord-${ENV}-lb" \
   --query 'LoadBalancers[0].DNSName' --output text)
@@ -156,13 +163,44 @@ if [ -z "$ALB_DNS" ] || [ "$ALB_DNS" = "None" ]; then
   echo "error: ALB concord-${ENV}-lb not found — run provision.sh first" >&2
   exit 2
 fi
-SYNC_URL="ws://${ALB_DNS}:8890/api/v1/sync"
-APP_URL="http://${ALB_DNS}"
+CONCORD_REQUIRE_TLS="${CONCORD_REQUIRE_TLS:-0}"
+case "$CONCORD_REQUIRE_TLS" in
+  0)
+    SYNC_URL="ws://${ALB_DNS}:8890/api/v1/sync"
+    APP_URL="http://${ALB_DNS}"
+    ;;
+  1)
+    : "${CONCORD_APP_ORIGIN:?CONCORD_REQUIRE_TLS=1 requires an exact owned HTTPS CONCORD_APP_ORIGIN}"
+    : "${NEXT_PUBLIC_SYNC_GATEWAY_URL:?CONCORD_REQUIRE_TLS=1 requires an exact WSS NEXT_PUBLIC_SYNC_GATEWAY_URL}"
+    APP_URL="$CONCORD_APP_ORIGIN"
+    SYNC_URL="$NEXT_PUBLIC_SYNC_GATEWAY_URL"
+    # Mirror src/proxy.ts's deployment contract before changing ECR, SSM,
+    # or S3. It is not safe to infer HTTPS from an arbitrary ACM ARN: the
+    # certificate may not cover the generated ALB DNS name.
+    node - "$APP_URL" "$SYNC_URL" <<'NODE'
+const [appUrl, syncUrl] = process.argv.slice(2);
+const app = new URL(appUrl);
+const sync = new URL(syncUrl);
+const fail = (message) => { throw new Error(`invalid TLS deployment URL: ${message}`); };
+if (app.protocol !== "https:" || app.origin !== appUrl || app.username || app.password || app.search || app.hash) {
+  fail("CONCORD_APP_ORIGIN must be an exact https origin");
+}
+if (sync.protocol !== "wss:" || sync.origin === "null" || sync.username || sync.password || sync.hash) {
+  fail("NEXT_PUBLIC_SYNC_GATEWAY_URL must be a credential-free wss URL");
+}
+NODE
+    ;;
+  *)
+    echo "error: CONCORD_REQUIRE_TLS must be exactly 0 or 1" >&2
+    exit 2
+    ;;
+esac
 
 echo "  building web image (NEXT_PUBLIC baked: sync=${SYNC_URL})…"
 docker build -q -f docker/web.Dockerfile \
   --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}" \
   --build-arg NEXT_PUBLIC_SYNC_GATEWAY_URL="${SYNC_URL}" \
+  --build-arg CONCORD_REQUIRE_TLS="${CONCORD_REQUIRE_TLS}" \
   -t concord-web:"${IMG_TAG}" "${WORK}" >/dev/null
 docker tag concord-web:"${IMG_TAG}" "$WEB_IMAGE"
 
@@ -212,8 +250,13 @@ CONCORD_GATEWAY_IMAGE=${GW_IMAGE}
 # --- web (Next.js runtime; NEXT_PUBLIC_* were baked at image build) ---
 DATABASE_URL=postgres://${PG_USER}:${PG_PASSWORD}@db:5432/${PG_DB}
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+# Keep the public endpoint available to the server-side proxy too. The
+# client value is baked above; this runtime copy lets proxy.ts derive its
+# exact CSP source without relying on build-time replacement semantics.
+NEXT_PUBLIC_SYNC_GATEWAY_URL=${SYNC_URL}
 CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
 CONCORD_APP_ORIGIN=${APP_URL}
+CONCORD_REQUIRE_TLS=${CONCORD_REQUIRE_TLS}
 
 # --- gateways (shared by gw1..gw3; per-replica vars in compose) ---
 GATEWAY_BIND_HOST=0.0.0.0

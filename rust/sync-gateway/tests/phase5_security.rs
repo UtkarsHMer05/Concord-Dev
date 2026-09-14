@@ -142,6 +142,7 @@ fn base_config() -> Config {
         clerk_issuer: ISSUER.into(),
         clerk_audience: None,
         clerk_authorized_party: None,
+        require_internal_services: false,
         allowed_origins: vec![],
         trusted_proxy_cidrs: vec![],
         connect_rate_per_min: 240,

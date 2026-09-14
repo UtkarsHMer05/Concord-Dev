@@ -1,6 +1,6 @@
 "use client";
 
-import { ClerkProvider, SignIn, useAuth } from "@clerk/nextjs";
+import { SignIn, useAuth } from "@clerk/nextjs";
 import { ReactNode } from "react";
 
 import { DocumentLoadingIndicator } from "./loading-indicator";
@@ -30,12 +30,11 @@ function AuthGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-export function ClerkClientProvider({ children }: { children: ReactNode }) {
-  return (
-    <ClerkProvider publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY!}>
-      <AuthGate>
-        {children}
-      </AuthGate>
-    </ClerkProvider>
-  );
+/**
+ * Client-only authentication gate beneath the server-rendered ClerkProvider.
+ * The provider itself lives in app/layout.tsx so Clerk can receive the
+ * per-request CSP nonce while rendering its script tags.
+ */
+export function ClerkAuthGate({ children }: { children: ReactNode }) {
+  return <AuthGate>{children}</AuthGate>;
 }

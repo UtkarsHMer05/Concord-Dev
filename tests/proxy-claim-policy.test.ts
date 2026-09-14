@@ -39,15 +39,21 @@ afterEach(() => {
  * header — not the options object — so the Clerk directive-merge and any
  * future refactor cannot silently weaken the policy.
  */
-function makeRequest(headers: Record<string, string> = {}) {
+function makeRequest(
+  headers: Record<string, string> = {},
+  url = "https://concord.example/",
+) {
   return {
     headers: new Headers(headers),
     method: "GET",
-    url: "https://concord.example/",
+    url,
   };
 }
 
-async function invokeMiddleware(requestEnv: Record<string, string>) {
+async function invokeMiddleware(
+  requestEnv: Record<string, string>,
+  requestUrl = "https://concord.example/",
+) {
   for (const [k, v] of Object.entries(requestEnv)) {
     if (
       k.startsWith("NEXT_PUBLIC_") ||
@@ -61,7 +67,7 @@ async function invokeMiddleware(requestEnv: Record<string, string>) {
   await import("../src/proxy");
   const handler = middlewareChain.at(-1);
   expect(handler).toBeDefined();
-  return (handler as (req: unknown) => unknown)(makeRequest()) as {
+  return (handler as (req: unknown) => unknown)(makeRequest({}, requestUrl)) as {
     headers: Headers;
     requestHeaders: Headers;
   };
@@ -84,6 +90,17 @@ describe("Clerk ingress claim policy", () => {
     vi.stubEnv("CONCORD_APP_ORIGIN", "https://concord.example/path");
     await expect(import("../src/proxy")).rejects.toThrow("CONCORD_APP_ORIGIN");
     expect(mocked.clerkMiddleware).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "https://user:pass@concord.example",
+    "https://concord.example/",
+    "https://concord.example?preview=1",
+    "https://concord.example#fragment",
+  ])("rejects a non-exact app origin: %s", async (origin) => {
+    vi.stubEnv("CONCORD_APP_ORIGIN", origin);
+    vi.stubEnv("CONCORD_REQUIRE_TLS", "0");
+    await expect(import("../src/proxy")).rejects.toThrow("CONCORD_APP_ORIGIN");
   });
 
   it("keeps the local no-origin configuration compatible", async () => {
@@ -265,6 +282,20 @@ describe("Content-Security-Policy contract (nonce-based)", () => {
     );
   });
 
+  it("does not emit HSTS for an HTTP request even with secure configuration", async () => {
+    const res = await invokeMiddleware(
+      {
+        NODE_ENV: "production",
+        CONCORD_REQUIRE_TLS: "1",
+        CONCORD_APP_ORIGIN: "https://concord.example",
+        NEXT_PUBLIC_SYNC_GATEWAY_URL: "wss://sync.example/api/v1/sync",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
+      },
+      "http://concord.example/",
+    );
+    expect(res.headers.get("strict-transport-security")).toBeNull();
+  });
+
   it("rejects an HTTP app origin when explicit TLS mode is enabled", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("CONCORD_REQUIRE_TLS", "1");
@@ -304,6 +335,16 @@ describe("Content-Security-Policy contract (nonce-based)", () => {
       "CONCORD_APP_ORIGIN",
     );
   });
+
+  it.each(["true", "yes", "2", " 1", "1 "])(
+    "rejects non-binary CONCORD_REQUIRE_TLS value %j",
+    async (requireTls) => {
+      vi.stubEnv("CONCORD_REQUIRE_TLS", requireTls);
+      await expect(import("../src/proxy")).rejects.toThrow(
+        "CONCORD_REQUIRE_TLS",
+      );
+    },
+  );
 });
 
 describe("HSTS Next.js route-header contract", () => {
@@ -332,5 +373,55 @@ describe("HSTS Next.js route-header contract", () => {
     expect(headers[0]?.headers).not.toContainEqual(
       expect.objectContaining({ key: "Strict-Transport-Security" }),
     );
+  });
+});
+
+describe("typed web-security environment contract", () => {
+  async function getConfig(env: Record<string, string | undefined>) {
+    const { getWebSecurityConfig } = await import("../src/server/env");
+    return getWebSecurityConfig(env);
+  }
+
+  it("returns canonical origins while retaining local plaintext allowances", async () => {
+    await expect(
+      getConfig({
+        NODE_ENV: "development",
+        CONCORD_REQUIRE_TLS: "0",
+        CONCORD_APP_ORIGIN: "http://localhost:3000",
+        NEXT_PUBLIC_SYNC_GATEWAY_URL:
+          "ws://127.0.0.1:8890/api/v1/sync?transport=websocket",
+      }),
+    ).resolves.toEqual({
+      requireTls: false,
+      appOrigin: "http://localhost:3000",
+      syncGatewayOrigin: "ws://127.0.0.1:8890",
+    });
+  });
+
+  it("fails closed when secure mode omits either origin", async () => {
+    await expect(
+      getConfig({ CONCORD_REQUIRE_TLS: "1" }),
+    ).rejects.toThrow("CONCORD_APP_ORIGIN");
+    await expect(
+      getConfig({
+        CONCORD_REQUIRE_TLS: "1",
+        CONCORD_APP_ORIGIN: "https://concord.example",
+      }),
+    ).rejects.toThrow("NEXT_PUBLIC_SYNC_GATEWAY_URL");
+  });
+
+  it.each([
+    "https://sync.example/api/v1/sync",
+    "wss://user:pass@sync.example/api/v1/sync",
+    "wss://sync.example/api/v1/sync#fragment",
+    "wss://sync.example/api/v1/sync ",
+  ])("rejects malformed gateway URLs even when TLS mode is off: %s", async (gatewayUrl) => {
+    await expect(
+      getConfig({
+        NODE_ENV: "development",
+        CONCORD_REQUIRE_TLS: "0",
+        NEXT_PUBLIC_SYNC_GATEWAY_URL: gatewayUrl,
+      }),
+    ).rejects.toThrow("NEXT_PUBLIC_SYNC_GATEWAY_URL");
   });
 });

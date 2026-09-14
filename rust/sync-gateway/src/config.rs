@@ -54,6 +54,10 @@ pub struct Config {
     /// Redis URL; absent ⇒ no ephemeral tier (presence disabled, local
     /// rate limiting only).
     pub redis_url: Option<String>,
+    /// Require the configured NATS and Redis services to be reachable during
+    /// startup. Defaults to false so local/single-gateway development keeps
+    /// the documented degrade-after-start behavior.
+    pub require_internal_services: bool,
     // --- Phase 6 observability (P6-M008/M009) ---
     /// OpenTelemetry tracing enabled (GATEWAY_OTEL_ENABLED, default
     /// false: zero behavior change when off).
@@ -236,6 +240,19 @@ impl Config {
             }
         };
         let redis_url = env_optional("GATEWAY_REDIS_URL").filter(|s| !s.is_empty());
+        let require_internal_services = env_parse(
+            "GATEWAY_REQUIRE_INTERNAL_SERVICES",
+            "expected a boolean",
+            false,
+        )?;
+        if require_internal_services {
+            if nats_url.is_none() {
+                return Err(ConfigError::Missing("GATEWAY_NATS_URL"));
+            }
+            if redis_url.is_none() {
+                return Err(ConfigError::Missing("GATEWAY_REDIS_URL"));
+            }
+        }
 
         // --- Phase 6 observability config (P6-M009) ---
         let otel_enabled = env_parse("GATEWAY_OTEL_ENABLED", "expected a boolean", false)?;
@@ -325,6 +342,7 @@ impl Config {
             nats_subject_prefix,
             gateway_id,
             redis_url,
+            require_internal_services,
             otel_enabled,
             otel_endpoint,
             otel_sample_ratio,
@@ -364,6 +382,7 @@ mod tests {
             "GATEWAY_NATS_SUBJECT_PREFIX",
             "GATEWAY_ID",
             "GATEWAY_REDIS_URL",
+            "GATEWAY_REQUIRE_INTERNAL_SERVICES",
             "GATEWAY_OTEL_ENABLED",
             "GATEWAY_OTEL_ENDPOINT",
             "GATEWAY_OTEL_SAMPLE_RATIO",
@@ -394,6 +413,7 @@ mod tests {
             "GATEWAY_NATS_SUBJECT_PREFIX",
             "GATEWAY_ID",
             "GATEWAY_REDIS_URL",
+            "GATEWAY_REQUIRE_INTERNAL_SERVICES",
             "GATEWAY_OTEL_ENABLED",
             "GATEWAY_OTEL_ENDPOINT",
             "GATEWAY_OTEL_SAMPLE_RATIO",
@@ -537,6 +557,64 @@ mod tests {
                     Config::from_env().expect("valid").nats_url.as_deref(),
                     Some("nats://127.0.0.1:4222")
                 );
+            },
+        );
+    }
+
+    #[test]
+    fn internal_services_requirement_defaults_to_degraded_mode() {
+        with_env(&[], || {
+            let cfg = Config::from_env().expect("valid development defaults");
+            assert!(!cfg.require_internal_services);
+        });
+        with_env(
+            &[("GATEWAY_REQUIRE_INTERNAL_SERVICES", Some("not-a-boolean"))],
+            || {
+                assert!(matches!(
+                    Config::from_env(),
+                    Err(ConfigError::Invalid {
+                        key: "GATEWAY_REQUIRE_INTERNAL_SERVICES",
+                        ..
+                    })
+                ));
+            },
+        );
+    }
+
+    #[test]
+    fn internal_services_requirement_requires_both_urls() {
+        with_env(
+            &[("GATEWAY_REQUIRE_INTERNAL_SERVICES", Some("true"))],
+            || {
+                assert!(matches!(
+                    Config::from_env(),
+                    Err(ConfigError::Missing("GATEWAY_NATS_URL"))
+                ));
+            },
+        );
+        with_env(
+            &[
+                ("GATEWAY_REQUIRE_INTERNAL_SERVICES", Some("true")),
+                ("GATEWAY_NATS_URL", Some("nats://127.0.0.1:4222")),
+            ],
+            || {
+                assert!(matches!(
+                    Config::from_env(),
+                    Err(ConfigError::Missing("GATEWAY_REDIS_URL"))
+                ));
+            },
+        );
+        with_env(
+            &[
+                ("GATEWAY_REQUIRE_INTERNAL_SERVICES", Some("true")),
+                ("GATEWAY_NATS_URL", Some("nats://127.0.0.1:4222")),
+                ("GATEWAY_REDIS_URL", Some("redis://127.0.0.1:6379")),
+            ],
+            || {
+                let cfg = Config::from_env().expect("both internal services configured");
+                assert!(cfg.require_internal_services);
+                assert_eq!(cfg.nats_url.as_deref(), Some("nats://127.0.0.1:4222"));
+                assert_eq!(cfg.redis_url.as_deref(), Some("redis://127.0.0.1:6379"));
             },
         );
     }

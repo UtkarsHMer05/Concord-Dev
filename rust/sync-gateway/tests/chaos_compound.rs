@@ -558,6 +558,7 @@ async fn ch_c_worker_crash_editing() {
             clerk_issuer: "https://chaos.clerk.accounts.dev".into(),
             clerk_audience: None,
             clerk_authorized_party: None,
+            require_internal_services: false,
             allowed_origins: vec![],
             trusted_proxy_cidrs: vec![],
             connect_rate_per_min: 240,

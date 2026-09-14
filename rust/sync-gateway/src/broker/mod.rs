@@ -50,6 +50,54 @@ pub enum BrokerError {
     InvalidEvent(String),
 }
 
+// async-nats intentionally keeps URL parsing and connection options separate:
+// `async_nats::connect("nats://user:pass@host")` parses the address but does
+// NOT promote its user-info into the CONNECT frame. Do that explicitly so an
+// authenticated deployment cannot silently act like an anonymous one. These
+// values are kept only in the client builder and are never formatted/logged.
+enum NatsUrlAuth {
+    None,
+    UserPassword { username: String, password: String },
+    Token(String),
+}
+
+fn nats_server_and_auth(url: &str) -> Result<(async_nats::ServerAddr, NatsUrlAuth), BrokerError> {
+    let server = url
+        .parse::<async_nats::ServerAddr>()
+        .map_err(|_| BrokerError::Connect)?;
+    let auth = match (server.username(), server.password()) {
+        (Some(username), Some(password)) => NatsUrlAuth::UserPassword {
+            username: username.to_owned(),
+            password: password.to_owned(),
+        },
+        // NATS URL syntax also permits nats://token@host. Preserve that
+        // compatibility instead of treating the token as a username with a
+        // missing password.
+        (Some(token), None) => NatsUrlAuth::Token(token.to_owned()),
+        (None, _) => NatsUrlAuth::None,
+    };
+    Ok((server, auth))
+}
+
+async fn connect_nats(url: &str) -> Result<async_nats::Client, BrokerError> {
+    let (server, auth) = nats_server_and_auth(url)?;
+    let client = match auth {
+        NatsUrlAuth::None => async_nats::connect(server).await,
+        NatsUrlAuth::UserPassword { username, password } => {
+            async_nats::ConnectOptions::with_user_and_password(username, password)
+                .connect(server)
+                .await
+        }
+        NatsUrlAuth::Token(token) => {
+            async_nats::ConnectOptions::with_token(token)
+                .connect(server)
+                .await
+        }
+    }
+    .map_err(|_| BrokerError::Connect)?;
+    Ok(client)
+}
+
 /// The per-gateway broker client: connection, stream, pull consumer.
 pub struct Broker {
     jetstream: jetstream::Context,
@@ -71,9 +119,7 @@ impl Broker {
     /// (callers treat `Err` as "run without broker"; the ws layer keeps
     /// local semantics — M019).
     pub async fn connect(url: &str, namespace: &str, gateway_id: u64) -> Result<Self, BrokerError> {
-        let nats = async_nats::connect(url)
-            .await
-            .map_err(|_| BrokerError::Connect)?;
+        let nats = connect_nats(url).await?;
         let jetstream = jetstream::new(nats);
 
         // NATS stream names: [A-Za-z0-9-] only — sanitize the namespace
@@ -249,5 +295,41 @@ fn consumer_config(name: &str, subject: &str) -> PullConfig {
         max_ack_pending: CONSUMER_MAX_ACK_PENDING,
         filter_subject: subject.to_owned(),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{nats_server_and_auth, NatsUrlAuth};
+
+    #[test]
+    fn authenticated_nats_url_preserves_explicit_user_password() {
+        let (server, auth) = nats_server_and_auth("nats://concord:secret-value@127.0.0.1:4222")
+            .expect("valid NATS URL");
+        assert_eq!(server.host(), "127.0.0.1");
+        assert_eq!(server.port(), 4222);
+        match auth {
+            NatsUrlAuth::UserPassword { username, password } => {
+                assert_eq!(username, "concord");
+                assert_eq!(password, "secret-value");
+            }
+            _ => panic!("expected user/password NATS authentication"),
+        }
+    }
+
+    #[test]
+    fn token_and_anonymous_nats_urls_keep_their_auth_mode() {
+        let (_, token) = nats_server_and_auth("nats://token-value@localhost:4222")
+            .expect("valid token NATS URL");
+        assert!(matches!(token, NatsUrlAuth::Token(value) if value == "token-value"));
+
+        let (_, anonymous) =
+            nats_server_and_auth("nats://127.0.0.1:4222").expect("valid anonymous NATS URL");
+        assert!(matches!(anonymous, NatsUrlAuth::None));
+    }
+
+    #[test]
+    fn malformed_nats_url_is_a_generic_connect_failure() {
+        assert!(nats_server_and_auth("https://not-nats.example").is_err());
     }
 }

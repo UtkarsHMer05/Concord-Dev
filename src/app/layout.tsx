@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { ClerkProvider } from "@clerk/nextjs";
 import { Inter } from "next/font/google";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 
 import { Toaster } from "@/components/ui/sonner";
-import { ClerkClientProvider } from "@/components/clerk-client-provider";
+import { ClerkAuthGate } from "@/components/clerk-client-provider";
 
 import "./globals.css";
 
@@ -13,8 +14,9 @@ import "./globals.css";
  * Provider order matters:
  * - `NuqsAdapter` wraps everything so any component may read/write URL
  *   search params (the home search box) inside server components.
- * - `ClerkClientProvider` gates the tree on authentication: Clerk owns
- *   identity, while Concord's own server layer owns authorization.
+ * - `ClerkProvider` is server-rendered with `dynamic` so its scripts receive
+ *   the per-request CSP nonce; `ClerkAuthGate` then gates the client tree.
+ *   Clerk owns identity while Concord's server layer owns authorization.
  * - `Toaster` mounts last so sonner toasts (used by actions like rename /
  *   delete / template create) render above the gated tree.
  */
@@ -47,10 +49,12 @@ export default function RootLayout(props: Readonly<{ children: React.ReactNode }
   // The provider stack is fixed (see the header comment); toast mounting
   // inside the auth gate keeps it available to all gated UI.
   const appTree = (
-    <ClerkClientProvider>
-      <Toaster />
-      {children}
-    </ClerkClientProvider>
+    <ClerkProvider dynamic>
+      <ClerkAuthGate>
+        <Toaster />
+        {children}
+      </ClerkAuthGate>
+    </ClerkProvider>
   );
 
   return (
