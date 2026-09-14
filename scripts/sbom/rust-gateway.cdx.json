@@ -3237,9 +3237,9 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/sync-gateway@1.0.0",
+      "bom-ref": "pkg:cargo/sync-gateway@1.0.1",
       "name": "sync-gateway",
-      "version": "1.0.0"
+      "version": "1.0.1"
     },
     {
       "type": "library",
