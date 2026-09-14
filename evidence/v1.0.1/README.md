@@ -36,9 +36,12 @@ The canonical interpretation is in:
 - Trusted authenticated Chromium/Firefox/WebKit CI is blocked by the empty
   GitHub `concord-e2e` Environment. The required Clerk values must be supplied
   by the owner without placing secrets in this evidence tree.
-- Exact-candidate remote CI, nightly/reliability conclusions, release
-  artifacts, checksums, attestations, and a GitHub Release do not exist until
-  the candidate is pushed and all required gates pass.
+- Exact-candidate push run `34807277532` observed SHA
+  `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a`: core web/Rust/WASM/security and
+  native jobs passed, while trusted Chromium/Firefox/WebKit and `browser gate`
+  failed closed at the empty Clerk `pk_test_` preflight. Nightly release
+  contexts, artifacts, checksums, attestations, and a GitHub Release remain
+  pending.
 - GitHub Dependabot vulnerability alerts and automated security fixes were
   observed disabled/unverified at account level; checked-in configuration is
   not a substitute for that setting.

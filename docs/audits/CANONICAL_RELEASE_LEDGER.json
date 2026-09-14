@@ -15,7 +15,7 @@
       "Make release image smoke and dependency-scan metadata derive identity from the exact exported source tree and refreshed image references."
     ],
     "branch": "main",
-    "localOriginMain": "a2b5125347b10c6c4d3fc0ff72cc33bab626f060",
+    "remoteVerificationCommit": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a",
     "worktreeAtCapture": "CLEAN_AT_d38541330909c063926eaa02c179ba6136004a43",
     "reportCommitRelation": "Documentation-only descendant of implementationCommit; never substitute it for the executable candidate SHA."
   },
@@ -36,6 +36,7 @@
   "statusVocabulary": {
     "CANDIDATE_PENDING": "Candidate exists but one or more required gates or artifacts remain unresolved.",
     "PASS_LOCAL": "Fresh local result bound to implementationCommit; it does not substitute for required remote or external evidence.",
+    "PASS_REMOTE": "Fresh exact-candidate remote workflow result observed from the authoritative check run.",
     "PASS_POLICY_WITH_RESIDUAL": "Policy result is usable with an exact documented residual that is not a Critical/High release blocker.",
     "FAIL_RELEASE_BLOCKER": "A required release gate failed and blocks publication.",
     "PENDING_REMOTE": "Exact candidate remote workflow conclusion has not been observed.",
@@ -51,9 +52,9 @@
     "browserLocalDev": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Full local dev-mode Chromium journey/accessibility plus Firefox/WebKit smoke jobs passed under the strict orchestrator; local .env.local and default dev configuration were used, so this does not substitute for trusted production-mode Clerk evidence"},
     "strictLocal": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "25 PASS / 1 FAIL / 0 SKIP / 0 required SKIP; the sole failing sub-gate was security/dependency-scan"},
     "branchProtection": {"status": "CLOSED", "verifiedSha": null, "details": "GitHub API readback confirms strict main protection now requires the current trusted browser contexts plus browser gate; obsolete unsplit browser contexts were removed and other protection settings were preserved"},
-    "browserTrusted": {"status": "OWNER_ACTION", "verifiedSha": null, "details": "GitHub concord-e2e Environment is empty; authenticated production-mode Chromium/Firefox/WebKit cannot provision"},
+    "browserTrusted": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "details": "Exact push run 34807277532 failed the authenticated production-mode Chromium/Firefox/WebKit preflight because GitHub concord-e2e supplied no pk_test_ publishable key; owner configuration is required before rerun"},
     "nativeClang": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Apple Clang Release CTest 3/3 and worker smoke passed"},
-    "nativeGcc": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "Configured Linux CI matrix lane; no exact candidate conclusion observed"},
+    "nativeGcc": {"status": "PASS_REMOTE", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "details": "Exact candidate phase6-pr-ci run 34807277532 native (g++) job passed"},
     "wasm": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "WASM smoke plus 5 files/31 CRDT tests passed"},
     "rust": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "fmt, clippy, and workspace tests: 258 passed, 1 ignored, 0 failed"},
     "sanitizers": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "ASan/UBSan CTest 3/3 and TSan CTest 3/3 passed locally; macOS leak detection disabled; remote nightly pending"},
@@ -67,7 +68,7 @@
     "findingsValidation": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Historical findings registry validates with unique IDs and no historical OPEN Critical/High"},
     "imagePins": {"status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "19 immutable refs checked; 7 runtime inputs deferred by design"},
     "dependencyScan": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "details": "Production npm 0/0/0/0, full npm 0/0/4/0 Moderate, Cargo 0/0/0/0; containers 44 Critical/180 High/158 Moderate/20 Low; tool errors 0; no allowlist"},
-    "remoteCi": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "Exact candidate conclusions absent at capture time; release workflow requires core, CodeQL, trusted browser, sanitizer, fuzz, and chaos checks"},
+    "remoteCi": {"status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "details": "phase6-pr-ci run 34807277532: web/rust/wasm/security/native GCC/Clang passed, trusted Chromium/Firefox/WebKit and browser gate failed closed because the concord-e2e pk_test_ Clerk publishable key was empty; CodeQL 34807277478 and phase2/3/4/5/6 supporting runs passed; nightly sanitizer/fuzz/chaos conclusions remain pending"},
     "releaseArtifacts": {"status": "PENDING_REMOTE", "verifiedSha": null, "details": "No tag, manifest, checksum, attestation, registry push, or GitHub Release created while remote, Clerk, and dependency blockers remain"},
     "liveRuntime": {"status": "NOT_CLAIMED", "verifiedSha": null, "details": "No AWS, Vercel, Neon, URL, TLS, deployed-SHA, live Clerk, or persistent realtime verification"}
   },
@@ -171,8 +172,8 @@
       "status": "PASS_LOCAL",
       "blocking": false,
       "title": "Credential-free build matrix passes locally",
-      "observedTruth": "Web, Apple Clang native, WASM, Rust format/lint/test, and exact source-export image smoke passed on implementationCommit; Linux GCC/Clang remote lanes remain pending.",
-      "requiredAction": "Observe the exact candidate Linux GCC/Clang and clean-room remote conclusions before release.",
+      "observedTruth": "Web, Apple Clang native, WASM, Rust format/lint/test, and exact source-export image smoke passed on implementationCommit; exact push run 34807277532 also passed Linux GCC and Clang jobs, while clean-room/nightly release conclusions remain pending.",
+      "requiredAction": "Observe the exact candidate clean-room and nightly release conclusions before release.",
       "owner": "release-lead"
     },
     {
@@ -214,11 +215,11 @@
       "id": "AUDIT-CI-001",
       "severity": "HIGH",
       "category": "ci_remote",
-      "status": "PENDING_REMOTE",
+      "status": "FAIL_RELEASE_BLOCKER",
       "blocking": true,
-      "title": "No exact-candidate remote CI conclusion at capture time",
-      "observedTruth": "The candidate had not yet been pushed when this evidence was captured; historical runs do not cover the changed workflows or exact implementation SHA.",
-      "requiredAction": "Push the candidate, inspect exact check-runs by name/head SHA/app, and preserve failures including missing-Clerk preflight.",
+      "title": "Exact-candidate remote CI is blocked by the trusted-browser preflight",
+      "observedTruth": "Exact pushed candidate 110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a was observed in phase6-pr-ci run 34807277532; core jobs passed, but all trusted browser jobs and browser gate failed closed at the missing pk_test_ Clerk preflight. Nightly release-required contexts remain pending.",
+      "requiredAction": "Configure the dedicated Clerk Environment, resolve the strict container blocker, rerun exact candidate trusted browsers, and observe the required nightly/release check names by exact head SHA and Actions app.",
       "owner": "release-lead"
     },
     {
@@ -304,10 +305,10 @@
     {"id": "EV-SAN-001", "category": "sanitizer_native", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
     {"id": "EV-FUZZ-001", "category": "fuzz_property", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
     {"id": "EV-STRICT-001", "category": "orchestration", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "25 PASS / 1 FAIL / 0 SKIP / 0 required SKIP; only security/dependency-scan failed"},
-    {"id": "EV-BROWSER-001", "category": "browser_e2e", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "Local dev-mode browser jobs pass in docs/audits/CANONICAL_FRESH_EVIDENCE.md; trusted production-mode Clerk matrix remains blocked"},
+    {"id": "EV-BROWSER-001", "category": "browser_e2e", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "artifact": "Run 34807277532 trusted Chromium/Firefox/WebKit and browser gate failed closed at the empty Clerk pk_test_ preflight; local dev-mode browser jobs pass in docs/audits/CANONICAL_FRESH_EVIDENCE.md"},
     {"id": "EV-BRANCH-001", "category": "ci_remote", "status": "CLOSED", "verifiedSha": null, "artifact": "GitHub API branch-protection readback"},
     {"id": "EV-CLERK-001", "category": "web_auth_clerk", "status": "OWNER_ACTION", "verifiedSha": null, "artifact": "GitHub concord-e2e Environment is empty"},
-    {"id": "EV-CI-001", "category": "ci_remote", "status": "PENDING_REMOTE", "verifiedSha": null, "artifact": null},
+    {"id": "EV-CI-001", "category": "ci_remote", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a", "artifact": "https://github.com/UtkarsHMer05/Concord-Dev/actions/runs/34807277532; CodeQL run 34807277478 and supporting exact-SHA workflow runs passed"},
     {"id": "EV-SUPPLY-001", "category": "security_supply_chain", "status": "FAIL_RELEASE_BLOCKER", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/container-scan.json"},
     {"id": "EV-BENCH-001", "category": "benchmark_performance", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/native-benchmark.txt"},
     {"id": "EV-CHAOS-001", "category": "reliability", "status": "PASS_LOCAL", "verifiedSha": "42dcb17dd26c11a05dd20109102f37ea3fb5135a", "artifact": "evidence/v1.0.1/chaos-summary.json"},
@@ -337,8 +338,8 @@
       "id": "OA-REMOTE-001",
       "category": "ci_remote",
       "owner": "release-lead",
-      "status": "PENDING_REMOTE",
-      "action": "Push the implementation plus canonical documentation, observe exact candidate check-runs, and retain failed/preflight details.",
+      "status": "FAIL_RELEASE_BLOCKER",
+      "action": "Configure the dedicated Clerk Environment and resolve the strict container blocker, then rerun the exact candidate trusted browsers and required nightly/release contexts while retaining run 34807277532 as the failed preflight record.",
       "acceptance": "All release-required check names conclude success for one exact candidate SHA, including trusted browsers, CodeQL, fuzz, sanitizer, and chaos."
     },
     {

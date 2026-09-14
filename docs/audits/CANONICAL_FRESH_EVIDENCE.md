@@ -83,11 +83,14 @@ accepted and prevent a canonical release.
    closed before the authenticated Chromium/Firefox/WebKit production-mode
    journey. The required names are documented in `docs/TESTING.md`; values
    must never be pasted into this repository or chat.
-2. **Remote exact-SHA CI — pending.** The candidate has not yet been pushed
-   during this evidence capture, so there are no current check-run conclusions
-   for SHA `42dcb17...`. Historical runs are not substituted. The workflow
-   requires `browser gate`, the three trusted browser jobs, native sanitizers,
-   native/Rust fuzz, chaos, CodeQL, and the core build/security jobs.
+2. **Remote exact-SHA CI — failed closed / release blocker.** Candidate
+   `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` was pushed and observed in
+   phase6-pr-ci run `34807277532`. Web, Rust, WASM, security, and native
+   GCC/Clang jobs passed; the three trusted browser jobs and `browser gate`
+   failed at the explicit Clerk preflight because the dedicated Environment
+   supplied no `pk_test_` publishable key. CodeQL run `34807277478` and the
+   phase2/3/4/5/6 supporting runs passed. Nightly `native-sanitizers`,
+   `native-fuzz`, `rust-fuzz`, and `chaos` conclusions remain pending.
 3. **Release identity/artifacts — pending.** No `v1.0.1` tag, release manifest,
    checksum set, artifact attestation, registry push, or GitHub Release exists.
    These cannot be produced honestly while required gates remain unresolved.

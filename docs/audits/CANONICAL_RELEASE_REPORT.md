@@ -5,7 +5,7 @@
 > evidence that does not require external credentials, but it did not reach a
 > releasable state. The exact candidate is blocked by unaccepted container
 > Critical/High findings, missing dedicated Clerk Environment configuration,
-> absent exact-SHA remote CI/nightly results, and unresolved external
+> the failed exact-SHA trusted-browser preflight, pending nightly gates, and unresolved external
 > provenance/account actions. No credential, tag, GitHub Release, deployment,
 > or live-runtime result is fabricated here.
 
@@ -20,10 +20,11 @@
 
 The work is complete up to the real blockers that cannot be bypassed safely.
 The strict local dependency scan is red with `44 Critical / 180 High` image
-findings and no broad allowlist. The trusted authenticated browser matrix
-cannot run because the GitHub `concord-e2e` Environment is empty. Remote
-checks, nightly reliability evidence, release artifacts, and account/legal
-decisions therefore cannot be certified as green.
+findings and no broad allowlist. The exact remote candidate run
+`34807277532` reached the trusted browser preflight and failed closed because
+the GitHub `concord-e2e` Environment has no `pk_test_` Clerk publishable key;
+the remaining nightly/release checks, artifacts, and account/legal decisions
+therefore cannot be certified as green.
 
 ## 2. Identity
 
@@ -37,7 +38,7 @@ decisions therefore cannot be certified as green.
 | Report/evidence relation | This report and `evidence/v1.0.1/` are documentation-only descendants of `releaseCommit`; the report commit must not be confused with the executable candidate SHA |
 | Initial canonical evidence commit | `d38541330909c063926eaa02c179ba6136004a43` (documentation-only descendant; not used as the implementation SHA) |
 | Branch | `main` |
-| Local `origin/main` tracking ref | `a2b5125347b10c6c4d3fc0ff72cc33bab626f060` at capture time; this is not a fresh remote query |
+| Remote verification snapshot | `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` (exact ref verified by run `34807277532`; later documentation descendants do not change the implementation) |
 | Audit date | 2026-09-14 (Asia/Kolkata) |
 
 Preserved historical references:
@@ -70,9 +71,9 @@ outputs or remote check conclusions.
 | Inherited issue | Reproduced/root cause | Repository work completed | Current status |
 |---|---|---|---|
 | Trusted browser jobs stopped before Clerk authentication | GitHub `concord-e2e` has no dedicated publishable key, secret key, or audience variable | Split public secretless and trusted lanes; scoped the Clerk secret to the final Playwright/global-setup path; enforced audience, authorized-party, and exact-origin policy | `OWNER_ACTION` / blocking |
-| Browser CI was unsafe for public fork PRs | Secret-backed jobs were treated as universally required | Added `browser (public chromium)`, trusted Chromium/Firefox/WebKit jobs, and aggregate `browser gate`; fork lane receives no secrets | `PASS_LOCAL` architecture; exact remote result pending |
+| Browser CI was unsafe for public fork PRs | Secret-backed jobs were treated as universally required | Added `browser (public chromium)`, trusted Chromium/Firefox/WebKit jobs, and aggregate `browser gate`; fork lane receives no secrets | `PASS_REMOTE` architecture; exact trusted run fails closed on missing Clerk |
 | Main branch protection still required obsolete browser contexts | Protection readback required `browser (chromium)`, `browser (firefox)`, and `browser (webkit)` after the workflow split | Replaced those contexts with `browser (trusted chromium)`, `browser (trusted firefox)`, `browser (trusted webkit)`, and `browser gate`, preserving strict protection and existing non-status settings | `CLOSED` by GitHub API readback on 2026-09-14 |
-| Release workflow could rely on a different SHA | Artifact workflow lacked strict exact-check-run identity | Release workflow now validates normal SemVer, event SHA, check-run name/head SHA/Actions app, trusted browsers, fuzz/sanitizer/chaos, CodeQL, and core gates | `PASS_LOCAL` static review; remote result pending |
+| Release workflow could rely on a different SHA | Artifact workflow lacked strict exact-check-run identity | Release workflow now validates normal SemVer, event SHA, check-run name/head SHA/Actions app, trusted browsers, fuzz/sanitizer/chaos, CodeQL, and core gates | `PASS_LOCAL` static review; exact PR run recorded below, release gate still blocked |
 | Web/gateway trust-boundary drift | Origin, CSP, Clerk party, TLS mode, and internal-service assumptions were not all exact | Added shared security configuration, per-request CSP nonce, HTTPS-only HSTS, exact `authorizedParties`, fail-closed TLS and internal-service requirements | Local tests/build pass; live/cloud auth remains unverified |
 | Native parity/sanitizer/fuzz evidence was incomplete or weakly bound | Sanitizer exclusivity, timeout, signed-byte, and campaign issues | Hardened CMake/worker/fuzz paths and reran Release, ASan/UBSan, TSan, property, and bounded fuzz campaigns | Fresh local pass; remote nightly still required |
 | Dev-container CVE inventory was high | Old pinned NATS/nginx/Grafana refs and no strict current inventory | Refreshed NATS, nginx, Grafana pins; retained exact Postgres/Redis/Prometheus refs after comparison; removed broad allowlist behavior | `FAIL_RELEASE_BLOCKER`; exact counts in §15 |
@@ -138,7 +139,7 @@ anonymous surface. It is not a real Clerk authentication result.
 | Authenticated WebKit | `BLOCKED` | Same missing prerequisite; no retry-only evidence accepted |
 | Current accessibility journey | `BLOCKED` | Requires the trusted authenticated production-mode path; old 5/5 result is historical |
 | Local realtime convergence | `PASS_LOCAL` | Realtime suite 3 files / 21 tests; two-context trusted browser convergence still pending |
-| Remote GitHub browser gate | `PENDING` | No exact-candidate remote run existed before push; historical run is not substituted |
+| Remote GitHub browser gate | `FAIL_RELEASE_BLOCKER` | Exact run `34807277532` failed all three trusted browser jobs and `browser gate` at the missing `pk_test_` Clerk preflight |
 
 The dev-mode and secretless browser paths remain useful diagnostics. Neither
 is labeled as the required trusted authenticated browser acceptance gate. The
@@ -165,8 +166,8 @@ deployment claim.
 |---|---|
 | Apple Clang Release / CTest | `PASS_LOCAL` · `bash scripts/verify-native.sh Release`; CTest 3/3 |
 | Native worker identity/smoke | `PASS_LOCAL` · version `1.0.1 (42dcb17)` and exact image smoke worker probe |
-| Linux GCC Release | `PENDING_REMOTE` · the CI matrix is configured; no current remote conclusion |
-| Linux Clang Release | `PENDING_REMOTE` · the CI matrix is configured; no current remote conclusion |
+| Linux GCC Release | `PASS_REMOTE` · exact candidate phase6-pr-ci run `34807277532` |
+| Linux Clang Release | `PASS_REMOTE` · exact candidate phase6-pr-ci run `34807277532` |
 | Gitless source export | `PASS_LOCAL` for the exact export used by image smoke; a separate clean-clone release gate remains remote/pending |
 | WASM build/smoke/parity | `PASS_LOCAL` · WASM smoke plus 5 files / 31 CRDT tests |
 | Warnings-as-errors | `PASS_LOCAL` in the native verification script; CI also configures it explicitly |
@@ -233,7 +234,7 @@ Remote `chaos` and nightly reliability contexts are still pending.
 | Immutable image-pin validation | `PASS_LOCAL` · 19 refs checked, 7 runtime inputs deferred by design |
 | SBOM generation | `PASS_LOCAL` · web 194, Rust 327, native 7; JSON parse and deterministic regeneration clean |
 | Container dependency gate | `FAIL_RELEASE_BLOCKER` · 44 Critical / 180 High unaccepted; no broad allowlist |
-| CodeQL | `PENDING_REMOTE` · exact candidate workflow conclusion absent |
+| CodeQL | `PASS_REMOTE` · exact candidate workflow run `34807277478` |
 | Artifact checksum/attestation | `PENDING` · no release artifacts created while gates are blocked |
 
 The strict container result is not softened by loopback binding or dev-only
@@ -295,16 +296,27 @@ The release image smoke built from a clean `git archive` export of the exact
 implementation candidate and passed gateway, web, and worker probes with
 non-root IDs. This proves the source-export path used by that smoke helper.
 
-A separately cloned, fully clean working tree with all remote gates cannot be
-certified before the candidate is pushed and the required remote workflows
-complete. No generated artifact is treated as a release artifact yet.
+A separately cloned, fully clean working tree with all required release gates
+is not certified by the push workflows alone: the exact candidate PR run
+completed its core jobs, but the trusted browsers failed closed at the Clerk
+preflight and the nightly/release artifact gates remain pending. No generated
+artifact is treated as a release artifact yet.
 
 ## 18. GitHub CI on `releaseCommit`
 
-At the time of this report capture there was no remote run for
-`42dcb17dd26c11a05dd20109102f37ea3fb5135a`; the local `origin/main` tracking
-ref is stale metadata, not a remote verification. The release workflow is
-configured to require exact successful check runs for:
+The exact pushed candidate `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a` was
+observed remotely. Push run `34807277532` concluded `failure`: `web`, `rust`,
+`wasm`, `security`, native GCC/Clang, and the source-side checks completed
+successfully, while `browser (trusted chromium)`, `browser (trusted firefox)`,
+`browser (trusted webkit)`, and `browser gate` failed closed before any
+authenticated browser test because `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` was
+empty and therefore did not satisfy the required `pk_test_` preflight. The
+separate exact-SHA CodeQL run `34807277478` and the phase2/3/4/5/6 supporting
+runs also concluded success. The nightly `native-sanitizers`, `native-fuzz`,
+`rust-fuzz`, and `chaos` contexts required by the release workflow have not
+yet produced current conclusions.
+
+The release workflow is configured to require exact successful check runs for:
 
 ```text
 web
@@ -325,9 +337,10 @@ rust-fuzz
 chaos
 ```
 
-The candidate cannot receive a green remote verdict until it is pushed and the
-trusted Clerk Environment is populated. Any run that stops at the explicit
-missing-configuration preflight remains a blocker.
+The candidate cannot receive a green remote verdict until the trusted Clerk
+Environment is populated, the strict container gate is resolved, and the
+nightly/release contexts conclude successfully. The observed preflight failure
+is retained as a blocker, not treated as a retry-only infrastructure failure.
 
 The protected `main` branch now requires the current status contexts
 `web`, `rust`, `wasm`, `security`, `native (g++)`, `native (clang++)`,

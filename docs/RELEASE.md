@@ -13,8 +13,9 @@ This document is the release-state boundary. The current implementation
 candidate has passed the credential-free local gates that were run, but the
 campaign has not produced a canonical release. The strict container scan is
 red (`44 Critical / 180 High`, no broad allowlist), the trusted Clerk browser
-Environment is empty, exact candidate remote CI/nightly results are pending,
-and external provenance/account actions remain open.
+Environment is empty, and exact candidate run `34807277532` failed closed at
+the trusted-browser preflight. Nightly/release checks and external
+provenance/account actions remain open.
 
 No credential, tag, GitHub Release, registry push, AWS deployment, Vercel
 deployment, URL reachability, live Clerk session, or persistent realtime
@@ -77,8 +78,11 @@ The complete command/result table is in
   exact advisory-level evidence. See [`docs/SECURITY.md`](SECURITY.md) §9.2.
 - Trusted authenticated Chromium/Firefox/WebKit production-mode browser
   matrix: blocked by the empty GitHub `concord-e2e` Environment.
-- Exact remote CI/nightly results: not observed for the candidate until it is
-  pushed; historical runs do not cover this SHA or changed workflows.
+- Exact remote CI/nightly results: push run `34807277532` observed candidate
+  `110881d6b2c9fdc1d3b4f2da26676d7fdf602f2a`; core jobs passed, but all
+  trusted browsers and `browser gate` failed closed because the dedicated
+  Clerk Environment supplied no `pk_test_` publishable key. Nightly release
+  contexts remain pending.
 - Release identity: no tag, manifest, checksum set, attestation, or GitHub
   Release may be created while required gates are unresolved.
 - Dependabot vulnerability-alert and automated-fix account settings: the GitHub
