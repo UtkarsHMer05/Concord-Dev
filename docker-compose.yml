@@ -32,7 +32,7 @@ services:
   # storage (restart recovery, M038). Dev only — no authn in local compose
   # (documented; loopback-bound).
   nats:
-    image: nats:2.11.6-alpine@sha256:7dec3f8f1ff181975dbdfc0d903d2a9724659648294dbc2ebb2fa3a294d573a6
+    image: nats:2.12-alpine@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6
     container_name: concord-nats
     restart: unless-stopped
     command: ["-js", "-sd", "/data", "-m", "8222"]
@@ -89,7 +89,7 @@ services:
   # is loopback-bound and the stack never leaves this machine — NEVER
   # enable this in any shared deployment.
   grafana:
-    image: grafana/grafana:12.2.0@sha256:74144189b38447facf737dfd0f3906e42e0776212bf575dc3334c3609183adf7
+    image: grafana/grafana:12.3.0@sha256:70d9599b186ce287be0d2c5ba9a78acb2e86c1a68c9c41449454d0fc3eeb84e8
     container_name: concord-grafana
     restart: unless-stopped
     environment:

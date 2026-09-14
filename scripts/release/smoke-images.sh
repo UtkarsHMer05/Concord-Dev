@@ -29,8 +29,8 @@ cd "$(dirname "$0")/../.."
 WORK=$(mktemp -d /tmp/concord-release-smoke.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 # Clean export of HEAD (tracked files only; no ignored/private content,
-# no in-flight working-tree changes). public/wasm + .next are git-ignored
-# build products — the web stage builds them inside the image.
+# no in-flight working-tree changes). Generated public/wasm assets are tracked
+# release inputs; other build products such as .next are created in the image.
 # CONCORD_SMOKE_TREE overrides the export source (verification helper).
 if [ -n "${CONCORD_SMOKE_TREE:-}" ]; then
   if [ ! -d "$CONCORD_SMOKE_TREE" ]; then
@@ -49,6 +49,28 @@ else
 fi
 note_export
 
+# Derive the version from the exact exported source tree. A supplied tree has
+# no .git metadata, so its caller must provide the full commit SHA explicitly;
+# this prevents labels from combining one source export with another checkout's
+# package version or revision.
+RELEASE_VERSION=$(node -e 'console.log(require(process.argv[1]).version)' "$WORK/package.json")
+if [ -z "$RELEASE_VERSION" ]; then
+  echo "error: exported source tree has no package version" >&2
+  exit 2
+fi
+if [ -n "${CONCORD_RELEASE_GIT_SHA:-}" ]; then
+  RELEASE_REVISION="$CONCORD_RELEASE_GIT_SHA"
+elif [ -z "${CONCORD_SMOKE_TREE:-}" ]; then
+  RELEASE_REVISION=$(git rev-parse HEAD)
+else
+  echo "error: CONCORD_RELEASE_GIT_SHA is required with CONCORD_SMOKE_TREE" >&2
+  exit 2
+fi
+if [[ ! "$RELEASE_REVISION" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  echo "error: CONCORD_RELEASE_GIT_SHA must be a full 40-character commit SHA" >&2
+  exit 2
+fi
+
 if [ ! -f "$WORK/public/wasm/concord-crdt.js" ] || [ ! -f "$WORK/public/wasm/concord-crdt.wasm" ]; then
   echo "error: clean image source tree is missing generated public/wasm assets" >&2
   echo "       run npm run wasm:build, then pass a git-archive export plus public/wasm via CONCORD_SMOKE_TREE" >&2
@@ -62,9 +84,7 @@ note() { printf '  %s\n' "$*"; }
 
 smoke_gateway() {
   local tag=concord-gateway:smoke
-  local version revision
-  version=$(node -p 'require("./package.json").version')
-  revision="${CONCORD_RELEASE_GIT_SHA:-$(git rev-parse HEAD)}"
+  local version="$RELEASE_VERSION" revision="$RELEASE_REVISION"
   note "building gateway image…"
   docker build -q \
     --build-arg "CONCORD_VERSION=$version" \
@@ -136,9 +156,7 @@ smoke_gateway() {
 
 smoke_web() {
   local tag=concord-web:smoke
-  local version revision
-  version=$(node -p 'require("./package.json").version')
-  revision="${CONCORD_RELEASE_GIT_SHA:-$(git rev-parse HEAD)}"
+  local version="$RELEASE_VERSION" revision="$RELEASE_REVISION"
   note "building web image…"
   docker build -q \
     --build-arg "CONCORD_VERSION=$version" \
@@ -199,9 +217,7 @@ smoke_web() {
 
 smoke_worker() {
   local tag=concord-worker:smoke
-  local version revision
-  version=$(node -p 'require("./package.json").version')
-  revision="${CONCORD_RELEASE_GIT_SHA:-$(git rev-parse HEAD)}"
+  local version="$RELEASE_VERSION" revision="$RELEASE_REVISION"
   note "building worker image…"
   docker build -q \
     --build-arg "CONCORD_VERSION=$version" \

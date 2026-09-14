@@ -31,7 +31,7 @@ services:
       retries: 30
 
   nats:
-    image: nats:2.11.6-alpine@sha256:7dec3f8f1ff181975dbdfc0d903d2a9724659648294dbc2ebb2fa3a294d573a6
+    image: nats:2.12-alpine@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6
     # `-js` is explicit: the CI probe exercises both authenticated core NATS
     # pub/sub and the JetStream API. The server never accepts anonymous clients.
     command:
