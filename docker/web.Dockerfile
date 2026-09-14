@@ -17,7 +17,7 @@
 # node:24-alpine is the LTS line matching .nvmrc (24.x). Digest-pinned
 # (hardening E6): the digest resolves the exact audited tag content;
 # Dependabot (docker ecosystem) opens refresh PRs when the tag moves.
-FROM node:24.20-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS deps
+FROM node:24.21-alpine@sha256:be80f76cf40ec8e42b9bec49f60a55e0660f30af58d3e5a25530785b30ea67e2 AS deps
 WORKDIR /app
 # libc6-compat: native modules (esbuild via drizzle-kit chain) may need it.
 RUN apk add --no-cache libc6-compat
@@ -26,7 +26,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # --- Stage 2: build ----------------------------------------------------------
-FROM node:24.20-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
+FROM node:24.21-alpine@sha256:be80f76cf40ec8e42b9bec49f60a55e0660f30af58d3e5a25530785b30ea67e2 AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -44,12 +44,19 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # the browser-facing sync WS URL).
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ARG NEXT_PUBLIC_SYNC_GATEWAY_URL
+ARG CONCORD_REQUIRE_TLS=0
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY} \
-    NEXT_PUBLIC_SYNC_GATEWAY_URL=${NEXT_PUBLIC_SYNC_GATEWAY_URL}
+    NEXT_PUBLIC_SYNC_GATEWAY_URL=${NEXT_PUBLIC_SYNC_GATEWAY_URL} \
+    CONCORD_REQUIRE_TLS=${CONCORD_REQUIRE_TLS}
 RUN npm run build
 
 # --- Stage 3: runtime --------------------------------------------------------
-FROM node:24.20-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS runtime
+FROM node:24.21-alpine@sha256:be80f76cf40ec8e42b9bec49f60a55e0660f30af58d3e5a25530785b30ea67e2 AS runtime
+ARG CONCORD_VERSION=1.0.1
+ARG CONCORD_GIT_SHA=unknown
+LABEL org.opencontainers.image.title="Concord web" \
+      org.opencontainers.image.version="$CONCORD_VERSION" \
+      org.opencontainers.image.revision="$CONCORD_GIT_SHA"
 # apk upgrade is a DELIBERATE, documented tradeoff (hardening E6): it
 # keeps OS packages at security-fixed versions from the pinned base
 # release repo, so the runtime layer is NOT byte-reproducible (the
@@ -72,23 +79,25 @@ RUN apk upgrade \
     && test ! -e /usr/local/bin/npx \
     && test ! -e /usr/local/bin/corepack
 WORKDIR /app
+ARG CONCORD_REQUIRE_TLS=0
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
+    CONCORD_REQUIRE_TLS=${CONCORD_REQUIRE_TLS} \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 # Standalone server + static assets only — no node_modules copy of build
 # toolchains, no package manager beyond what apk already removed.
-COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=build --chown=node:node /app/.next/standalone ./
+COPY --from=build --chown=node:node /app/.next/static ./.next/static
 # public assets (incl. wasm if built) — copy is small and keeps URLs stable.
-COPY --from=build --chown=nextjs:nodejs /app/public ./public
+COPY --from=build --chown=node:node /app/public ./public
 # Migration runner (P7-M022, two-family rule): drizzle migrations +
 # runner script + drizzle-orm/pg deps (not traced into standalone — the
 # migrator imports them directly, outside Next's dependency graph).
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/pg ./node_modules/pg
-COPY --chown=nextjs:nodejs drizzle ./drizzle
-COPY --chown=nextjs:nodejs scripts/db/migrate.mjs ./scripts/db/migrate.mjs
+COPY --from=deps --chown=node:node /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
+COPY --from=deps --chown=node:node /app/node_modules/pg ./node_modules/pg
+COPY --chown=node:node drizzle ./drizzle
+COPY --chown=node:node scripts/db/migrate.mjs ./scripts/db/migrate.mjs
 # Non-root user (node image ships uid 1000 `node`).
 USER node
 EXPOSE 3000

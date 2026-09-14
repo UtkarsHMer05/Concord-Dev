@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Concord dependency and supply-chain scanner.
 #
-# Raw findings are always reported. An explicit, dated policy may classify a
-# finding as accepted residual risk, but it never removes the finding from
-# the output. Exit 1 means an unaccepted critical/high finding; exit 2 means
-# a scanner or invocation failed. The optional --skip-containers flag is an
+# Raw findings are always reported. There is no container allowlist in this
+# helper: every critical/high image finding is unaccepted and fails the local
+# gate. Exit 1 means an unaccepted critical/high finding; exit 2 means a
+# scanner or invocation failed. The optional --skip-containers flag is an
 # explicit PR-mode choice because the release workflow owns the mandatory
 # Trivy image gate; strict local verification never uses that flag.
 set -euo pipefail
@@ -43,50 +43,10 @@ record() {
 "
 }
 
-ACCEPTED_NPM="GHSA-67mh-4wv8-2f99|esbuild dev-server advisory in the drizzle-kit @esbuild-kit chain; Concord invokes drizzle-kit exclusively as a CLI (generate/studio), never as a served dev server, so the request-forgery vector is not reachable; remediation would force a breaking drizzle-kit downgrade"
-CONTAINER_POLICY_REVIEW="2026-10-13"
-CONTAINER_POLICY_OWNER="Concord release owner"
-CONTAINER_POLICY_REASON="pinned local-development or inactive-cloud image; findings are in base OS/embedded toolchain packages, not the server package; production release images use the separate Trivy gate"
-# Scan the exact manifest references used by compose, not the mutable tags.
-# Keeping the digest in both the scan input and the policy match prevents a
-# tag move from silently inheriting an old acceptance.
-CONTAINER_POLICY_IMAGES="postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2 nats:2.11.6-alpine@sha256:7dec3f8f1ff181975dbdfc0d903d2a9724659648294dbc2ebb2fa3a294d573a6 redis:8.8.2-alpine@sha256:96cb544fa0af5aa898d160cffb7dae70c3df117190fc123831c64712cda425ff nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de"
-IMAGES="$CONTAINER_POLICY_IMAGES"
-
-review_epoch() {
-  local value="$1"
-  local result
-  if result="$(date -u -j -f "%Y-%m-%d" "$value" +%s 2>/dev/null)"; then
-    printf '%s' "$result"
-  elif result="$(date -u -d "$value" +%s 2>/dev/null)"; then
-    printf '%s' "$result"
-  else
-    return 1
-  fi
-}
-
-container_policy_applies() {
-  local image="$1"
-  local candidate
-  local review
-  local now
-  local found=1
-  for candidate in $CONTAINER_POLICY_IMAGES; do
-    if [ "$candidate" = "$image" ]; then
-      found=0
-      break
-    fi
-  done
-  [ "$found" -eq 0 ] || return 1
-  if [[ "$image" == nginx:1.29-alpine@sha256:* ]]; then
-    grep -Fqx "    image: $image" docker-compose.cloud.yml || return 1
-  else
-    grep -Fqx "    image: $image" docker-compose.yml || return 1
-  fi
-  review="$(review_epoch "$CONTAINER_POLICY_REVIEW")" || return 1
-  now="$(date -u +%s)"
-  [ "$review" -gt "$now" ] || return 1
-}
+# Scan the exact static manifest references used by compose, not mutable tags.
+# Application release images are supplied through CONCORD_*_IMAGE and are
+# validated separately by validate-image-pins.sh before deployment.
+IMAGES="postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2 nats:2.11.6-alpine@sha256:7dec3f8f1ff181975dbdfc0d903d2a9724659648294dbc2ebb2fa3a294d573a6 redis:8.8.2-alpine@sha256:96cb544fa0af5aa898d160cffb7dae70c3df117190fc123831c64712cda425ff nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996 grafana/grafana:12.2.0@sha256:74144189b38447facf737dfd0f3906e42e0776212bf575dc3334c3609183adf7"
 
 NPM_VERSION="$(npm --version)"
 NODE_VERSION="$(node --version)"
@@ -135,10 +95,16 @@ read -r P_CRIT P_HIGH P_MED P_LOW P_TOT <<< "$NPM_PROD_COUNTS"
 read -r A_CRIT A_HIGH A_MED A_LOW A_TOT <<< "$NPM_ALL_COUNTS"
 CRIT_TOTAL=$((CRIT_TOTAL + P_CRIT))
 HIGH_TOTAL=$((HIGH_TOTAL + P_HIGH))
-UNACCEPTED_CRIT=$((UNACCEPTED_CRIT + P_CRIT))
-UNACCEPTED_HIGH=$((UNACCEPTED_HIGH + P_HIGH))
 record "npm|prod|critical=$P_CRIT high=$P_HIGH medium=$P_MED low=$P_LOW total=$P_TOT"
 record "npm|all(dev+prod)|critical=$A_CRIT high=$A_HIGH medium=$A_MED low=$A_LOW total=$A_TOT"
+
+# Gate the complete tree as well as production. This prevents a dev-only
+# critical/high from becoming an invisible exception while still reporting
+# the separate --omit=dev result above.
+CRIT_TOTAL=$((CRIT_TOTAL + A_CRIT - P_CRIT))
+HIGH_TOTAL=$((HIGH_TOTAL + A_HIGH - P_HIGH))
+UNACCEPTED_CRIT=$((UNACCEPTED_CRIT + A_CRIT))
+UNACCEPTED_HIGH=$((UNACCEPTED_HIGH + A_HIGH))
 
 NPM_JSON=""
 if NPM_JSON="$(npm audit --json 2>/dev/null)"; then
@@ -166,11 +132,7 @@ if [ "$JSON" -eq 0 ]; then
   echo "  full tree (dev+prod):   critical=$A_CRIT high=$A_HIGH medium=$A_MED low=$A_LOW total=$A_TOT"
   while IFS='|' read -r severity name ghsa; do
     [ -n "$severity" ] || continue
-    accepted=""
-    if printf '%s' "$ghsa" | grep -q 'GHSA-67mh-4wv8-2f99'; then
-      accepted="  [ACCEPTED: $ACCEPTED_NPM]"
-    fi
-    echo "  finding: $severity $name ($ghsa)$accepted"
+    echo "  finding: $severity $name ($ghsa)"
   done <<< "$NPM_FINDINGS"
   echo "  critical path: $(npm ls drizzle-kit 2>/dev/null | tail -n +2 | tr '\n' ' ' | sed 's/  */ /g')"
 fi
@@ -323,21 +285,12 @@ print(counts["critical"], counts["high"], counts["medium"], counts["low"])
       read -r C_CRIT C_HIGH C_MED C_LOW <<< "$COUNTS"
       CRIT_TOTAL=$((CRIT_TOTAL + C_CRIT))
       HIGH_TOTAL=$((HIGH_TOTAL + C_HIGH))
-      if container_policy_applies "$img"; then
-        ACCEPTED_CRIT=$((ACCEPTED_CRIT + C_CRIT))
-        ACCEPTED_HIGH=$((ACCEPTED_HIGH + C_HIGH))
-        classification="accepted dev-only policy (review $CONTAINER_POLICY_REVIEW)"
-      else
-        UNACCEPTED_CRIT=$((UNACCEPTED_CRIT + C_CRIT))
-        UNACCEPTED_HIGH=$((UNACCEPTED_HIGH + C_HIGH))
-        classification="UNACCEPTED — no active exact-image policy"
-      fi
+      UNACCEPTED_CRIT=$((UNACCEPTED_CRIT + C_CRIT))
+      UNACCEPTED_HIGH=$((UNACCEPTED_HIGH + C_HIGH))
+      classification="UNACCEPTED — no container allowlist"
       record "container|$img|critical=$C_CRIT high=$C_HIGH medium=$C_MED low=$C_LOW; $classification"
       if [ "$JSON" -eq 0 ]; then
         echo "  $img: critical=$C_CRIT high=$C_HIGH medium=$C_MED low=$C_LOW; $classification"
-        case "$classification" in
-          accepted*) echo "    [ACCEPTED: $CONTAINER_POLICY_REASON; owner=$CONTAINER_POLICY_OWNER]" ;;
-        esac
       fi
     done
   fi
@@ -381,7 +334,7 @@ if [ "$TOOL_ERRORS" -gt 0 ]; then
   exit 2
 fi
 if [ "$UNACCEPTED_CRIT" -gt 0 ] || [ "$UNACCEPTED_HIGH" -gt 0 ]; then
-  echo "dep-scan: unaccepted critical/high findings present — remediate or add a precise, dated acceptance." >&2
+  echo "dep-scan: unaccepted critical/high findings present — remediate; no broad acceptance is configured." >&2
   exit 1
 fi
 if [ "$JSON" -eq 1 ]; then

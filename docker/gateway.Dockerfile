@@ -35,7 +35,7 @@ RUN cargo build --release --manifest-path rust/sync-gateway/Cargo.toml
 # (same flow as docker/worker.Dockerfile: Release, tests/benchmarks off,
 # libstdc++/libgcc linked STATICALLY so the minimal runtime needs no
 # extra packages).
-FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS worker-builder
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS worker-builder
 RUN apk add --no-cache cmake ninja gcc g++ musl-dev
 WORKDIR /build
 COPY cpp ./cpp
@@ -45,7 +45,12 @@ RUN cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build/native
 
 # --- Stage 2: runtime --------------------------------------------------------
-FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
+ARG CONCORD_VERSION=1.0.1
+ARG CONCORD_GIT_SHA=unknown
+LABEL org.opencontainers.image.title="Concord sync gateway" \
+      org.opencontainers.image.version="$CONCORD_VERSION" \
+      org.opencontainers.image.revision="$CONCORD_GIT_SHA"
 # CA certs for Clerk HTTPS verification. Nothing else: no shell tools
 # beyond busybox defaults, no package manager, no build toolchain.
 # apk upgrade is a DELIBERATE, documented tradeoff (hardening E6): it

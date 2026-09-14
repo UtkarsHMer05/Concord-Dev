@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Concord dev-environment bootstrap (release 1.0.0).
+# Concord dev-environment bootstrap (release 1.0.1).
 #
 # One-shot setup for a fresh checkout (macOS + Linux):
 #   1. checks every prerequisite with a per-tool fix hint,

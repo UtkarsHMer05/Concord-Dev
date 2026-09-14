@@ -40,11 +40,18 @@ for report in "$@"; do
     echo "scan-gate: missing report $report" >&2
     exit 2
   fi
+  # A syntactically valid JSON object without Trivy's Results array is not a
+  # scan result. Reject it before filtering so a truncated or wrong-schema
+  # report cannot become an empty, falsely passing finding set.
+  if ! jq -e '(.Results | type) == "array"' "$report" >/dev/null; then
+    echo "scan-gate: missing or invalid Trivy Results array in $report; refusing a false-green result" >&2
+    exit 2
+  fi
   # Validate and extract in the parent shell. A process substitution would
   # hide jq's exit status and could turn malformed scanner output into an
   # empty, falsely passing finding set.
   scan_lines=""
-  if ! scan_lines="$(jq -r '.Results[]?.Vulnerabilities[]? | select((.Severity // "" | ascii_upcase) == "CRITICAL" or (.Severity // "" | ascii_upcase) == "HIGH") | [.VulnerabilityID, (.Status // "-"), .PkgName, .Severity] | @tsv' "$report")"; then
+  if ! scan_lines="$(jq -r '.Results[].Vulnerabilities[]? | select((.Severity // "" | ascii_upcase) == "CRITICAL" or (.Severity // "" | ascii_upcase) == "HIGH") | [.VulnerabilityID, (.Status // "-"), .PkgName, .Severity] | @tsv' "$report")"; then
     echo "scan-gate: invalid Trivy JSON in $report; refusing a false-green result" >&2
     exit 2
   fi

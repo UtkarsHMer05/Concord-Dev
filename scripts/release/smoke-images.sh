@@ -62,8 +62,16 @@ note() { printf '  %s\n' "$*"; }
 
 smoke_gateway() {
   local tag=concord-gateway:smoke
+  local version revision
+  version=$(node -p 'require("./package.json").version')
+  revision="${CONCORD_RELEASE_GIT_SHA:-$(git rev-parse HEAD)}"
   note "building gateway image…"
-  docker build -q -f docker/gateway.Dockerfile -t "$tag" "$WORK" >/dev/null
+  docker build -q \
+    --build-arg "CONCORD_VERSION=$version" \
+    --build-arg "CONCORD_GIT_SHA=$revision" \
+    -f docker/gateway.Dockerfile -t "$tag" "$WORK" >/dev/null
+  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}' "$tag")" = "$version"
+  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' "$tag")" = "$revision"
   note "starting gateway (loopback, configured smoke DB → it must boot + serve health)…"
   local cid=""
   local -a host_args=()
@@ -128,8 +136,16 @@ smoke_gateway() {
 
 smoke_web() {
   local tag=concord-web:smoke
+  local version revision
+  version=$(node -p 'require("./package.json").version')
+  revision="${CONCORD_RELEASE_GIT_SHA:-$(git rev-parse HEAD)}"
   note "building web image…"
-  docker build -q -f docker/web.Dockerfile -t "$tag" "$WORK" >/dev/null
+  docker build -q \
+    --build-arg "CONCORD_VERSION=$version" \
+    --build-arg "CONCORD_GIT_SHA=$revision" \
+    -f docker/web.Dockerfile -t "$tag" "$WORK" >/dev/null
+  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}' "$tag")" = "$version"
+  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' "$tag")" = "$revision"
   note "starting web (dummy DB URL; process liveness via HTTP)…"
   local cid=""
   # No --rm: the stopped container's exit code must be inspectable.
@@ -183,8 +199,16 @@ smoke_web() {
 
 smoke_worker() {
   local tag=concord-worker:smoke
+  local version revision
+  version=$(node -p 'require("./package.json").version')
+  revision="${CONCORD_RELEASE_GIT_SHA:-$(git rev-parse HEAD)}"
   note "building worker image…"
-  docker build -q -f docker/worker.Dockerfile -t "$tag" "$WORK" >/dev/null
+  docker build -q \
+    --build-arg "CONCORD_VERSION=$version" \
+    --build-arg "CONCORD_GIT_SHA=$revision" \
+    -f docker/worker.Dockerfile -t "$tag" "$WORK" >/dev/null
+  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}' "$tag")" = "$version"
+  test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' "$tag")" = "$revision"
   note "probing worker image (generate_ops stdin probe: cmd 6 → status 0 + digest + ≥1 batch)…"
   # Probe frame — the exact bytes proven by the phase6 release-artifacts
   # workflow: [u32 24 payload][u32 6 cmd][u64 1 seed][u32 10 ops]

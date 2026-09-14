@@ -29,7 +29,7 @@
 # gcc in alpine builds the C++20 core with no external dependencies.
 # (Tag matches the platform BuildKit is building for.) Digest-pinned
 # (hardening E6); Dependabot (docker ecosystem) opens refresh PRs.
-FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS builder
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS builder
 RUN apk add --no-cache cmake ninja gcc g++ musl-dev
 WORKDIR /build
 # The worker + the CRDT core it wraps. .dockerignore excludes rust/target
@@ -47,7 +47,12 @@ RUN cmake -S cpp -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
 # --- Stage 2: runtime --------------------------------------------------------
 # Static-friendly minimal runtime: alpine + nothing but the binary. musl
 # already matches the builder's libc; libstdc++ is linked in statically.
-FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
+ARG CONCORD_VERSION=1.0.1
+ARG CONCORD_GIT_SHA=unknown
+LABEL org.opencontainers.image.title="Concord native worker" \
+      org.opencontainers.image.version="$CONCORD_VERSION" \
+      org.opencontainers.image.revision="$CONCORD_GIT_SHA"
 # apk upgrade is a DELIBERATE, documented tradeoff (hardening E6): it
 # keeps the base's libcrypto3 at security-fixed versions from the
 # pinned release repo, so this layer is NOT byte-reproducible (the

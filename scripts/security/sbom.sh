@@ -59,7 +59,7 @@ log() { printf '[sbom] %s\n' "$*"; }
 # threaded into every generated SBOM (rust-gateway + native-worker metadata
 # components). Do NOT bump an SBOM's embedded version by hand — regenerate:
 #   bash scripts/security/sbom.sh
-# package.json keeps the same 1.0.0 identity as rust/Cargo.toml's
+# package.json keeps the same 1.0.1 identity as rust/Cargo.toml's
 # workspace.package.version and cpp/CMakeLists.txt's project VERSION (the
 # three are the release trio; the wire protocol version is a separate
 # constant and never tracks this).
@@ -210,7 +210,7 @@ metadata["tools"] = [
     {
         "vendor": "Concord",
         "name": "scripts/security/sbom.sh (Cargo.lock parser)",
-        "version": "1.0.0",
+        "version": concord_version,
     }
 ]
 metadata["component"] = {
@@ -285,7 +285,7 @@ bom["version"] = 1
 metadata = OrderedDict()
 metadata["timestamp"] = timestamp
 metadata["tools"] = [
-    {"vendor": "Concord", "name": "scripts/security/sbom.sh (hand-authored manifest)", "version": "1.0.0"}
+    {"vendor": "Concord", "name": "scripts/security/sbom.sh (hand-authored manifest)", "version": concord_version}
 ]
 metadata["properties"] = [
     {

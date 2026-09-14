@@ -2,15 +2,15 @@
 #
 # ================== NO DEPLOYMENT — EXPLICIT ==================
 # This workflow builds and verifies artifacts. It NEVER pushes images to
-# a registry, NEVER logs into a cloud provider, NEVER touches a deploy
-# target, and uploads ONLY to the workflow run's artifacts. Production
-# deployment is Phase 7 work (per docs/OPERATIONS.md and the Dockerfiles'
-# "LOCAL BUILD + SMOKE ONLY" banners). Setting DEPLOY=false below would
-# be decoration; the honest statement is: no deploy steps exist here.
+# a registry, NEVER logs into a cloud provider, and NEVER touches a deploy
+# target. A guarded publication job may create the canonical GitHub Release
+# and attach the already-verified artifacts; that is release publication, not
+# production deployment. Production deployment remains a separate operation.
 # ================================================================
 #
-# Triggers: workflow_dispatch (manual release build) + canonical v1-style
-# tag pushes (both the historical `concord-v*` convention and `v*`).
+# Triggers: workflow_dispatch (manual candidate build) + canonical normal
+# SemVer tag pushes (`vMAJOR.MINOR.PATCH`). Historical `concord-v*` and
+# `-hardened.N` tags are evidence markers, not releasable identities.
 #
 # Artifacts produced (into release-artifacts/, uploaded once):
 #   concord-web-image.tar          hardened web image (docker/web.Dockerfile)
@@ -27,7 +27,7 @@
 #     already builds BOTH images from the archive and smoke-starts them.
 #     The image .tar artifacts are exported from the exact images the
 #     script built (same tags, tagged release-stable before export).
-#   - worker artifact: the worker's --version argv mode (release 1.0.0)
+#   - worker artifact: the worker's --version argv mode (release 1.0.1)
 #     reports the CMake project VERSION + short git sha and exits 0 before
 #     any stdin reading (wired via CONCORD_VERSION/CONCORD_GIT_SHA compile
 #     definitions). As a deeper probe, one generate_ops stdin request
@@ -52,7 +52,7 @@ name: phase6-release-artifacts
 on:
   workflow_dispatch:
   push:
-    tags: ["v*", "concord-v*"]
+    tags: ["v*"]
 
 concurrency:
   group: phase6-release-artifacts-${{ github.ref }}
@@ -60,6 +60,7 @@ concurrency:
 
 permissions:
   contents: read
+  checks: read
 
 jobs:
   release:
@@ -73,6 +74,75 @@ jobs:
           # not required, but a clean HEAD is; checkout of the tag commit
           # is exactly what should be released.
           fetch-depth: 1
+      # A tag is never enough: a release candidate must have succeeded at
+      # the exact tagged commit in every protected CI lane, including the
+      # trusted real-Clerk browser matrix. Query every check-run page by SHA
+      # rather than workflow/run name so a successful run on a different
+      # commit, a skipped lane, or an in-progress/cancelled result cannot
+      # satisfy this release.
+      - name: Require exact-commit CI and trusted browser gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "release tag must be normal SemVer: vMAJOR.MINOR.PATCH (received ${GITHUB_REF_NAME})" >&2
+              exit 2
+            fi
+          fi
+
+          sha="$(git rev-parse HEAD)"
+          test "$sha" = "$GITHUB_SHA" || {
+            echo "checked-out release commit does not match GitHub event SHA" >&2
+            exit 1
+          }
+          checks="$(gh api --paginate --slurp \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/commits/${sha}/check-runs?per_page=100")"
+          page_count="$(printf '%s' "$checks" | jq 'length')"
+          test "$page_count" -ge 1 || {
+            echo "GitHub returned no check-run pages for exact release commit ${sha}" >&2
+            exit 1
+          }
+          required_checks=(
+            "web"
+            "rust"
+            "wasm"
+            "security"
+            "native (g++)"
+            "native (clang++)"
+            "Analyze (javascript-typescript)"
+            "Analyze (cpp)"
+            "browser gate"
+            "browser (trusted chromium)"
+            "browser (trusted firefox)"
+            "browser (trusted webkit)"
+            "native-sanitizers"
+            "native-fuzz"
+            "rust-fuzz"
+            "chaos"
+          )
+          for required in "${required_checks[@]}"; do
+            conclusion="$(printf '%s' "$checks" | jq -r --arg name "$required" --arg sha "$sha" '
+              [ .[]
+                | .check_runs[]?
+                | select(.name == $name and .head_sha == $sha and .app.id == 15368)
+                | { status, conclusion, completed_at, started_at, created_at, id }
+              ]
+              | sort_by([(.completed_at // .started_at // .created_at // ""), .id])
+              | last // {}
+              | if .status == "completed" and .conclusion == "success"
+                then "success"
+                else (.conclusion // .status // "missing")
+                end
+            ')"
+            if [ "$conclusion" != success ]; then
+              echo "required exact-commit check is missing or not successful: ${required} (conclusion: ${conclusion:-missing})" >&2
+              exit 1
+            fi
+          done
+          echo "exact-commit release gates passed for ${sha}"
       - name: Pin reproducible release timestamp to the checked-out commit
         run: |
           source_date_epoch="$(git show -s --format=%ct HEAD)"
@@ -218,6 +288,7 @@ jobs:
       - name: Build + smoke release images (clean git-archive tree)
         run: scripts/release/smoke-images.sh
         env:
+          CONCORD_RELEASE_GIT_SHA: ${{ github.sha }}
           CONCORD_SMOKE_DATABASE_URL: postgres://concord:concord_local_dev@host.docker.internal:5433/concord_test
           CONCORD_SMOKE_HOST_GATEWAY: "1"
       - name: Stop disposable PostgreSQL smoke service
@@ -304,5 +375,41 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-      # NO DEPLOYMENT STEPS FOLLOW. Nothing below this line may push,
-      # publish, or deploy — that is Phase 7 work (docs/OPERATIONS.md).
+  # Publication is intentionally separated from the read-only build job. It
+  # runs only for a normal vMAJOR.MINOR.PATCH tag after the exact-commit gate,
+  # artifact scans, manifest, checksums, and upload all succeed. It creates
+  # one canonical GitHub Release and never deploys a service or pushes an
+  # image to a registry.
+  publish:
+    name: publish canonical GitHub release
+    needs: release
+    if: needs.release.result == 'success' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download exact release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: concord-release-${{ github.run_id }}
+          path: published
+      - name: Publish one canonical GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          mapfile -d '' assets < <(find published -type f -print0 | sort -z)
+          test "${#assets[@]}" -gt 0
+          printf '%s\n' \
+            "Concord ${GITHUB_REF_NAME}" \
+            "" \
+            "This release was published only after the exact-commit CI, trusted browser, reliability, security, provenance, image-scan, SBOM, manifest, and checksum gates succeeded." \
+            "Production deployment is intentionally separate and is not implied by this release." \
+            > release-notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Concord $GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            "${assets[@]}"

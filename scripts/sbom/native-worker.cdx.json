@@ -10,7 +10,7 @@
       {
         "vendor": "Concord",
         "name": "scripts/security/sbom.sh (hand-authored manifest)",
-        "version": "1.0.0"
+        "version": "1.0.1"
       }
     ],
     "properties": [
@@ -23,11 +23,11 @@
   "components": [
     {
       "type": "application",
-      "bom-ref": "pkg:generic/concord-worker@1.0.0",
+      "bom-ref": "pkg:generic/concord-worker@1.0.1",
       "name": "concord-worker",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "C++ native snapshot/restore worker (cpp/worker): C++20 stdlib only, no third-party libraries",
-      "purl": "pkg:generic/concord-worker@1.0.0",
+      "purl": "pkg:generic/concord-worker@1.0.1",
       "licenses": [
         {
           "license": {
@@ -38,11 +38,11 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:generic/concord-crdt-cpp@1.0.0",
+      "bom-ref": "pkg:generic/concord-crdt-cpp@1.0.1",
       "name": "concord-crdt-cpp",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "C++ CRDT core (cpp/crdt): header+impl C++20 stdlib only, no third-party libraries",
-      "purl": "pkg:generic/concord-crdt-cpp@1.0.0",
+      "purl": "pkg:generic/concord-crdt-cpp@1.0.1",
       "licenses": [
         {
           "license": {
@@ -53,11 +53,11 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:generic/concord-crdt-wasm@1.0.0",
+      "bom-ref": "pkg:generic/concord-crdt-wasm@1.0.1",
       "name": "concord-crdt-wasm",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "WASM build of the SAME C++ CRDT core (wasm/): compiled with the Emscripten toolchain; identical source to the native component, browser-side replica engine",
-      "purl": "pkg:generic/concord-crdt-wasm@1.0.0",
+      "purl": "pkg:generic/concord-crdt-wasm@1.0.1",
       "licenses": [
         {
           "license": {

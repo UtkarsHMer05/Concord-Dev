@@ -3,10 +3,10 @@ resolver = "2"
 members = ["sync-gateway"]
 
 [workspace.package]
-# Release identity: 1.0.0 (matches package.json and the CMake project
+# Release identity: 1.0.1 (matches package.json and the CMake project
 # VERSION — the wire protocol version is a SEPARATE constant, see
 # sync-gateway/src/lib.rs WIRE_PROTOCOL_VERSION, and must not track this).
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 # Aligned with the root LICENSE (docs/PROVENANCE.md resolves the
 # tutorial-derived material; rust/deny.toml polices third-party crates).

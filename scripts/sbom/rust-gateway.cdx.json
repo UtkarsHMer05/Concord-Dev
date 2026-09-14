@@ -10,15 +10,15 @@
       {
         "vendor": "Concord",
         "name": "scripts/security/sbom.sh (Cargo.lock parser)",
-        "version": "1.0.0"
+        "version": "1.0.1"
       }
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/concord-sync-gateway@1.0.0",
+      "bom-ref": "pkg:generic/concord-sync-gateway@1.0.1",
       "name": "concord-sync-gateway",
-      "version": "1.0.0",
-      "purl": "pkg:generic/concord-sync-gateway@1.0.0",
+      "version": "1.0.1",
+      "purl": "pkg:generic/concord-sync-gateway@1.0.1",
       "description": "Concord Rust sync-gateway (workspace crate set)"
     },
     "properties": [

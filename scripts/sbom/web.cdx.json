@@ -19,12 +19,12 @@
       }
     ],
     "component": {
-      "bom-ref": "concord@1.0.0",
+      "bom-ref": "concord@1.0.1",
       "type": "library",
       "name": "Concord Dev",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "scope": "required",
-      "purl": "pkg:npm/concord@1.0.0",
+      "purl": "pkg:npm/concord@1.0.1",
       "properties": [
         {
           "name": "cdx:npm:package:private",
@@ -5468,7 +5468,7 @@
   ],
   "dependencies": [
     {
-      "ref": "concord@1.0.0",
+      "ref": "concord@1.0.1",
       "dependsOn": [
         "@clerk/nextjs@7.9.2",
         "@radix-ui/react-alert-dialog@1.1.23",
