@@ -5,24 +5,27 @@
  * status. This module OWNS the truthfulness rules from
  * docs/FAILURE_MODEL.md §1 for the UI:
  *
- * - "saved locally" is always honest for local-first content (the CRDT
- *   replica + IndexedDB oplog are written before/independently of any
- *   network ack);
+ * - "saved locally" applies only to the CRDT path, whose replica and
+ *   IndexedDB oplog own local durability;
  * - nothing may be presented as "saved to server/cloud" before the
  *   durable-ack point (ACK_DURABLE). In the v1 product surface the durable
  *   ack path is the transitional content-mirror POST — a 2xx response is
  *   the mirror-saved point;
- * - offline/reconnecting states describe connectivity, not data loss:
- *   edits keep accumulating safely.
+ * - fallback saves that lack a server response say the edits remain only in
+ *   this tab; connectivity alone never implies local durability.
  *
  * The mapping is pure so it is unit-testable without React (tests/unit).
  */
 
 import type { SaveStatus } from "@/lib/collaboration/types";
+import type { SyncOutboxStatus } from "@/store/use-sync-status-store";
 
 /** Presentation states for the editor document session. */
 export type EditorSaveState =
   | "saved-locally"
+  | "local-only"
+  | "pending-sync"
+  | "server-acknowledged"
   | "saving"
   | "saved-mirror"
   | "offline"
@@ -46,6 +49,27 @@ const VIEWS: Record<EditorSaveState, Omit<SaveStatusView, "state">> = {
     label: "Saved on this device",
     description:
       "Edits are saved locally on this device and will sync when a connection is available.",
+    className: "text-muted-foreground",
+    prominent: false,
+  },
+  "local-only": {
+    label: "Local only",
+    description:
+      "Edits are saved to this device's durable replica. No sync session is active, so they are not being copied to the server.",
+    className: "text-amber-700",
+    prominent: true,
+  },
+  "pending-sync": {
+    label: "Pending sync",
+    description:
+      "Edits are saved to this device's durable replica and are waiting for a durable server acknowledgement.",
+    className: "text-amber-700",
+    prominent: true,
+  },
+  "server-acknowledged": {
+    label: "Acknowledged by server",
+    description:
+      "The server has durably acknowledged the local edits, or a completed catch-up confirmed the local cursor covers them.",
     className: "text-muted-foreground",
     prominent: false,
   },
@@ -89,25 +113,84 @@ const VIEWS: Record<EditorSaveState, Omit<SaveStatusView, "state">> = {
 /**
  * Maps the session's save status + connectivity into a presentation state.
  *
- * Precedence: conflict > offline > error > saving > saved-mirror > saved-locally.
- * Offline/error never downgrade the local-first guarantee in the copy.
+ * Local fallback saves do not claim durability before a server response.
+ * Only CRDT sessions can use the local-durable wording.
  */
 export function toSaveStatusView(
   status: SaveStatus,
   online: boolean,
+  locallyDurable: boolean,
+  sync?: {
+    localOnly?: boolean;
+    outbox?: SyncOutboxStatus | null;
+    error?: string | null;
+  },
 ): SaveStatusView {
+  if (locallyDurable && status !== "conflict") {
+    if (sync?.error) {
+      return {
+        state: "error",
+        label: "Saved locally — sync error",
+        description: `The edits are saved to this device's durable replica, but server sync failed: ${sync.error}`,
+        className: "text-rose-700",
+        prominent: true,
+      };
+    }
+    const pending = (sync?.outbox?.pending ?? 0) + (sync?.outbox?.sent ?? 0);
+    if (pending > 0) {
+      const edits = `${pending} ${pending === 1 ? "edit is" : "edits are"}`;
+      const pronoun = pending === 1 ? "it" : "them";
+      const state: EditorSaveState = online ? "pending-sync" : "offline";
+      if (state === "offline") {
+        return {
+          state,
+          label: `Offline — ${pending} pending`,
+          description: `${edits} saved to this device's durable replica and will sync when the connection returns. The server has not acknowledged ${pronoun} yet.`,
+          className: "text-amber-700",
+          prominent: true,
+        };
+      }
+      return {
+        state,
+        ...VIEWS[state],
+        label: `Pending sync (${pending})`,
+        description: `${edits} saved to this device's durable replica and waiting for a durable server acknowledgement.`,
+      };
+    }
+    if ((sync?.outbox?.durablyAcked ?? 0) > 0 || sync?.outbox?.serverConfirmed) {
+      const state: EditorSaveState = "server-acknowledged";
+      return { state, ...VIEWS[state] };
+    }
+    if (sync?.localOnly) {
+      const state: EditorSaveState = "local-only";
+      return { state, ...VIEWS[state] };
+    }
+    const state: EditorSaveState = online ? "saved-locally" : "offline";
+    return { state, ...VIEWS[state] };
+  }
+
   let state: EditorSaveState;
   if (status === "conflict") {
     state = "conflict";
-  } else if (!online) {
-    state = "offline";
-  } else if (status === "error") {
-    state = "error";
+    if (locallyDurable) return { state, ...VIEWS[state] };
+    return {
+      state,
+      ...VIEWS[state],
+      label: "Conflict — unsaved changes",
+      description:
+        "A newer server version exists. Your changes in this tab have not been saved; copy them before reloading or they will be lost.",
+    };
+  } else if (status === "error" || (!online && status === "saving")) {
+    return {
+      state: "error",
+      label: online ? "Not saved — retrying" : "Offline — changes not saved",
+      description:
+        "Your latest changes have not reached the server and are only in this tab. Keep it open and reconnect or retry before closing.",
+      className: "text-rose-700",
+      prominent: true,
+    };
   } else if (status === "saving") {
     state = "saving";
-  } else if (status === "idle") {
-    // idle + online = the mirror is up to date (no pending save).
-    state = "saved-mirror";
   } else {
     state = "saved-mirror";
   }

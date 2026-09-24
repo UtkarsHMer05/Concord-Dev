@@ -42,12 +42,20 @@ export class WorkerEnginePort implements ResyncEnginePort {
         this.options = options;
     }
 
-    async applyRemote(ops: Uint8Array[]): Promise<{ applied: number; duplicates: number }> {
-        const result = await this.options.client.applyRemote(ops);
+    async applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }> {
+        const result = await this.options.client.applyRemote(ops, cursor);
         if (result.applied > 0) {
             this.options.onRemoteApplied?.();
         }
         return result;
+    }
+
+    syncCursor(): Promise<string> {
+        return this.options.client.syncCursor();
+    }
+
+    persistCursor(cursor: string): Promise<void> {
+        return this.options.client.persistSyncCursor(cursor);
     }
 
     async replicaId(): Promise<string> {
@@ -62,6 +70,10 @@ export class WorkerEnginePort implements ResyncEnginePort {
 
     onLocalOps(handler: (ops: Uint8Array[]) => void): () => void {
         return this.options.client.onLocalOps(handler);
+    }
+
+    localOpsSince(counter: string): Promise<{ ops: Uint8Array[]; nextCounter: string }> {
+        return this.options.client.localOpsSince(counter);
     }
 
     async importSnapshot(inner: Uint8Array): Promise<void> {

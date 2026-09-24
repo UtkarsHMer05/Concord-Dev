@@ -52,7 +52,7 @@ const GATEWAY_BIN = join(REPO_ROOT, "rust", "target", "release", "sync-gateway")
 const JWKS_FILE = join(REPO_ROOT, ".agent", "scratch", "phase-3", "e2e-jwks.json");
 const KEY_DER = join(REPO_ROOT, ".agent", "scratch", "phase-3", "e2e-key.der");
 const WASM_DIR = join(REPO_ROOT, "wasm", "dist");
-const DB_URL = "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test";
+const DB_URL = process.env.DATABASE_TEST_URL ?? "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test";
 const ISSUER = "https://e2e.clerk.accounts.dev";
 
 const databaseAvailable: Promise<boolean> = (async () => {
@@ -113,16 +113,32 @@ async function signToken(sub: string): Promise<string> {
 class MemoryPersistence implements PersistenceAdapter {
   snapshots = new Map<string, Uint8Array>();
   logs = new Map<string, { seq: number; op: Uint8Array }[]>();
+  cursors = new Map<string, string>();
   async loadLocalState(documentId: string): Promise<LocalState> {
     return {
       snapshot: this.snapshots.get(documentId) ?? null,
       ops: (this.logs.get(documentId) ?? []).map((e) => e.op),
     };
   }
-  async appendOps(documentId: string, ops: Uint8Array[]): Promise<void> {
+  async appendOps(
+    documentId: string,
+    ops: Uint8Array[],
+    sync?: { cursor: string; coveredOpIds: string[] },
+  ): Promise<void> {
     const log = this.logs.get(documentId) ?? [];
     for (const op of ops) log.push({ seq: log.length, op });
     this.logs.set(documentId, log);
+    if (sync !== undefined) {
+      const current = this.cursors.get(documentId) ?? "0";
+      this.cursors.set(documentId, BigInt(sync.cursor) > BigInt(current) ? sync.cursor : current);
+    }
+  }
+  async loadSyncCursor(documentId: string): Promise<string> {
+    return this.cursors.get(documentId) ?? "0";
+  }
+  async saveSyncCursor(documentId: string, cursor: string): Promise<void> {
+    const current = this.cursors.get(documentId) ?? "0";
+    this.cursors.set(documentId, BigInt(cursor) > BigInt(current) ? cursor : current);
   }
   async saveSnapshot(documentId: string, snapshot: Uint8Array): Promise<void> {
     this.snapshots.set(documentId, snapshot);
@@ -130,6 +146,7 @@ class MemoryPersistence implements PersistenceAdapter {
   async clearDocument(documentId: string): Promise<void> {
     this.logs.delete(documentId);
     this.snapshots.delete(documentId);
+    this.cursors.delete(documentId);
   }
 }
 
@@ -211,11 +228,25 @@ class RealWorkerClient {
     return ops;
   }
 
-  applyRemote(ops: Uint8Array[]): Promise<{ applied: number; duplicates: number }> {
-    return this.core.handle({ id: this.nextId++, kind: "applyRemote", ops }) as Promise<{
+  applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }> {
+    return this.core.handle({ id: this.nextId++, kind: "applyRemote", ops, cursor }) as Promise<{
       applied: number;
       duplicates: number;
     }>;
+  }
+
+  async syncCursor(): Promise<string> {
+    const result = await this.core.handle({ id: this.nextId++, kind: "getSyncCursor" });
+    return (result as { cursor: string }).cursor;
+  }
+
+  async persistSyncCursor(cursor: string): Promise<void> {
+    await this.core.handle({ id: this.nextId++, kind: "persistSyncCursor", cursor });
+  }
+
+  async localOpsSince(counter: string): Promise<{ ops: Uint8Array[]; nextCounter: string }> {
+    const result = await this.core.handle({ id: this.nextId++, kind: "localOpsSince", counter });
+    return result as { ops: Uint8Array[]; nextCounter: string };
   }
 
   async replicaInfo(): Promise<{ replicaId: string; sequence: string }> {

@@ -551,7 +551,7 @@ export async function performSnapshotResync(params: {
   expectedDocumentId: string;
   envelope: SnapshotEnvelope;
   engine: ResyncEnginePort;
-  setCursor: (cursor: string) => void;
+  setCursor: (cursor: string) => void | Promise<void>;
   getCursor: () => string;
 }): Promise<ResyncResult> {
   const previousCursor = params.getCursor();
@@ -579,7 +579,7 @@ export async function performSnapshotResync(params: {
       duplicates = applied.duplicates;
     }
     // The only committed effect — LAST, by invariant 2.
-    params.setCursor(coverageSeq.toString());
+    await params.setCursor(coverageSeq.toString());
     return {
       boundary: coverageSeq,
       reapplyCount: pending.length,
@@ -592,7 +592,7 @@ export async function performSnapshotResync(params: {
     // pre-resync value back so the next session retries from the truth.
     if (params.getCursor() !== previousCursor) {
       console.error("[snapshot-resync] cursor advanced during a failed resync; restoring");
-      params.setCursor(previousCursor);
+      await params.setCursor(previousCursor);
     }
     throw error;
   }

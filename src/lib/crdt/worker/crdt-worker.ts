@@ -91,6 +91,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
                 }
                 core = new CrdtWorkerCore({
                     documentId: request.documentId,
+                    storageId: request.storageId,
                     replicaId: BigInt(request.replicaId),
                     loadFactory,
                     persistence: new IdbPersistence(),

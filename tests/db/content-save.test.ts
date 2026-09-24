@@ -185,6 +185,9 @@ describe("content save (optimistic concurrency)", () => {
     await expect(
       documentsService.saveDocumentContent(owner, docId, { content: { v: 1 }, expectedContentVersion: 1 }),
     ).rejects.toThrow(ValidationError); // missing doc field
+    await expect(
+      documentsService.saveDocumentContent(owner, docId, { content: { v: 2, doc: {} }, expectedContentVersion: 1 }),
+    ).rejects.toThrow(ValidationError); // unsupported content version
     const circular: Record<string, unknown> = {};
     circular["self"] = circular;
     await expect(

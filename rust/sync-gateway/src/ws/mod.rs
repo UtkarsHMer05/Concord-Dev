@@ -11,6 +11,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::bus::EventPublisher;
 use crate::ephemeral::ratelimit::RateLimitOutcome;
@@ -18,7 +19,7 @@ use crate::http::AppState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, State};
 use axum::response::IntoResponse;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -75,7 +76,6 @@ use crate::protocol::control::{
 use crate::protocol::data::{DataFrame, SyncBatch};
 use crate::protocol::envelope::OpEnvelope;
 use crate::protocol::error::{error_code_to_str, ProtocolError};
-use crate::protocol::MAX_FRAME_BYTES;
 use crate::sessions::{ConnectionHandle, OutboundFrame, SessionRegistry, SessionState};
 use crate::telemetry::Metrics;
 
@@ -89,6 +89,8 @@ enum FlowError {
 /// Connection-scoped context threaded through the handler.
 struct Conn {
     id: Uuid,
+    max_frame_size: usize,
+    close: watch::Sender<bool>,
     state: SessionState,
     /// Verified principal (set at authenticate).
     user: Option<UserId>,
@@ -100,9 +102,16 @@ struct Conn {
 }
 
 impl Conn {
-    fn new(id: Uuid, outbound: mpsc::Sender<OutboundFrame>) -> Self {
+    fn new(
+        id: Uuid,
+        max_frame_size: usize,
+        outbound: mpsc::Sender<OutboundFrame>,
+        close: watch::Sender<bool>,
+    ) -> Self {
         Self {
             id,
+            max_frame_size,
+            close,
             state: SessionState::Connected,
             user: None,
             clerk_user_id: None,
@@ -185,8 +194,8 @@ pub async fn upgrade(
     let gateway_id = app.gateway_id;
     let presence = app.presence.clone();
     let rate_limiter = app.rate_limiter.clone();
-    ws.max_message_size(MAX_FRAME_BYTES)
-        .max_frame_size(MAX_FRAME_BYTES)
+    ws.max_message_size(config.max_frame_size)
+        .max_frame_size(config.max_frame_size)
         .on_upgrade(move |socket| {
             let config = config.clone();
             let registry = registry.clone();
@@ -241,28 +250,67 @@ async fn handle_socket(
     use futures_util::StreamExt;
     let (writer_socket, mut reader_socket) = socket.split();
     let (out_tx, mut out_rx) = mpsc::channel::<OutboundFrame>(config.per_connection_queue_capacity);
+    let max_frame_size = config.max_frame_size;
+    let (close, mut reader_close) = watch::channel(false);
+    let mut writer_close = close.subscribe();
+    registry
+        .register_connection(connection_id, close.clone())
+        .await;
 
-    // Writer task: drains the bounded queue to the socket. Exits when the
-    // reader drops the sender or the socket dies.
+    // The close signal bypasses the bounded data queue, so slow consumers and
+    // shutdown can close a socket even when that queue is full.
     let writer = tokio::spawn(async move {
         use futures_util::SinkExt;
         let mut tx = writer_socket;
-        while let Some(frame) = out_rx.recv().await {
-            let msg = match frame {
-                OutboundFrame::Text(t) => Message::Text(t.into()),
-                OutboundFrame::Binary(b) => Message::Binary(b.into()),
-            };
-            Metrics::global()
-                .outbound_frames_total
-                .fetch_add(1, Ordering::Relaxed);
-            if tx.send(msg).await.is_err() {
-                break;
+        let mut closing = *writer_close.borrow();
+        'writer: while !closing {
+            tokio::select! {
+                biased;
+                changed = writer_close.changed() => {
+                    closing = changed.is_err() || *writer_close.borrow();
+                }
+                frame = out_rx.recv() => {
+                    let Some(frame) = frame else { break };
+                    let frame_size = match &frame {
+                        OutboundFrame::Text(text) => text.len(),
+                        OutboundFrame::Binary(bytes) => bytes.len(),
+                    };
+                    if frame_size > max_frame_size {
+                        tracing::warn!(connection_id = %connection_id, frame_size, max_frame_size, "oversized outbound websocket frame; closing connection");
+                        closing = true;
+                        break;
+                    }
+                    let msg = match frame {
+                        OutboundFrame::Text(t) => Message::Text(t.into()),
+                        OutboundFrame::Binary(b) => Message::Binary(b.into()),
+                    };
+                    Metrics::global()
+                        .outbound_frames_total
+                        .fetch_add(1, Ordering::Relaxed);
+                    tokio::select! {
+                        biased;
+                        changed = writer_close.changed() => {
+                            closing = changed.is_err() || *writer_close.borrow();
+                            if closing { break 'writer; }
+                        }
+                        sent = tx.send(msg) => if sent.is_err() { break 'writer; },
+                    }
+                }
             }
         }
-        let _ = tx.close().await;
+        if closing {
+            let _ = tokio::time::timeout(Duration::from_millis(500), tx.send(Message::Close(None)))
+                .await;
+        }
+        let _ = tokio::time::timeout(Duration::from_millis(500), tx.close()).await;
     });
 
-    let mut conn = Conn::new(connection_id, out_tx.clone());
+    let mut conn = Conn::new(
+        connection_id,
+        config.max_frame_size,
+        out_tx.clone(),
+        close.clone(),
+    );
 
     // Idle bookkeeping: last inbound activity + periodic heartbeat checks.
     let mut last_activity = Instant::now();
@@ -282,6 +330,7 @@ async fn handle_socket(
         &rate_limiter,
         &mut last_activity,
         &mut heartbeat_tick,
+        &mut reader_close,
     )
     .await;
 
@@ -300,7 +349,15 @@ async fn handle_socket(
     conn.state = SessionState::Closed;
     drop(conn);
     drop(out_tx);
-    let _ = writer.await;
+    registry.unregister_connection(connection_id).await;
+    let mut writer = writer;
+    if tokio::time::timeout(Duration::from_secs(2), &mut writer)
+        .await
+        .is_err()
+    {
+        writer.abort();
+        let _ = writer.await;
+    }
     Metrics::global()
         .active_connections
         .fetch_sub(1, Ordering::Relaxed);
@@ -310,12 +367,14 @@ async fn handle_socket(
     tracing::info!(connection_id = %connection_id, outcome = ?result, "connection closed");
 }
 
-/// Send a control frame into the outbound queue (best-effort; queue-full
-/// here means the client is already a slow consumer — the reader loop's
-/// idle/heartbeat path will reap it).
+/// Send a control frame; a full queue closes the connection out of band.
 fn send_control(conn: &Conn, frame: Frame, id: Option<String>) {
     let text = ControlFrame { id, frame }.encode();
-    let _ = conn.outbound.try_send(OutboundFrame::Text(text));
+    if text.len() > conn.max_frame_size
+        || conn.outbound.try_send(OutboundFrame::Text(text)).is_err()
+    {
+        conn.close.send_replace(true);
+    }
 }
 
 /// Send a safe error frame. `fatal` errors also close the connection.
@@ -349,16 +408,24 @@ async fn connection_loop(
     rate_limiter: &Arc<crate::ephemeral::ratelimit::RateLimiter>,
     last_activity: &mut Instant,
     heartbeat_tick: &mut tokio::time::Interval,
+    close: &mut watch::Receiver<bool>,
 ) -> Result<(), FlowError> {
     use futures_util::StreamExt;
     let conn_id = conn.id;
     loop {
+        if *close.borrow() {
+            return Ok(());
+        }
         // Heartbeat/idle supervision (P3-M029): a `select!` between the
         // next inbound frame and the heartbeat tick. Cancellation-safe:
         // each iteration re-evaluates deadlines from fresh state.
         let inbound = rx.next();
         tokio::pin!(inbound);
         tokio::select! {
+            biased;
+            changed = close.changed() => {
+                if changed.is_err() || *close.borrow() { return Ok(()); }
+            }
             inbound = &mut inbound => {
                 let Some(msg) = inbound else { return Ok(()); };
                 *last_activity = Instant::now();
@@ -420,7 +487,7 @@ async fn handle_text(
     gateway_id: u64,
     rate_limiter: &Arc<crate::ephemeral::ratelimit::RateLimiter>,
 ) -> Result<(), FlowError> {
-    if text.len() > MAX_FRAME_BYTES {
+    if text.len() > conn.max_frame_size {
         let fatal = send_error(
             conn,
             ProtocolError::PayloadTooLarge,
@@ -783,6 +850,7 @@ async fn handle_join(
                 user_id: user.0,
                 join_role: access.role,
                 outbound: conn.outbound.clone(),
+                close: conn.close.clone(),
             },
         )
         .await;
@@ -882,14 +950,8 @@ async fn handle_fetch_snapshot(conn: &mut Conn, fetch: FetchSnapshot, repo: &Arc
     // outbound queue. Refuse deterministically instead: the client
     // sees a size error, never a truncated frame. The +2 KiB margin
     // covers the frame's JSON metadata overhead.
-    const B64: usize = 4;
-    const RAW: usize = 3;
-    const JSON_OVERHEAD_MARGIN: usize = 2 * 1024;
-    let encoded_estimate = row
-        .payload_size
-        .saturating_mul(B64 as i64 / RAW as i64)
-        .saturating_add(JSON_OVERHEAD_MARGIN as i64);
-    if encoded_estimate > MAX_FRAME_BYTES as i64 {
+    if estimated_snapshot_frame_size(row.payload_size).is_none_or(|size| size > conn.max_frame_size)
+    {
         let _ = send_error(
             conn,
             ProtocolError::PayloadTooLarge,
@@ -913,6 +975,15 @@ async fn handle_fetch_snapshot(conn: &mut Conn, fetch: FetchSnapshot, repo: &Arc
         }),
         None,
     );
+}
+
+fn estimated_snapshot_frame_size(payload_size: i64) -> Option<usize> {
+    const JSON_OVERHEAD_MARGIN: usize = 2 * 1024;
+    let raw_size = usize::try_from(payload_size).ok()?;
+    raw_size
+        .div_ceil(3)
+        .checked_mul(4)?
+        .checked_add(JSON_OVERHEAD_MARGIN)
 }
 
 /// Per-connection budget for snapshot read paths (fetch_snapshot +
@@ -1034,25 +1105,34 @@ async fn stream_catchup(
             break;
         }
         replayed += page.ops.len() as u64;
-        let batch = SyncBatch {
-            next_cursor: page.next_cursor.max(0) as u64,
-            has_more: page.has_more,
-            ops: page
-                .ops
-                .into_iter()
-                .map(|(_, _, payload)| payload)
-                .collect(),
+        let batches = match split_sync_batches(page.ops, page.has_more, conn.max_frame_size) {
+            Ok(batches) => batches,
+            Err(()) => {
+                send_error(
+                    conn,
+                    ProtocolError::PayloadTooLarge,
+                    "operation exceeds frame limit",
+                    None,
+                );
+                return;
+            }
         };
         Metrics::global()
             .sync_batches_total
-            .fetch_add(1, Ordering::Relaxed);
-        if let Ok(bytes) = DataFrame::SyncBatch(batch).encode() {
-            if conn
-                .outbound
-                .try_send(OutboundFrame::Binary(bytes))
-                .is_err()
+            .fetch_add(batches.len() as u64, Ordering::Relaxed);
+        for batch in batches {
+            let Ok(bytes) = DataFrame::SyncBatch(batch).encode() else {
+                conn.close.send_replace(true);
+                return;
+            };
+            if bytes.len() > conn.max_frame_size
+                || conn
+                    .outbound
+                    .try_send(OutboundFrame::Binary(bytes))
+                    .is_err()
             {
-                return; // slow consumer: reaped by the idle/heartbeat path
+                conn.close.send_replace(true);
+                return;
             }
         }
         cursor = page.next_cursor;
@@ -1074,6 +1154,52 @@ async fn stream_catchup(
     if conn.state == SessionState::Syncing {
         conn.state = SessionState::Ready;
     }
+}
+
+/// Splits one durable DB page into WebSocket-sized SyncBatch messages. The
+/// cursor advances only to the last operation included in each message.
+/// A page's final batch preserves the DB's has_more flag; earlier chunks set
+/// it because more operations from the same DB page follow.
+fn split_sync_batches(
+    ops: Vec<(String, i64, Vec<u8>)>,
+    page_has_more: bool,
+    max_frame_size: usize,
+) -> Result<Vec<SyncBatch>, ()> {
+    const SYNC_HEADER_SIZE: usize = 13;
+    let mut batches = Vec::new();
+    let mut batch_ops = Vec::new();
+    let mut batch_size = SYNC_HEADER_SIZE;
+    let mut batch_cursor = 0_u64;
+
+    for (_, seq, payload) in ops {
+        let operation_size = 4_usize.checked_add(payload.len()).ok_or(())?;
+        if batch_size.checked_add(operation_size).ok_or(())? > max_frame_size {
+            if batch_ops.is_empty() {
+                return Err(());
+            }
+            batches.push(SyncBatch {
+                next_cursor: batch_cursor,
+                has_more: true,
+                ops: std::mem::take(&mut batch_ops),
+            });
+            batch_size = SYNC_HEADER_SIZE;
+        }
+        batch_size = batch_size.checked_add(operation_size).ok_or(())?;
+        if batch_size > max_frame_size {
+            return Err(());
+        }
+        batch_cursor = u64::try_from(seq).map_err(|_| ())?;
+        batch_ops.push(payload);
+    }
+
+    if !batch_ops.is_empty() {
+        batches.push(SyncBatch {
+            next_cursor: batch_cursor,
+            has_more: page_has_more,
+            ops: batch_ops,
+        });
+    }
+    Ok(batches)
 }
 
 struct BinaryContext<'a> {
@@ -1133,7 +1259,7 @@ async fn handle_binary(
         );
         return if fatal { Err(FlowError::Close) } else { Ok(()) };
     }
-    if bytes.len() > MAX_FRAME_BYTES {
+    if bytes.len() > conn.max_frame_size {
         let fatal = send_error(
             conn,
             ProtocolError::PayloadTooLarge,
@@ -1358,14 +1484,10 @@ async fn handle_binary(
                         .fetch_add(1, Ordering::Relaxed);
                     crate::observability::metrics::incr("concord_slow_consumer_disconnects_total");
                     tracing::info!(connection_id = %slow_id, correlation_id = %correlation_id, "slow consumer disconnect (outbound queue saturated)");
-                    // The slow peer's own loop reaps it: its queue is full and
-                    // the drain path signals closure via a sentinel.
-                    // Phase 3 single-gateway: mark via broadcast; the writer
-                    // task ends when the queue receiver sees the sentinel.
                 }
             }
         }
-        Err(RepoError::WriteDenied) => {
+        Err(RepoError::WriteDenied | RepoError::ReplicaOwnedByAnotherUser) => {
             Metrics::global()
                 .authorization_denied_total
                 .fetch_add(1, Ordering::Relaxed);
@@ -1386,6 +1508,24 @@ async fn handle_binary(
                 "ingest denied by write-role recheck"
             );
             let fatal = send_error(conn, ProtocolError::Forbidden, "write denied", None);
+            return if fatal { Err(FlowError::Close) } else { Ok(()) };
+        }
+        Err(RepoError::LegacyReplicaQuarantined) => {
+            let fatal = send_error(
+                conn,
+                ProtocolError::Forbidden,
+                "legacy replica is quarantined; use a new replica identity",
+                None,
+            );
+            return if fatal { Err(FlowError::Close) } else { Ok(()) };
+        }
+        Err(RepoError::IdentityConflict) => {
+            let fatal = send_error(
+                conn,
+                ProtocolError::MalformedFrame,
+                "operation identity conflicts with stored payload",
+                None,
+            );
             return if fatal { Err(FlowError::Close) } else { Ok(()) };
         }
         Err(e)
@@ -1458,6 +1598,10 @@ pub async fn begin_drain(registry: &Arc<SessionRegistry>, grace_ms: u32) {
     tracing::info!(connections = count, "drain notice queued");
 }
 
+pub async fn close_drained(registry: &Arc<SessionRegistry>) {
+    registry.close_all().await;
+}
+
 #[cfg(test)]
 mod client_ip_tests {
     use super::*;
@@ -1514,5 +1658,32 @@ mod client_ip_tests {
         let mut duplicate = headers("198.51.100.1");
         duplicate.append("x-forwarded-for", "198.51.100.2".parse().unwrap());
         assert_eq!(client_ip(peer, &duplicate, &proxies), peer.ip());
+    }
+
+    #[test]
+    fn snapshot_frame_estimate_uses_base64_ceiling() {
+        assert_eq!(estimated_snapshot_frame_size(1), Some(2 * 1024 + 4));
+        assert_eq!(estimated_snapshot_frame_size(3), Some(2 * 1024 + 4));
+        assert_eq!(estimated_snapshot_frame_size(4), Some(2 * 1024 + 8));
+        assert_eq!(estimated_snapshot_frame_size(-1), None);
+    }
+
+    #[test]
+    fn catchup_batches_respect_frame_limit_and_cursor() {
+        let batches = split_sync_batches(
+            vec![("a".into(), 10, vec![1; 5]), ("b".into(), 11, vec![2; 5])],
+            false,
+            25,
+        )
+        .expect("small operations fit");
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].next_cursor, 10);
+        assert!(batches[0].has_more);
+        assert_eq!(batches[1].next_cursor, 11);
+        assert!(!batches[1].has_more);
+        for batch in batches {
+            assert!(DataFrame::SyncBatch(batch).encode().unwrap().len() <= 25);
+        }
+        assert!(split_sync_batches(vec![("c".into(), 12, vec![3; 9])], false, 25).is_err());
     }
 }

@@ -20,19 +20,21 @@ import type { WorkerRequest, WorkerResultPayload } from "./protocol";
  * (PROTOCOL §7 header layout: version u8, type u8, replica u64, counter u64,
  * lamport u64 — little-endian).
  */
-function readOpIdentity(frame: Uint8Array): { replicaId: bigint; counter: number; lamport: number } | null {
+function readOpIdentity(frame: Uint8Array): { replicaId: bigint; counter: bigint; lamport: bigint } | null {
     if (frame.length < 26) {
         return null;
     }
     const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
     const replicaId = view.getBigUint64(2, true);
-    const counter = view.getUint32(10, true);
-    const lamport = view.getUint32(18, true);
+    const counter = view.getBigUint64(10, true);
+    const lamport = view.getBigUint64(18, true);
     return { replicaId, counter, lamport };
 }
 
 export interface WorkerCoreConfig {
     documentId: string;
+    /** Per-user local namespace; defaults to documentId for legacy callers. */
+    storageId?: string;
     /** Stable replica identity for this browser+document pair. */
     replicaId: bigint;
     /** Injected Emscripten module factory. */
@@ -45,6 +47,10 @@ export class CrdtWorkerCore {
     private starting: Promise<void> | null = null;
 
     constructor(private readonly config: WorkerCoreConfig) {}
+
+    private get storageId(): string {
+        return this.config.storageId ?? this.config.documentId;
+    }
 
     private async ensureEngine(): Promise<ConcordEngine> {
         if (this.engine !== null) {
@@ -61,7 +67,7 @@ export class CrdtWorkerCore {
     }
 
     private async restore(): Promise<void> {
-        const state = await this.config.persistence.loadLocalState(this.config.documentId);
+        const state = await this.config.persistence.loadLocalState(this.storageId);
         if (state.snapshot !== null) {
             // M037: snapshot + full op-log replay (idempotent by design).
             this.engine = await ConcordEngine.importFromSnapshot(
@@ -92,19 +98,37 @@ export class CrdtWorkerCore {
         if (this.engine === null || ops.length === 0) {
             return;
         }
-        let maxOwnCounter = 0;
-        let maxLamport = 0;
+        let maxOwnCounter = 0n;
+        let maxLamport = 0n;
         for (const op of ops) {
             this.engine.applyRemote(op);
             const id = readOpIdentity(op);
             if (id !== null) {
                 if (id.replicaId === this.config.replicaId) {
-                    maxOwnCounter = Math.max(maxOwnCounter, id.counter);
+                    if (id.counter > maxOwnCounter) maxOwnCounter = id.counter;
                 }
-                maxLamport = Math.max(maxLamport, id.lamport);
+                if (id.lamport > maxLamport) maxLamport = id.lamport;
             }
         }
-        this.engine.restoreAllocationState(BigInt(maxOwnCounter) + 1n, BigInt(maxLamport) + 1n);
+        this.engine.restoreAllocationState(maxOwnCounter + 1n, maxLamport + 1n);
+    }
+
+    /** Discard uncommitted engine state if the durable append fails. */
+    private async appendOrReset(
+        ops: Uint8Array[],
+        sync?: { cursor: string; coveredOpIds: string[] },
+    ): Promise<void> {
+        if (ops.length === 0 && sync === undefined) {
+            return;
+        }
+        try {
+            await this.config.persistence.appendOps(this.storageId, ops, sync);
+        } catch (error) {
+            this.engine?.free();
+            this.engine = null;
+            this.starting = null;
+            throw error;
+        }
     }
 
     async handle(request: WorkerRequest): Promise<WorkerResultPayload> {
@@ -112,6 +136,10 @@ export class CrdtWorkerCore {
             case "init": {
                 if (SUPPORTED_PROTOCOL_VERSION !== 1) {
                     throw new CrdtError("UnsupportedVersion", "protocol version mismatch");
+                }
+                if (request.documentId !== this.config.documentId ||
+                    (request.storageId !== undefined && request.storageId !== this.storageId)) {
+                    throw new CrdtError("InvalidArgument", "worker identity changed after initialization");
                 }
                 await this.ensureEngine();
                 return { kind: "init", ready: true };
@@ -124,9 +152,14 @@ export class CrdtWorkerCore {
                     request.snapshot,
                     this.config.loadFactory,
                 );
+                try {
+                    await this.config.persistence.saveSnapshot(this.storageId, request.snapshot);
+                } catch (error) {
+                    restored.free();
+                    throw error;
+                }
                 engine.free();
                 this.engine = restored;
-                await this.config.persistence.saveSnapshot(this.config.documentId, request.snapshot);
                 return { kind: "loadSnapshot", streamSize: restored.streamSize() };
             }
 
@@ -146,8 +179,18 @@ export class CrdtWorkerCore {
                 // Received remote ops join the durable log: a reload replays
                 // the full replica history (origin + remote), so no received
                 // content is ever lost across a reload (M044 gap this fixed).
-                if (durable.length > 0) {
-                    await this.config.persistence.appendOps(this.config.documentId, durable);
+                if (durable.length > 0 || request.cursor !== undefined) {
+                    const coveredOpIds = request.cursor === undefined
+                        ? []
+                        : request.ops.flatMap((op) => {
+                            const id = readOpIdentity(op);
+                            return id === null || id.replicaId !== this.config.replicaId
+                                ? []
+                                : [`${id.replicaId}:${id.counter}`];
+                        });
+                    await this.appendOrReset(durable, request.cursor === undefined
+                        ? undefined
+                        : { cursor: request.cursor, coveredOpIds });
                 }
                 return { kind: "applyRemote", applied, duplicates, ops: durable };
             }
@@ -155,14 +198,14 @@ export class CrdtWorkerCore {
             case "localInsertText": {
                 const engine = await this.ensureEngine();
                 const op = engine.localInsertText(request.streamIndex, request.codepoint);
-                await this.config.persistence.appendOps(this.config.documentId, [op]);
+                await this.appendOrReset([op]);
                 return { kind: "localOps", ops: [op], streamSize: engine.streamSize() };
             }
 
             case "localInsertDelimiter": {
                 const engine = await this.ensureEngine();
                 const op = engine.localInsertDelimiter(request.streamIndex, request.blockType);
-                await this.config.persistence.appendOps(this.config.documentId, [op]);
+                await this.appendOrReset([op]);
                 return { kind: "localOps", ops: [op], streamSize: engine.streamSize() };
             }
 
@@ -172,14 +215,14 @@ export class CrdtWorkerCore {
                 if (op === null) {
                     return { kind: "localOps", ops: [], streamSize: engine.streamSize() };
                 }
-                await this.config.persistence.appendOps(this.config.documentId, [op]);
+                await this.appendOrReset([op]);
                 return { kind: "localOps", ops: [op], streamSize: engine.streamSize() };
             }
 
             case "localSetAttr": {
                 const engine = await this.ensureEngine();
                 const op = engine.localSetAttr(request.streamIndex, request.name, request.value);
-                await this.config.persistence.appendOps(this.config.documentId, [op]);
+                await this.appendOrReset([op]);
                 return { kind: "localOps", ops: [op], streamSize: engine.streamSize() };
             }
 
@@ -201,13 +244,13 @@ export class CrdtWorkerCore {
             case "exportSnapshot": {
                 const engine = await this.ensureEngine();
                 const snapshot = engine.exportSnapshot();
-                await this.config.persistence.saveSnapshot(this.config.documentId, snapshot);
+                await this.config.persistence.saveSnapshot(this.storageId, snapshot);
                 return { kind: "exportSnapshot", snapshot };
             }
 
             case "exportOps": {
                 // Verification surface: the durable local log (test harness).
-                const state = await this.config.persistence.loadLocalState(this.config.documentId);
+                const state = await this.config.persistence.loadLocalState(this.storageId);
                 return { kind: "exportOps", ops: state.ops };
             }
 
@@ -225,15 +268,13 @@ export class CrdtWorkerCore {
                 // log (the local summary the gateway join frame carries).
                 await this.ensureEngine();
                 const state = await this.config.persistence.loadLocalState(
-                    this.config.documentId,
+                    this.storageId,
                 );
                 let maxOwnCounter = 0n;
                 for (const op of state.ops) {
                     const id = readOpIdentity(op);
                     if (id !== null && id.replicaId === this.config.replicaId) {
-                        maxOwnCounter = BigInt(
-                            Math.max(Number(maxOwnCounter), id.counter),
-                        );
+                        if (id.counter > maxOwnCounter) maxOwnCounter = id.counter;
                     }
                 }
                 return {
@@ -250,7 +291,7 @@ export class CrdtWorkerCore {
                 // generated ops ever enter the client outbox.
                 await this.ensureEngine();
                 const state = await this.config.persistence.loadLocalState(
-                    this.config.documentId,
+                    this.storageId,
                 );
                 const since = BigInt(request.counter);
                 const ops: Uint8Array[] = [];
@@ -260,9 +301,9 @@ export class CrdtWorkerCore {
                     if (id === null || id.replicaId !== this.config.replicaId) {
                         continue;
                     }
-                    if (BigInt(id.counter) > since) {
+                    if (id.counter > since) {
                         ops.push(op);
-                        nextCounter = BigInt(id.counter);
+                        nextCounter = id.counter;
                     }
                 }
                 return {
@@ -284,13 +325,28 @@ export class CrdtWorkerCore {
                     request.snapshot,
                     this.config.loadFactory,
                 );
+                try {
+                    await this.config.persistence.saveSnapshot(this.storageId, request.snapshot);
+                } catch (error) {
+                    restored.free();
+                    throw error;
+                }
                 engine.free();
                 this.engine = restored;
-                await this.config.persistence.saveSnapshot(
-                    this.config.documentId,
-                    request.snapshot,
-                );
                 return { kind: "importSnapshot", streamSize: restored.streamSize() };
+            }
+
+            case "getSyncCursor": {
+                const cursor = await this.config.persistence.loadSyncCursor?.(this.storageId) ?? "0";
+                return { kind: "getSyncCursor", cursor };
+            }
+
+            case "persistSyncCursor": {
+                if (this.config.persistence.saveSyncCursor === undefined) {
+                    throw new CrdtError("StateCorruption", "sync cursor persistence unavailable");
+                }
+                await this.config.persistence.saveSyncCursor(this.storageId, request.cursor);
+                return { kind: "persistSyncCursor", cursor: request.cursor };
             }
         }
     }

@@ -11,7 +11,7 @@
  * (Phase 2+). They must never be faked.
  */
 
-export type SaveStatus = "idle" | "saving" | "error" | "conflict";
+export type SaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
 
 export interface DocumentContentSession {
   /** Transitional persistence state for the editor content. */

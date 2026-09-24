@@ -211,6 +211,22 @@ describe("documents service (PostgreSQL integration)", () => {
       expect(page2.hasMore).toBe(false);
     });
 
+    it("uses exact offsets after a loaded document is deleted", async () => {
+      const { actorA } = await seedWorld();
+      for (let i = 0; i < 11; i++) {
+        await documentsService.createDocument(actorA, { title: `Offset ${i}` });
+      }
+      const all = await documentsService.listDocuments(actorA, { pageSize: 50 });
+      const firstPage = await documentsService.listDocuments(actorA, { pageSize: 5 });
+      await documentsService.deleteDocument(actorA, firstPage.documents[0]!.id);
+
+      const next = await documentsService.listDocuments(actorA, {
+        offset: firstPage.documents.length - 1,
+        pageSize: 5,
+      });
+      expect(next.documents[0]?.id).toBe(all.documents[5]?.id);
+    });
+
     it("search filters within scope, case-insensitively", async () => {
       const { actorA, actorB } = await seedWorld();
       const hit = await documentsService.createDocument(actorA, { title: "Quarterly Report" });
@@ -325,6 +341,51 @@ describe("documents service (PostgreSQL integration)", () => {
       await expect(
         documentsService.renameDocument(actorA, doc.id, { title: "Stale", expectedMetadataVersion: 1 }),
       ).rejects.toThrow(ConflictError);
+    });
+
+    it("rolls back rename and permission mutations when the audit write fails", async () => {
+      const { actorA, actorB } = await seedWorld();
+      const doc = await documentsService.createDocument(actorA, { title: "Before" });
+      await pool.query(`
+        CREATE FUNCTION reject_selected_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.action IN ('document.rename', 'document.permission.granted') THEN
+            RAISE EXCEPTION 'forced audit failure';
+          END IF;
+          RETURN NEW;
+        END $$;
+        CREATE TRIGGER reject_selected_audit
+          BEFORE INSERT ON audit_events
+          FOR EACH ROW EXECUTE FUNCTION reject_selected_audit();
+      `);
+
+      try {
+        await expect(
+          documentsService.renameDocument(actorA, doc.id, {
+            title: "After",
+            expectedMetadataVersion: 1,
+          }),
+        ).rejects.toThrow();
+        expect((await documentsService.getDocument(actorA, doc.id)).title).toBe("Before");
+        expect((await documentsService.getDocument(actorA, doc.id)).metadataVersion).toBe(1);
+
+        await expect(
+          permissionsService.grantPermission(actorA, doc.id, {
+            targetUserId: actorB.userId,
+            role: "VIEWER",
+          }),
+        ).rejects.toThrow();
+        const grants = await pool.query(
+          "SELECT count(*)::int AS count FROM document_user_permissions WHERE document_id = $1 AND user_id = $2",
+          [doc.id, actorB.userId],
+        );
+        expect(grants.rows[0].count).toBe(0);
+      } finally {
+        await pool.query(`
+          DROP TRIGGER IF EXISTS reject_selected_audit ON audit_events;
+          DROP FUNCTION IF EXISTS reject_selected_audit();
+        `);
+      }
     });
 
     it("empty/whitespace title falls back to default; >200 chars rejected", async () => {

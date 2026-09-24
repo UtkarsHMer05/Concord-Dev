@@ -7,7 +7,8 @@ import { documentsService } from "@/server/services/documents";
 
 const querySchema = z.object({
   search: z.string().max(200).default(""),
-  // Offset must be a multiple of limit (our client always steps by limit).
+  // Preserve exact offsets because deleting a loaded row can make the next
+  // request non-aligned with the page size.
   offset: z.coerce.number().int().min(0).default(0),
   limit: z.coerce.number().int().min(1).max(50).default(5),
 });
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
     const actor = await buildActorContext();
     const result = await documentsService.listDocuments(actor, {
       search,
-      page: Math.floor(offset / limit) + 1,
+      offset,
       pageSize: limit,
     });
     return NextResponse.json(result);

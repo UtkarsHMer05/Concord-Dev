@@ -22,6 +22,7 @@ import type { Editor } from "@tiptap/react";
 import { blocksToPmDoc, pmDocToBlocks, type CanonicalBlock, type PmNode } from "./pm-model";
 import { reconcile, type ReconcileOp, type StreamEntryJson } from "./adapter";
 import type { CrdtClient } from "./worker/client";
+import { replicaStorageId } from "./worker/idb";
 
 /**
  * P7-M033: per-render-pass RPC budget (ms). A visibleJson on a converged
@@ -41,8 +42,10 @@ export interface BridgeInit {
     client: CrdtClient;
     /** Document the replica belongs to. */
     documentId: string;
-    /** Server-side seed (Phase 1 envelope) for the first open of a document. */
-    seedPmDoc: PmNode | null;
+    /** Authenticated owner for browser-local replica isolation. */
+    userId?: string | null;
+    /** Optional parsed JSON seed for direct bridge clients and tests. */
+    seedPmDoc?: PmNode | null;
     onStatusChange?: (state: BridgeState) => void;
 }
 
@@ -51,8 +54,10 @@ export interface BridgeInit {
  * u64, disjoint from the system's low reserved REST/SYSC IDs. Existing
  * stored client IDs remain valid for backwards compatibility.
  */
-export function replicaIdForDocument(documentId: string): bigint {
-    const key = `concord.replica.${documentId}`;
+export function replicaIdForDocument(documentId: string, userId?: string | null): bigint {
+    const key = userId
+        ? `concord.replica.${encodeURIComponent(userId)}.${documentId}`
+        : `concord.replica.${documentId}`;
     try {
         const stored = globalThis.localStorage?.getItem(key);
         if (stored !== null && BigInt(stored) !== 0n) {
@@ -153,11 +158,11 @@ export class CrdtEditorBridge {
      * state — or from the server snapshot when the local replica is new.
      */
     async start(): Promise<BridgeState> {
-        const { editor, client, documentId, seedPmDoc } = this.init;
+        const { editor, client, documentId, userId, seedPmDoc } = this.init;
         // Serialize: no transaction may reconcile while the seed/restore is
         // mid-flight (concurrent start + typing produced out-of-range stream
         // indices in the double-mounted dev mode - the bug this guards).
-        const run = this.runStart(editor, client, documentId, seedPmDoc);
+        const run = this.runStart(editor, client, documentId, seedPmDoc, userId);
         this.startPromise = run;
         await run;
         return this.state;
@@ -167,10 +172,15 @@ export class CrdtEditorBridge {
         editor: Editor,
         client: CrdtClient,
         documentId: string,
-        seedPmDoc: PmNode | null,
+        seedPmDoc?: PmNode | null,
+        userId?: string | null,
     ): Promise<void> {
         try {
-            await client.init(documentId, replicaIdForDocument(documentId));
+            await client.init(
+                documentId,
+                replicaIdForDocument(documentId, userId),
+                replicaStorageId(documentId, userId),
+            );
             const crdtBlocks = CrdtEditorBridge.toCanonicalBlocks(
                 await client.visibleJson(),
             );
@@ -182,8 +192,11 @@ export class CrdtEditorBridge {
             if (!crdtIsEmpty) {
                 // Local replica exists: it is the editing truth (offline-first).
                 seedBlocks = crdtBlocks;
-            } else if (seedPmDoc !== null) {
-                const parsed = pmDocToBlocks(seedPmDoc);
+            } else if (seedPmDoc === null) {
+                seedBlocks = [{ type: "paragraph", attrs: { type: "paragraph" }, chars: [] }];
+                seedIsNew = true;
+            } else {
+                const parsed = pmDocToBlocks(seedPmDoc ?? editor.getJSON() as PmNode);
                 if (!parsed.support.supported) {
                     this.state = {
                         mode: "fallback",
@@ -193,9 +206,6 @@ export class CrdtEditorBridge {
                     return;
                 }
                 seedBlocks = parsed.blocks;
-                seedIsNew = true;
-            } else {
-                seedBlocks = [{ type: "paragraph", attrs: { type: "paragraph" }, chars: [] }];
                 seedIsNew = true;
             }
 
@@ -308,6 +318,10 @@ export class CrdtEditorBridge {
                 this.state = { mode: "crdt", lastBlocks: parsed.blocks };
                 currentEditor = this.pendingReconcileEditor ?? currentEditor;
             } while (this.reconcileRequested && this.state.mode === "crdt");
+        } catch (error) {
+            this.state = { mode: "fallback", reason: "worker persistence failed" };
+            this.init.onStatusChange?.(this.state);
+            throw error;
         } finally {
             this.reconciling = false;
             this.reconcileRequested = false;

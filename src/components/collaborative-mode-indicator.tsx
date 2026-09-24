@@ -22,6 +22,9 @@ import { toConnectionStatusView } from "@/lib/collaboration/connection-status";
 export const CollaborativeModeIndicator = () => {
   const { state } = useBridgeStatusStore();
   const syncStatus = useSyncStatusStore((s) => s.status);
+  const syncError = useSyncStatusStore((s) => s.error);
+  const compatibilityWarning = useSyncStatusStore((s) => s.compatibilityWarning);
+  const attention = compatibilityWarning ?? syncError;
 
   if (state.mode === "idle") {
     return null;
@@ -32,7 +35,7 @@ export const CollaborativeModeIndicator = () => {
     // local-only replica, no connection claim (truthful local-first).
     const view = syncStatus === null ? null : toConnectionStatusView(syncStatus);
     const connected = syncStatus === "ready";
-    const dot = view
+    const dot = attention ? "bg-rose-600" : view
       ? view.level === "ok"
         ? "bg-emerald-500"
         : view.level === "pending"
@@ -47,16 +50,16 @@ export const CollaborativeModeIndicator = () => {
         role="status"
         title={
           view
-            ? `${view.description} (Changes are saved to a durable local replica first and synced through the realtime session.)`
+          ? `${attention ?? view.description} (Changes are saved to a durable local replica first.)`
             : "Changes are saved to a durable local replica first. This document stays within the collaborative content model (text, headings, basic formatting). Realtime sync is not configured, so edits stay on this device until it is."
         }
       >
         <span className={`size-1.5 rounded-full ${dot}`} aria-hidden="true" />
         <span className="hidden sm:inline">
-          {view ? `Collaborative · ${view.label}` : "Collaborative format"}
+          {compatibilityWarning ? "Local data needs attention" : syncError ? "Sync error" : view ? `Collaborative · ${view.label}` : "Collaborative format"}
         </span>
         <span className="sr-only">
-          {view
+          {attention ? `${compatibilityWarning ? "Local data warning" : "Sync error"}: ${attention}.` : view
             ? `This document is within the collaborative content model and the realtime session is ${connected ? "connected" : view.label.toLowerCase()}. ${view.description}`
             : "This document is within the collaborative content model. Changes are saved to a durable local replica first. Realtime sync is not configured."}
         </span>
@@ -67,16 +70,19 @@ export const CollaborativeModeIndicator = () => {
   // mode === "fallback"
   return (
     <span
-      className="inline-flex items-center gap-1.5 text-xs text-amber-700"
+      className={`inline-flex items-center gap-1.5 text-xs ${attention ? "text-rose-700" : "text-amber-700"}`}
       role="status"
-      title="This document contains content (for example tables, images, lists, or colors) that is not part of the collaborative model yet. It is saved as a whole document instead of collaborative changes, and multi-user realtime editing is not available for it."
+      title={`${attention ? `${attention} ` : ""}This document contains content (for example tables, images, lists, or colors) that is not part of the collaborative model yet. It is saved as a whole document instead of collaborative changes, and multi-user realtime editing is not available for it.`}
     >
-      <span className="size-1.5 rounded-full bg-amber-600" aria-hidden="true" />
-      <span className="hidden sm:inline">Saved as full document</span>
+      <span className={`size-1.5 rounded-full ${attention ? "bg-rose-600" : "bg-amber-600"}`} aria-hidden="true" />
+      <span className="hidden sm:inline">
+        {compatibilityWarning ? "Local data needs attention" : syncError ? "Sync error" : "Full document mode"}
+      </span>
       <span className="sr-only">
+        {attention ? `${compatibilityWarning ? "Local data warning" : "Sync error"}: ${attention}. ` : ""}
         This document contains content outside the collaborative model, such as
         tables, images, lists, or colors. It is saved as a whole document
-        instead of collaborative changes.
+        instead of collaborative changes; save status is shown separately.
       </span>
     </span>
   );

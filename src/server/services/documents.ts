@@ -211,7 +211,7 @@ export const documentsService = {
    */
   async listDocuments(
     actor: ActorContext,
-    input: { search?: unknown; page?: unknown; pageSize?: unknown } = {},
+    input: { search?: unknown; page?: unknown; pageSize?: unknown; offset?: unknown } = {},
   ): Promise<DocumentListResult> {
     const page = (() => {
       const parsed = z.coerce.number().int().min(1).default(1).safeParse(
@@ -238,7 +238,12 @@ export const documentsService = {
       titlePattern = search.length > 0 ? escapeLikePattern(search) : null;
     }
 
-    const offset = (page - 1) * pageSize;
+    const offset = (() => {
+      if (input.offset === undefined) return (page - 1) * pageSize;
+      const parsed = z.coerce.number().int().min(0).safeParse(input.offset);
+      if (!parsed.success) throw new ValidationError("Invalid offset");
+      return parsed.data;
+    })();
     const limit = pageSize + 1; // fetch one extra to compute hasMore
 
     const rows = actor.organization
@@ -281,29 +286,25 @@ export const documentsService = {
       throw new ValidationError("Invalid expectedMetadataVersion");
     }
 
-    const updated = await documentsRepository.renameConditional(
-      id,
-      expectedMetadataVersion.data,
-      title,
-    );
-    if (!updated) {
-      const existing = await documentsRepository.findById(id);
-      if (!existing) {
-        throw new NotFoundError("Document not found");
+    return getDb().transaction(async (tx) => {
+      const updated = await documentsRepository.renameConditional(
+        id, expectedMetadataVersion.data, title, tx,
+      );
+      if (!updated) {
+        const existing = await documentsRepository.findById(id, tx);
+        if (!existing) throw new NotFoundError("Document not found");
+        throw new ConflictError("Document was modified concurrently");
       }
-      throw new ConflictError("Document was modified concurrently");
-    }
-
-    await auditRepository.insert({
-      actorUserId: actor.userId,
-      action: AUDIT_ACTIONS.documentRename,
-      resourceType: "document",
-      resourceId: id,
-      organizationId: actor.organization?.id ?? null,
-      metadata: { title },
+      await auditRepository.insert({
+        actorUserId: actor.userId,
+        action: AUDIT_ACTIONS.documentRename,
+        resourceType: "document",
+        resourceId: id,
+        organizationId: updated.organizationId,
+        metadata: { title },
+      }, tx);
+      return { metadataVersion: updated.metadataVersion };
     });
-
-    return { metadataVersion: updated.metadataVersion };
   },
 
   /**
@@ -359,9 +360,11 @@ export const documentsService = {
       input.content === null ||
       typeof input.content !== "object" ||
       Array.isArray(input.content) ||
+      !("v" in input.content) ||
+      input.content.v !== 1 ||
       !("doc" in input.content)
     ) {
-      throw new ValidationError("Content must be an object envelope");
+      throw new ValidationError("Content must be a version 1 object envelope");
     }
     let serialized: string;
     try {

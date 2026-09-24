@@ -268,9 +268,9 @@ std::int32_t concord_stream_json(void* handle, std::uint8_t* out, std::int32_t c
     const auto doc = static_cast<Doc*>(handle);
     try {
         std::string json = "[";
-        const std::size_t size = doc->stream_size();
-        for (std::size_t i = 0; i < size; ++i) {
-            const concord::crdt::StreamEntry entry = doc->stream_entry(i);
+        const auto entries = doc->stream_entries();
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            const auto& entry = entries[i];
             if (i > 0) {
                 json += ",";
             }

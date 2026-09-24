@@ -15,13 +15,14 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CrdtWorkerCore } from "@/lib/crdt/worker/core";
 import type { PersistenceAdapter, LocalState } from "@/lib/crdt/worker/idb";
 import { WorkerEnginePort } from "@/lib/sync/worker-engine-port";
 import type { PendingOpStore, PendingOpRecord } from "@/lib/sync/pending-store";
 import { identityFromOpBytes } from "@/lib/sync/identities";
+import { SyncSession } from "@/lib/sync/sync-session";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const wasmDist = path.join(repoRoot, "wasm/dist");
@@ -45,7 +46,15 @@ async function loadFactory() {
 
 class MemoryPersistence implements PersistenceAdapter {
     snapshots = new Map<string, Uint8Array>();
-    logs = new Map<string, { seq: number; op: Uint8Array }[]>();
+    logs = new Map<string, {
+        seq: number;
+        op: Uint8Array;
+        identity?: string;
+        coveredAtCursor?: string;
+    }[]>();
+    cursors = new Map<string, string>();
+    appendGate: { started: () => void; wait: Promise<void> } | null = null;
+    failNextAppend = false;
 
     async loadLocalState(documentId: string): Promise<LocalState> {
         return {
@@ -53,12 +62,66 @@ class MemoryPersistence implements PersistenceAdapter {
             ops: (this.logs.get(documentId) ?? []).map((entry) => entry.op),
         };
     }
-    async appendOps(documentId: string, ops: Uint8Array[]): Promise<void> {
-        const log = this.logs.get(documentId) ?? [];
+    async appendOps(
+        documentId: string,
+        ops: Uint8Array[],
+        sync?: { cursor: string; coveredOpIds: string[] },
+    ): Promise<void> {
+        if (this.appendGate !== null) {
+            const gate = this.appendGate;
+            this.appendGate = null;
+            gate.started();
+            await gate.wait;
+        }
+        if (this.failNextAppend) {
+            this.failNextAppend = false;
+            throw new Error("simulated IndexedDB transaction failure");
+        }
+        const log = [...(this.logs.get(documentId) ?? [])];
         for (const op of ops) {
-            log.push({ seq: log.length, op });
+            const parsed = identityFromOpBytes(op);
+            const identity = parsed === null ? undefined : `${parsed.replica}:${parsed.counter}`;
+            log.push(identity === undefined
+                ? { seq: log.length, op }
+                : { seq: log.length, op, identity });
+        }
+        if (sync !== undefined) {
+            const previous = this.cursors.get(documentId) ?? "0";
+            this.cursors.set(documentId, BigInt(previous) >= BigInt(sync.cursor) ? previous : sync.cursor);
+            for (const identity of sync.coveredOpIds) {
+                for (const record of log) {
+                    if (record.identity !== identity) continue;
+                    const previousCoverage = record.coveredAtCursor ?? "0";
+                    record.coveredAtCursor = BigInt(previousCoverage) >= BigInt(sync.cursor)
+                        ? previousCoverage
+                        : sync.cursor;
+                }
+            }
         }
         this.logs.set(documentId, log);
+    }
+    async loadSyncCursor(documentId: string): Promise<string> {
+        return this.cursors.get(documentId) ?? "0";
+    }
+    async saveSyncCursor(documentId: string, cursor: string): Promise<void> {
+        const previous = this.cursors.get(documentId) ?? "0";
+        this.cursors.set(documentId, BigInt(previous) >= BigInt(cursor) ? previous : cursor);
+    }
+    async loadCoveredOpIds(documentId: string, identities: string[]): Promise<Set<string>> {
+        const cursor = BigInt(this.cursors.get(documentId) ?? "0");
+        const records = this.logs.get(documentId) ?? [];
+        return new Set(identities.filter((id) => records.some((record) =>
+            record.identity === id && record.coveredAtCursor !== undefined &&
+            BigInt(record.coveredAtCursor) <= cursor,
+        )));
+    }
+    async clearCoveredOpIds(documentId: string, identities: string[]): Promise<void> {
+        const covered = new Set(identities);
+        for (const record of this.logs.get(documentId) ?? []) {
+            if (record.identity !== undefined && covered.has(record.identity)) {
+                delete record.coveredAtCursor;
+            }
+        }
     }
     async saveSnapshot(documentId: string, snapshot: Uint8Array): Promise<void> {
         this.snapshots.set(documentId, snapshot);
@@ -66,27 +129,42 @@ class MemoryPersistence implements PersistenceAdapter {
     async clearDocument(documentId: string): Promise<void> {
         this.logs.delete(documentId);
         this.snapshots.delete(documentId);
+        this.cursors.delete(documentId);
     }
 }
 
 /** In-memory PendingOpStore with the same contract the IDB one has. */
 class MemoryPendingStore {
     private records = new Map<string, PendingOpRecord>();
+    private lastCounter = 0n;
+    failNextAdd = false;
 
-    constructor(private readonly docId: string) {}
+    constructor(private readonly docId: string, private readonly persistence?: MemoryPersistence) {}
 
     private key(id: string): string {
         return `${this.docId}:${id}`;
     }
 
     async addPending(id: string, op: Uint8Array): Promise<void> {
-        this.records.set(this.key(id), {
-            id: this.key(id) as PendingOpRecord["id"],
-            op,
-            state: "pending",
-            seq: this.records.size,
-            savedAt: Date.now(),
-        });
+        if (this.failNextAdd) {
+            this.failNextAdd = false;
+            throw new Error("simulated outbox transaction failure");
+        }
+        const key = this.key(id);
+        if (!this.records.has(key)) {
+            this.records.set(key, {
+                id: key as PendingOpRecord["id"],
+                op,
+                state: "pending",
+                seq: this.records.size,
+                savedAt: Date.now(),
+            });
+        }
+        const counter = BigInt(id.split(":").at(-1) ?? "0");
+        if (counter > this.lastCounter) this.lastCounter = counter;
+    }
+    async lastSeenCounter(): Promise<string> {
+        return this.lastCounter.toString();
     }
     async unackedOps(): Promise<PendingOpRecord[]> {
         return [...this.records.values()]
@@ -105,16 +183,93 @@ class MemoryPendingStore {
             if (rec && rec.state !== "durably_acked") rec.state = "durably_acked";
         }
     }
-    async clearAcked(): Promise<number> {
-        return 0;
+    async ackedIds(): Promise<string[]> {
+        return [...this.records.values()]
+            .filter((record) => record.state === "durably_acked")
+            .map((record) => record.id.slice(`${this.docId}:`.length));
+    }
+    async clearAcked(ids: string[]): Promise<number> {
+        const covered = await this.persistence?.loadCoveredOpIds(this.docId, ids) ?? new Set<string>();
+        const removed: string[] = [];
+        for (const id of ids) {
+            if (!covered.has(id)) continue;
+            const key = this.key(id);
+            if (this.records.get(key)?.state === "durably_acked") {
+                this.records.delete(key);
+                removed.push(id);
+            }
+        }
+        await this.persistence?.clearCoveredOpIds(this.docId, removed);
+        return removed.length;
     }
     async stateCounts(): Promise<Record<string, number>> {
-        return { pending: 0, sent: 0, durably_acked: 0 };
+        const counts = { pending: 0, sent: 0, durably_acked: 0 };
+        for (const record of this.records.values()) {
+            counts[record.state] += 1;
+        }
+        return counts;
     }
     close(): void {}
 }
 
 const DOC = "worker-port-doc";
+
+class MockSessionSocket {
+    static instances: MockSessionSocket[] = [];
+    static OPEN = 1;
+    readyState = MockSessionSocket.OPEN;
+    binaryType = "";
+    sent: Array<string | ArrayBuffer> = [];
+    onopen: (() => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(url: string) {
+        if (!url) throw new Error("mock socket requires a URL");
+        MockSessionSocket.instances.push(this);
+    }
+
+    send(data: string | ArrayBuffer): void {
+        this.sent.push(data);
+    }
+
+    close(): void {
+        this.readyState = 3;
+        this.onclose?.();
+    }
+
+    serverSend(data: string | ArrayBuffer): void {
+        this.onmessage?.({ data } as MessageEvent);
+    }
+
+    texts(): string[] {
+        return this.sent.filter((frame): frame is string => typeof frame === "string");
+    }
+}
+
+async function authenticateAndJoin(socket: MockSessionSocket): Promise<void> {
+    socket.onopen?.();
+    socket.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"test"}}');
+    await vi.waitFor(() => expect(socket.texts().some((frame) => frame.includes('"authenticate"'))).toBe(true));
+    socket.serverSend('{"v":1,"type":"authenticated","payload":{"userId":"u1","clerkUserId":"cu1"}}');
+    await vi.waitFor(() => expect(socket.texts().some((frame) => frame.includes('"join_document"'))).toBe(true));
+    socket.serverSend('{"v":1,"type":"join_accepted","payload":{"documentId":"worker-port-doc","role":"owner","durableCursor":"0"}}');
+    await vi.waitFor(() => expect(socket.texts().some((frame) => frame.includes('"sync_request"'))).toBe(true));
+}
+
+function syncBatch(cursor: number, op: Uint8Array): ArrayBuffer {
+    const frame = new Uint8Array(17 + op.length);
+    const view = new DataView(frame.buffer);
+    frame[0] = 1;
+    frame[1] = 0x21;
+    view.setBigUint64(2, BigInt(cursor), false);
+    frame[10] = 0;
+    view.setUint16(11, 1, false);
+    view.setUint32(13, op.length, false);
+    frame.set(op, 17);
+    return frame.buffer;
+}
 
 /**
  * CrdtClient-shaped adapter delegating to a real CrdtWorkerCore — the same
@@ -162,11 +317,18 @@ class CoreBackedClient {
         this.notifyLocal(ops);
         return ops;
     }
-    async applyRemote(ops: Uint8Array[]): Promise<{ applied: number; duplicates: number }> {
-        return (await this.core.handle({ id: this.nextId++, kind: "applyRemote", ops })) as {
+    async applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }> {
+        return (await this.core.handle({ id: this.nextId++, kind: "applyRemote", ops, cursor })) as {
             applied: number;
             duplicates: number;
         };
+    }
+    async syncCursor(): Promise<string> {
+        const r = await this.core.handle({ id: this.nextId++, kind: "getSyncCursor" });
+        return (r as { kind: "getSyncCursor"; cursor: string }).cursor;
+    }
+    async persistSyncCursor(cursor: string): Promise<void> {
+        await this.core.handle({ id: this.nextId++, kind: "persistSyncCursor", cursor });
     }
     async replicaInfo(): Promise<{ replicaId: string; sequence: string }> {
         const r = await this.core.handle({ id: this.nextId++, kind: "replicaInfo" });
@@ -215,7 +377,7 @@ async function newHarness(replicaId = 4242n): Promise<Harness> {
     });
     const client = new CoreBackedClient(core, DOC);
     await client.init(replicaId);
-    const store = new MemoryPendingStore(DOC);
+    const store = new MemoryPendingStore(DOC, persistence);
     const port = new WorkerEnginePort({
         client: client as unknown as import("@/lib/crdt/worker/client").CrdtClient,
         store: store as unknown as PendingOpStore,
@@ -297,7 +459,7 @@ describe("WorkerEnginePort over the real engine (D16)", () => {
         });
         const client = new CoreBackedClient(core, DOC);
         await client.init(7n);
-        const store = new MemoryPendingStore(DOC);
+        const store = new MemoryPendingStore(DOC, persistence);
         const port = new WorkerEnginePort({
             client: client as unknown as import("@/lib/crdt/worker/client").CrdtClient,
             store: store as unknown as PendingOpStore,
@@ -370,5 +532,221 @@ describe("WorkerEnginePort over the real engine (D16)", () => {
         await h.store.markDurablyAcked([idStr]);
         expect(await h.port.unackedOps()).toHaveLength(1);
         expect(identityFromOpBytes((await h.port.unackedOps())[0])?.counter).toBe(id2.counter);
+    });
+});
+
+describe("SyncSession durability recovery over the real worker core", () => {
+    it("backfills a worker-log/outbox crash gap and retries a failed checkpoint without skipping ops", async () => {
+        const original = await newHarness(7n);
+        const persisted = await original.core.handle({
+            id: 100,
+            kind: "localInsertText",
+            streamIndex: 0,
+            codepoint: 0x61,
+        }) as { ops: Uint8Array[] };
+        const reloadedCore = new CrdtWorkerCore({
+            documentId: DOC,
+            replicaId: 7n,
+            loadFactory,
+            persistence: original.persistence,
+        });
+        const client = new CoreBackedClient(reloadedCore, DOC);
+        await client.init(7n);
+        const store = new MemoryPendingStore(DOC, original.persistence);
+        store.failNextAdd = true;
+        const localErrors: string[] = [];
+        const port = new WorkerEnginePort({
+            client: client as unknown as import("@/lib/crdt/worker/client").CrdtClient,
+            store: store as unknown as PendingOpStore,
+        });
+        const session = new SyncSession({
+            documentId: DOC,
+            gatewayUrl: "ws://test",
+            getToken: async () => "test",
+            engine: port,
+            getCursor: () => "0",
+            setCursor: () => {},
+            store: store as unknown as PendingOpStore,
+            onLocalError: (message) => localErrors.push(message),
+        });
+        vi.stubGlobal("WebSocket", MockSessionSocket);
+        MockSessionSocket.instances.length = 0;
+        try {
+            await session.start();
+            expect(await store.lastSeenCounter()).toBe("0");
+            expect(localErrors).toContain("simulated outbox transaction failure");
+
+            // A later local notification forces a log backfill before its own
+            // higher counter can advance the durable outbox checkpoint.
+            await client.localInsertText(1, 0x62);
+            await vi.waitFor(async () => {
+                expect(await store.lastSeenCounter()).toBe("2");
+                expect(await store.unackedOps()).toHaveLength(2);
+            });
+            const rows = await store.unackedOps();
+            expect(rows.map((row) => identityFromOpBytes(row.op)?.counter)).toEqual([1n, 2n]);
+            expect(rows[0].op).toEqual(persisted.ops[0]);
+        } finally {
+            await session.stop();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("persists each catch-up batch before advancing the durable cursor", async () => {
+        const target = await newHarness(7n);
+        const source = await newHarness(8n);
+        const remote = (await source.client.localInsertText(0, 0x72))[0];
+        let releaseAppend!: () => void;
+        let markAppendStarted!: () => void;
+        const appendStarted = new Promise<void>((resolve) => { markAppendStarted = resolve; });
+        const appendWait = new Promise<void>((resolve) => { releaseAppend = resolve; });
+        target.persistence.appendGate = { started: markAppendStarted, wait: appendWait };
+        let cursor = "0";
+        const port = new WorkerEnginePort({
+            client: target.client as unknown as import("@/lib/crdt/worker/client").CrdtClient,
+            store: target.store as unknown as PendingOpStore,
+        });
+        const session = new SyncSession({
+            documentId: DOC,
+            gatewayUrl: "ws://test",
+            getToken: async () => "test",
+            engine: port,
+            getCursor: () => cursor,
+            setCursor: (value) => { cursor = value; },
+            store: target.store as unknown as PendingOpStore,
+        });
+        vi.stubGlobal("WebSocket", MockSessionSocket);
+        MockSessionSocket.instances.length = 0;
+        try {
+            await session.start();
+            const socket = MockSessionSocket.instances.at(-1)!;
+            await authenticateAndJoin(socket);
+            socket.serverSend(syncBatch(42, remote));
+            await appendStarted;
+            expect(cursor).toBe("0");
+            expect(await target.persistence.loadSyncCursor(DOC)).toBe("0");
+            expect(target.persistence.logs.get(DOC) ?? []).toHaveLength(0);
+            socket.serverSend('{"v":1,"type":"sync_done","payload":{}}');
+            await Promise.resolve();
+            expect(cursor).toBe("0");
+            releaseAppend();
+            await vi.waitFor(() => expect(cursor).toBe("42"));
+            expect(target.persistence.logs.get(DOC)).toHaveLength(1);
+            expect(await target.persistence.loadSyncCursor(DOC)).toBe("42");
+            expect(target.persistence.logs.get(DOC)?.[0].coveredAtCursor).toBeUndefined();
+        } finally {
+            releaseAppend();
+            await session.stop();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("persists duplicate-only catch-up cursor atomically, then prunes proof after ACK compaction", async () => {
+        const h = await newHarness(7n);
+        const local = (await h.client.localInsertText(0, 0x72))[0];
+        const identity = identityFromOpBytes(local)!;
+        const id = `${identity.replica}:${identity.counter}`;
+        await h.store.addPending(id, local);
+        await h.store.markDurablyAcked([id]);
+
+        h.persistence.failNextAppend = true;
+        await expect(h.port.applyRemote([local], "42")).rejects.toThrow(
+            "simulated IndexedDB transaction failure",
+        );
+        expect(h.persistence.logs.get(DOC) ?? []).toHaveLength(1);
+        expect(await h.port.syncCursor()).toBe("0");
+        expect(h.persistence.logs.get(DOC)?.[0].coveredAtCursor).toBeUndefined();
+        expect(await h.store.clearAcked([id])).toBe(0);
+        expect((await h.store.stateCounts()).durably_acked).toBe(1);
+
+        await expect(h.port.applyRemote([local], "42")).resolves.toMatchObject({
+            applied: 0,
+            duplicates: 1,
+        });
+        expect(await h.port.syncCursor()).toBe("42");
+        expect(h.persistence.logs.get(DOC)).toHaveLength(1);
+        expect(h.persistence.logs.get(DOC)?.[0].coveredAtCursor).toBe("42");
+        expect(await h.store.clearAcked([id])).toBe(1);
+        expect((await h.store.stateCounts()).durably_acked).toBe(0);
+        expect(h.persistence.logs.get(DOC)?.[0].coveredAtCursor).toBeUndefined();
+    });
+
+    it("keeps durable ACK rows until a later completed catch-up compacts them", async () => {
+        const h = await newHarness(4242n);
+        await h.client.localInsertText(0, 0x78);
+        const localId = identityFromOpBytes((await h.client.localOpsSince("0")).ops[0])!;
+        const outboxStates: Array<{
+            pending: number;
+            sent: number;
+            durablyAcked: number;
+            serverConfirmed: boolean;
+        }> = [];
+        const session = new SyncSession({
+            documentId: DOC,
+            gatewayUrl: "ws://test",
+            getToken: async () => "test",
+            engine: h.port,
+            getCursor: () => "0",
+            setCursor: () => {},
+            store: h.store as unknown as PendingOpStore,
+            onOutboxState: (state) => outboxStates.push(state),
+        });
+        vi.stubGlobal("WebSocket", MockSessionSocket);
+        MockSessionSocket.instances.length = 0;
+        try {
+            await session.start();
+            expect(outboxStates.at(-1)).toEqual({
+                pending: 1,
+                sent: 0,
+                durablyAcked: 0,
+                serverConfirmed: false,
+            });
+            const socket = MockSessionSocket.instances.at(-1)!;
+            await authenticateAndJoin(socket);
+            socket.serverSend('{"v":1,"type":"sync_done","payload":{}}');
+            await vi.waitFor(async () => {
+                expect((await h.store.stateCounts()).sent).toBe(1);
+            });
+
+            socket.serverSend(JSON.stringify({
+                v: 1,
+                type: "durable_ack",
+                payload: { batchId: "1", opIds: [`${localId.replica}:${localId.counter}`] },
+            }));
+            await vi.waitFor(async () => {
+                expect((await h.store.stateCounts()).durably_acked).toBe(1);
+            });
+            expect(await h.store.ackedIds()).toHaveLength(1);
+
+            // A new sync_done stands in for a reconnect catch-up that has
+            // not supplied durable coverage, so it cannot compact the row.
+            socket.serverSend('{"v":1,"type":"sync_done","payload":{}}');
+            await vi.waitFor(() => expect(outboxStates.at(-1)).toMatchObject({
+                durablyAcked: 1,
+                serverConfirmed: false,
+            }));
+            expect((await h.store.stateCounts()).durably_acked).toBe(1);
+            expect(outboxStates.at(-1)).toMatchObject({ durablyAcked: 1, serverConfirmed: false });
+
+            // Only the exact ACKed identity inside a catch-up batch, persisted
+            // with cursor 42, proves it is safe to remove.
+            const localOp = (await h.client.localOpsSince("0")).ops[0];
+            socket.serverSend(syncBatch(42, localOp));
+            await vi.waitFor(async () => expect(await h.port.syncCursor()).toBe("42"));
+            socket.serverSend('{"v":1,"type":"sync_done","payload":{}}');
+            await vi.waitFor(async () => {
+                expect((await h.store.stateCounts()).durably_acked).toBe(0);
+            });
+            expect(await h.store.ackedIds()).toHaveLength(0);
+            expect(outboxStates.at(-1)).toEqual({
+                pending: 0,
+                sent: 0,
+                durablyAcked: 0,
+                serverConfirmed: true,
+            });
+        } finally {
+            await session.stop();
+            vi.unstubAllGlobals();
+        }
     });
 });

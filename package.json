@@ -92,6 +92,11 @@
     "typescript": "~5.9.3",
     "vitest": "^5.0.0"
   },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "0.25.12"
+    }
+  },
   "allowScripts": {
     "esbuild@0.18.20": true,
     "esbuild@0.25.12": true,

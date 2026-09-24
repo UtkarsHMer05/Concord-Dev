@@ -36,7 +36,7 @@ const REPO_ROOT = join(__dirname, "..", "..");
 const GATEWAY_BIN = join(REPO_ROOT, "rust", "target", "release", "sync-gateway");
 const JWKS_FILE = join(REPO_ROOT, ".agent", "scratch", "phase-3", "e2e-jwks.json");
 const KEY_DER = join(REPO_ROOT, ".agent", "scratch", "phase-3", "e2e-key.der");
-const DB_URL = "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test";
+const DB_URL = process.env.DATABASE_TEST_URL ?? "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test";
 const ISSUER = "https://e2e.clerk.accounts.dev";
 
 const databaseAvailable: Promise<boolean> = (async () => {
@@ -321,7 +321,7 @@ async function untilReady(client: ClientSession, timeoutMs = 20_000): Promise<vo
   client.transport.connect();
   const ok = await waitFor(async () => client.transport.currentStatus === "ready", timeoutMs);
   if (!ok) {
-    throw new Error(`client never reached ready (statuses=${client.statuses.join("→")})`);
+    throw new Error(`client never reached ready (statuses=${client.statuses.join("→")}; errors=${client.errors.join(",")})`);
   }
 }
 

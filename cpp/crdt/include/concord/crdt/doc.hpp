@@ -99,6 +99,7 @@ public:
     // Tombstone-inclusive stream length (adapter position space).
     [[nodiscard]] std::size_t stream_size() const noexcept { return size_; }
     [[nodiscard]] StreamEntry stream_entry(std::size_t index) const;
+    [[nodiscard]] std::vector<StreamEntry> stream_entries() const;
 
     // The visible document: blocks partitioned at delimiters (PROTOCOL §2).
     [[nodiscard]] std::vector<VisibleBlock> visible_document() const;
@@ -165,6 +166,7 @@ private:
         return items_[static_cast<std::size_t>(index)];
     }
     [[nodiscard]] StreamEntry make_entry(std::size_t order_pos) const;
+    [[nodiscard]] static StreamEntry entry_from_item(const Item& item);
 
     ReplicaId self_;
     Counter next_counter_;

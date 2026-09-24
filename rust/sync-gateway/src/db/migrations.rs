@@ -203,6 +203,35 @@ const MIGRATIONS: &[Migration] = &[
             REFERENCES crdt_snapshots(snapshot_id);
     "#,
     },
+    Migration {
+        version: 4,
+        name: "replica ownership",
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS crdt_replica_owners (
+            document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            replica_id BIGINT NOT NULL,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            PRIMARY KEY (document_id, replica_id)
+        );
+    "#,
+    },
+    Migration {
+        version: 5,
+        name: "legacy replica quarantine",
+        // Older operation rows have no authenticated author. Quarantine all
+        // existing client replicas instead of guessing and misattributing them.
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS crdt_legacy_replicas (
+            document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            replica_id BIGINT NOT NULL,
+            PRIMARY KEY (document_id, replica_id)
+        );
+        INSERT INTO crdt_legacy_replicas (document_id, replica_id)
+        SELECT DISTINCT document_id, replica_id FROM crdt_operations
+        WHERE replica_id NOT IN (1380275028, 1398362947)
+        ON CONFLICT (document_id, replica_id) DO NOTHING;
+    "#,
+    },
 ];
 
 /// Applies all pending migrations idempotently, including concurrent starts

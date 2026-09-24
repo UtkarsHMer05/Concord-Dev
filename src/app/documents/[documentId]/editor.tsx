@@ -36,7 +36,6 @@ import { useDocumentSession } from '@/lib/collaboration/provider';
 import { CrdtEditorBridge } from '@/lib/crdt/editor-bridge';
 import { useSyncSession } from '@/lib/sync/use-sync-session';
 import type { CrdtClient } from '@/lib/crdt/worker/client';
-import type { PmNode } from '@/lib/crdt/pm-model';
 import { FontSizeExtension } from '@/extensions/font-size';
 import { LineHeightExtension } from '@/extensions/line-height';
 
@@ -47,8 +46,8 @@ interface EditorProps {
   crdtClient: CrdtClient | null;
   /** Document the replica belongs to. */
   documentId: string;
-  /** Server-side seed (Phase 1 envelope content) for the first local open. */
-  seedPmDoc: PmNode | null;
+  /** Clerk principal that owns this browser's local replica. */
+  userId: string | null;
 }
 
 /**
@@ -72,7 +71,7 @@ const publishEditorToStore =
     setEditor(editor);
   };
 
-export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
+export const Editor = ({ crdtClient, documentId, userId }: EditorProps) => {
   const { editorContent, content, settings, canEditContent } = useDocumentSession();
   const { setEditor } = useEditorStore();
   const setBridgeStatus = useBridgeStatusStore((s) => s.setState);
@@ -157,20 +156,26 @@ export const Editor = ({ crdtClient, documentId, seedPmDoc }: EditorProps) => {
   // editor), then start inside the effect. The useMemo result also feeds the
   // sync-session hook without touching refs during render.
   const bridge = useMemo(() => {
-    if (!crdtClient || !editor) {
+    if (!crdtClient || !editor || !userId) {
       return null;
     }
     return new CrdtEditorBridge({
       editor,
       client: crdtClient,
       documentId,
-      seedPmDoc,
-      // Surface fallback transitions honestly instead of failing silently.
-      onStatusChange: setBridgeStatus,
+      userId,
+      // TipTap parses both stored JSON and template HTML before the bridge
+      // starts; the bridge seeds from that parsed document.
+      onStatusChange: (state) => {
+        setBridgeStatus(state);
+        if (state.mode === 'fallback') {
+          content.saveContent(editor.getJSON());
+        }
+      },
     });
-    // seedPmDoc is consumed once at bridge start; the bridge is per editor.
+    // The bridge is per editor; content is read at start.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crdtClient, editor, documentId, setBridgeStatus]);
+  }, [crdtClient, editor, documentId, setBridgeStatus, userId]);
 
   useEffect(() => {
     if (!bridge) {

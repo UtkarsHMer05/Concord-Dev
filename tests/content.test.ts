@@ -19,6 +19,11 @@ describe("transitional document content envelope", () => {
     expect(parseDocumentContent("", fallback)).toBe(fallback);
   });
 
+  it("passes unsaved template HTML to TipTap when no JSON envelope exists", () => {
+    const template = "<h1>Proposal</h1><p>Summary</p>";
+    expect(parseDocumentContent(null, template)).toBe(template);
+  });
+
   it("returns the fallback for malformed JSON instead of throwing", () => {
     const fallback = null;
     expect(parseDocumentContent("{not json", fallback)).toBe(fallback);

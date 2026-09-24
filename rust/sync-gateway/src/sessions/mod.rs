@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, watch, Mutex};
 
 use uuid::Uuid;
 
@@ -62,6 +62,8 @@ pub struct ConnectionHandle {
     pub join_role: crate::db::authz::EffectiveRole,
     /// Bounded outbound frame queue (M026). Capacity from config.
     pub outbound: mpsc::Sender<OutboundFrame>,
+    /// Out-of-band close signal so a full outbound queue cannot prevent cleanup.
+    pub close: watch::Sender<bool>,
 }
 
 /// One document room: the set of live connections joined to the document.
@@ -73,13 +75,31 @@ struct Room {
 /// rooms vanish when empty (no leak, no durable truth).
 pub struct SessionRegistry {
     rooms: Mutex<HashMap<Uuid, Room>>,
+    connections: Mutex<HashMap<Uuid, watch::Sender<bool>>>,
 }
 
 impl SessionRegistry {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             rooms: Mutex::new(HashMap::new()),
+            connections: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Tracks every upgraded socket, including those not yet joined to a document.
+    pub async fn register_connection(&self, id: Uuid, close: watch::Sender<bool>) {
+        self.connections.lock().await.insert(id, close);
+    }
+
+    pub async fn unregister_connection(&self, id: Uuid) {
+        self.connections.lock().await.remove(&id);
+    }
+
+    /// Closes every tracked socket independently of its bounded outbound queue.
+    pub async fn close_all(&self) {
+        for close in self.connections.lock().await.values() {
+            close.send_replace(true);
+        }
     }
 
     /// Registers a joined connection; creates the room when first.
@@ -111,9 +131,8 @@ impl SessionRegistry {
     /// makes duplicate receipt safe; echoing is pointless traffic).
     ///
     /// Bounded behavior (M026): a peer whose outbound queue is full is a
-    /// slow consumer — `try_send` fails, the peer is marked, and the caller
-    /// closes it (it catches up from PostgreSQL on reconnect). Persistence
-    /// never blocks on a slow peer.
+    /// slow consumer — `try_send` fails and its out-of-band close signal is
+    /// set. Persistence never blocks on a slow peer.
     pub async fn fanout(
         &self,
         document: Uuid,
@@ -130,6 +149,7 @@ impl SessionRegistry {
                 continue;
             }
             if handle.outbound.try_send(frame.clone()).is_err() {
+                handle.close.send_replace(true);
                 mark_slow.push(*id);
             }
         }
@@ -184,6 +204,7 @@ mod tests {
                 user_id: Uuid::new_v4(),
                 join_role: EffectiveRole::Editor,
                 outbound: tx,
+                close: watch::channel(false).0,
             },
             rx,
         )
@@ -243,6 +264,7 @@ mod tests {
         let fast_peer = Uuid::new_v4();
         let (hs, _rs) = handle(sender, 8);
         let (hslow, _rslow) = handle(slow_peer, 1); // capacity 1 — fills fast
+        let mut slow_close = hslow.close.subscribe();
         let (hfast, mut rfast) = handle(fast_peer, 8);
         registry.join(doc, hs).await;
         registry.join(doc, hslow).await;
@@ -256,8 +278,22 @@ mod tests {
         }
         // The stalled peer got marked (queue capacity 1, no receiver).
         assert!(slow.contains(&slow_peer), "slow consumer must be marked");
+        assert!(slow_close.changed().await.is_ok());
+        assert!(*slow_close.borrow(), "slow consumer must be closed");
         // The fast peer still received frames (fanout never blocked).
         assert!(matches!(rfast.try_recv(), Ok(OutboundFrame::Binary(_))));
+    }
+
+    #[tokio::test]
+    async fn close_all_signals_unjoined_connections() {
+        let registry = SessionRegistry::new();
+        let id = Uuid::new_v4();
+        let (close, mut receiver) = watch::channel(false);
+        registry.register_connection(id, close).await;
+        registry.close_all().await;
+        assert!(receiver.changed().await.is_ok());
+        assert!(*receiver.borrow());
+        registry.unregister_connection(id).await;
     }
 
     #[tokio::test]

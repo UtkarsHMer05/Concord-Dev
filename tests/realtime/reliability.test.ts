@@ -63,7 +63,7 @@ const REPO_ROOT = join(__dirname, "..", "..");
 const GATEWAY_BIN = join(REPO_ROOT, "rust", "target", "release", "sync-gateway");
 const JWKS_FILE = join(REPO_ROOT, ".agent", "scratch", "phase-3", "e2e-jwks.json");
 const KEY_DER = join(REPO_ROOT, ".agent", "scratch", "phase-3", "e2e-key.der");
-const DB_URL = "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test";
+const DB_URL = process.env.DATABASE_TEST_URL ?? "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test";
 const ISSUER = "https://e2e.clerk.accounts.dev";
 const NATS_URL = "nats://127.0.0.1:4222";
 const REDIS_URL = "redis://127.0.0.1:6379";
@@ -295,7 +295,7 @@ class MemPendingStore {
   }
   async markSent(ids: string[]) {
     for (const id of ids) {
-      const r = this.rows.get(id);
+      const r = this.rows.get(`${this.documentId}:${id}`);
       if (r && r.state !== "durably_acked") r.state = "sent";
     }
   }
@@ -1303,7 +1303,7 @@ describe("M035 matrix · 8: WASM worker restart (engine recreation from durable 
     }
     const ackedAll = await waitFor(async () => {
       const counts = await store.stateCounts();
-      return counts.pending + counts.sent === 0;
+      return counts.durably_acked === 3 && counts.pending + counts.sent === 0;
     }, 15_000);
     expect(ackedAll).toBe(true);
     const digestBefore = digest(engine);

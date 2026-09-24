@@ -21,17 +21,24 @@ import {
   SnapshotResyncError,
 } from "./snapshot-resync";
 import type { SnapshotPayload, SnapshotResyncRequired } from "./protocol";
+import type { ErrorCode } from "./protocol";
 import { SyncTransport, type ConnectionStatus } from "./transport";
 
 export interface CrdtEnginePort {
-  /** Applies remote canonical op bytes (idempotent). */
-  applyRemote(ops: Uint8Array[]): Promise<{ applied: number; duplicates: number }>;
+  /** Applies ops; catch-up batches also atomically persist their cursor. */
+  applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }>;
+  /** Durable cursor in the same database as the CRDT op log. */
+  syncCursor?(): Promise<string>;
+  /** Persists a resync snapshot boundary after the base and pending ops land. */
+  persistCursor?(cursor: string): Promise<void>;
   /** The local replica id (for the join state summary). */
   replicaId(): Promise<string>;
   /** Highest contiguous local counter (own summary entry). */
   localSummary(): Promise<string>;
   /** Subscribes to locally generated canonical op bytes. */
   onLocalOps(handler: (ops: Uint8Array[]) => void): () => void;
+  /** Durable own-replica log for repairing worker-log/outbox crash gaps. */
+  localOpsSince?(counter: string): Promise<{ ops: Uint8Array[]; nextCounter: string }>;
 }
 
 /**
@@ -59,6 +66,14 @@ export interface SyncSessionOptions {
   /** Outbox (IndexedDB); opened by the session when not provided (tests). */
   store?: PendingOpStore;
   onStatus?: (status: ConnectionStatus) => void;
+  onError?: (code: ErrorCode, message: string) => void;
+  onLocalError?: (message: string) => void;
+  onOutboxState?: (state: {
+    pending: number;
+    sent: number;
+    durablyAcked: number;
+    serverConfirmed: boolean;
+  }) => void;
 }
 
 /** Batching window for outgoing local ops (ms). */
@@ -76,9 +91,11 @@ export class SyncSession {
   private lastCursor: string;
   private unsubscribeLocal: (() => void) | null = null;
   /** Ops buffered from the engine waiting for the flush window. */
-  private pendingFlush: Uint8Array[] = [];
-  /** Sets of op identities currently marked sent, by batch id. */
-  private sentBatches = new Map<string, OpIdentityString[]>();
+  private enqueueTail: Promise<void> = Promise.resolve();
+  private inboundTail: Promise<void> = Promise.resolve();
+  private catchupFailed = false;
+  private catchupComplete = false;
+  private serverConfirmed = false;
   /**
    * Snapshot resync (P5-M031): the signal the server last sent while the
    * fetch was in flight. A payload that does not match the outstanding
@@ -97,31 +114,62 @@ export class SyncSession {
       getToken: options.getToken,
       events: {
         onStatus: (s) => options.onStatus?.(s),
-        onDurableAck: (batchId, opIds) => void this.handleDurableAck(batchId, opIds),
+        onDurableAck: (batchId, opIds) => {
+          void this.handleDurableAck(batchId, opIds).catch((error: unknown) => {
+            this.reportLocalError(error);
+            this.transport.reconnect();
+          });
+        },
         // Reconnect flow (M034): authenticated → join(state summary) →
         // catch-up from the persisted cursor → sync_done → READY → resend.
-        onAuthenticated: () => void this.joinWithSummary(),
-        onPeerOps: (ops) => void this.applyRemoteOps(ops),
+        onAuthenticated: () => {
+          this.catchupFailed = false;
+          this.catchupComplete = false;
+          this.serverConfirmed = false;
+          // Repair any worker-log/outbox gap before the server accepts our
+          // state summary. This also retries a previously failed outbox write.
+          this.enqueueTail = this.enqueueTail
+            .then(() => this.recoverOutbox(), () => this.recoverOutbox());
+          void this.enqueueTail.then(() => this.joinWithSummary()).catch((error: unknown) => {
+            this.reportLocalError(error);
+            this.transport.reconnect();
+          });
+        },
+        onPeerOps: (ops) => this.queueRemote(ops),
         onSyncBatch: (ops, nextCursor, hasMore) => {
-          this.lastCursor = nextCursor.toString();
-          options.setCursor(this.lastCursor);
-          void this.applyRemoteOps(ops);
+          this.queueRemote(ops, nextCursor.toString());
           void hasMore;
         },
         onJoinAccepted: () => this.requestCatchup(),
-        onSyncDone: () => void this.onReady(),
+        onSyncDone: () => {
+          void this.onReady().catch((error: unknown) => {
+            this.reportLocalError(error);
+            this.transport.reconnect();
+          });
+        },
         // Stale-client resync (P5-M031): a cursor below the compaction
         // floor cannot be served by delta catch-up. The server points
         // us at the covering snapshot; we fetch, validate
         // (checksum-before-trust), import atomically, re-apply our own
         // unacked ops, then resume catch-up from the boundary.
         onSnapshotResyncRequired: (signal) => void this.beginSnapshotResync(signal),
-        onSnapshotPayload: (payload) => void this.handleSnapshotPayload(payload),
+        onSnapshotPayload: (payload) => {
+          void this.handleSnapshotPayload(payload).catch((error: unknown) => {
+            this.reportLocalError(error);
+            this.transport.reconnect();
+          });
+        },
         onError: (code, message) => {
-          // database_unavailable / server_draining keep pending ops; the
-          // transport reconnects. Non-fatal errors never clear the outbox.
-          void code;
-          void message;
+          options.onError?.(code, message);
+          // A failed catch-up has no sync_done. Reconnect so the durable
+          // cursor is retried with backoff; ready sessions retain their
+          // outbox and show the error without starting a retry loop.
+          if (
+            code === "database_unavailable" &&
+            this.transport.currentStatus === "syncing"
+          ) {
+            this.transport.reconnect();
+          }
         },
         onDraining: () => {},
         onFatal: () => {
@@ -158,10 +206,44 @@ export class SyncSession {
   /** Starts the session (connect + handshake + join + catch-up). */
   async start(): Promise<void> {
     this.store = await this.storeReady;
+    this.serverConfirmed = false;
+    if (this.options.engine.syncCursor) {
+      this.lastCursor = await this.options.engine.syncCursor();
+    }
+    // Subscribe before scanning: edits made during recovery are queued behind
+    // it, while duplicate notifications retain the existing outbox state.
+    this.enqueueTail = this.recoverOutbox();
     this.unsubscribeLocal = this.options.engine.onLocalOps((ops) => {
-      void this.enqueueLocal(ops);
+      this.enqueueTail = this.enqueueTail.then(
+        () => this.enqueueLocal(ops),
+        async () => {
+          await this.recoverOutbox();
+          await this.enqueueLocal(ops);
+        },
+      );
+      void this.enqueueTail.catch((error: unknown) => {
+        this.reportLocalError(error);
+      });
     });
+    try {
+      await this.enqueueTail;
+    } catch (error) {
+      // The worker log is still durable. Connect so authenticated retries can
+      // backfill it before joining or sending any operations.
+      this.reportLocalError(error);
+    }
+    await this.reportOutboxState(false);
     this.transport.connect();
+  }
+
+  private async recoverOutbox(): Promise<void> {
+    if (!this.options.engine.localOpsSince) return;
+    const store = this.store ?? (await this.storeReady);
+    if (typeof store.lastSeenCounter !== "function") return;
+    const since = await store.lastSeenCounter();
+    const { ops } = await this.options.engine.localOpsSince(since);
+    await this.enqueueLocal(ops);
+    if (ops.length === 0) await this.reportOutboxState(false);
   }
 
   /** Clean stop (navigation/logout): cancels timers, closes transport. */
@@ -174,7 +256,18 @@ export class SyncSession {
       this.flushTimer = null;
     }
     this.transport.close();
+    try {
+      await this.enqueueTail;
+    } catch {
+      // A failed outbox write remains recoverable from the worker log.
+    }
     this.store?.close();
+  }
+
+  private reportLocalError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.options.onLocalError?.(message);
+    console.error("[sync] local durability operation failed:", message);
   }
 
   // ------------------------------------------------------------------ outbound
@@ -184,17 +277,21 @@ export class SyncSession {
     if (this.disposed || ops.length === 0) {
       return;
     }
+    this.serverConfirmed = false;
     const store = this.store ?? (await this.storeReady);
-    for (const op of ops) {
-      const identity = identityFromOpBytes(op);
-      if (identity === null) {
-        // Structurally invalid local op — a programming error; drop loudly.
-        console.error("[sync] local op missing identity; not persisted");
-        continue;
+    try {
+      for (const op of ops) {
+        const identity = identityFromOpBytes(op);
+        if (identity === null) {
+          // Structurally invalid local op — a programming error; drop loudly.
+          console.error("[sync] local op missing identity; not persisted");
+          continue;
+        }
+        await store.addPending(`${identity.replica}:${identity.counter}`, op);
       }
-      await store.addPending(`${identity.replica}:${identity.counter}`, op);
+    } finally {
+      await this.reportOutboxState(false);
     }
-    this.pendingFlush.push(...ops);
     if (this.transport.currentStatus === "ready") {
       this.scheduleFlush();
     }
@@ -206,13 +303,13 @@ export class SyncSession {
     }
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
-      void this.flushOutbox();
+      void this.flushOutbox().catch((error: unknown) => this.reportLocalError(error));
     }, OUTBOX_FLUSH_MS);
   }
 
   /** Sends one bounded batch of unacked ops under stable identities. */
   private async flushOutbox(): Promise<void> {
-    if (this.transport.currentStatus !== "ready" || this.disposed) {
+    if (this.transport.currentStatus !== "ready" || !this.catchupComplete || this.disposed) {
       return;
     }
     const store = this.store ?? (await this.storeReady);
@@ -220,7 +317,8 @@ export class SyncSession {
     if (unacked.length === 0) {
       return;
     }
-    // Stable order; batch identity list kept for the matching durable_ack.
+    // Stable order; the operation identities remain in the durable outbox
+    // until their individual durable ACKs arrive.
     const batch = unacked.slice(0, MAX_BATCH);
     const batchId = this.nextBatchId++;
     const ids = batch.map((record) => record.id.split(":").slice(-2).join(":"));
@@ -230,7 +328,7 @@ export class SyncSession {
       return; // not open: reconnect flow will resend
     }
     await store.markSent(ids);
-    this.sentBatches.set(batchId.toString(), ids);
+    await this.reportOutboxState(false);
   }
 
   // ------------------------------------------------------------------ resync (P5-M031)
@@ -295,10 +393,7 @@ export class SyncSession {
         expectedDocumentId: this.options.documentId,
         envelope,
         engine,
-        setCursor: (cursor) => {
-          this.lastCursor = cursor;
-          this.options.setCursor(cursor);
-        },
+        setCursor: (cursor) => this.persistCursor(cursor),
         getCursor: () => this.lastCursor,
       });
     } catch (error) {
@@ -317,31 +412,81 @@ export class SyncSession {
 
   // ------------------------------------------------------------------ inbound
 
-  private async applyRemoteOps(ops: Uint8Array[]): Promise<void> {
-    if (ops.length === 0 || this.disposed) {
+  private async applyRemoteOps(ops: Uint8Array[], cursor?: string): Promise<void> {
+    if ((ops.length === 0 && cursor === undefined) || this.disposed) {
       return;
     }
     // The worker applies idempotently (dedup inside the engine) — order
     // independence is a CRDT guarantee, not a transport one.
-    await this.options.engine.applyRemote(ops);
+    await this.options.engine.applyRemote(ops, cursor);
+  }
+
+  private async persistCursor(cursor: string): Promise<void> {
+    await this.options.engine.persistCursor?.(cursor);
+    this.options.setCursor(cursor);
+    this.lastCursor = cursor;
+  }
+
+  private async reportOutboxState(catchupConfirmed: boolean): Promise<void> {
+    const store = this.store ?? (await this.storeReady);
+    if (typeof store.stateCounts !== "function") return;
+    try {
+      const counts = await store.stateCounts();
+      this.serverConfirmed = catchupConfirmed &&
+        counts.pending === 0 && counts.sent === 0 && counts.durably_acked === 0;
+      this.options.onOutboxState?.({
+        pending: counts.pending,
+        sent: counts.sent,
+        durablyAcked: counts.durably_acked,
+        serverConfirmed: this.serverConfirmed,
+      });
+    } catch (error) {
+      // A failed count read must never be rendered as an empty outbox.
+      this.reportLocalError(error);
+    }
+  }
+
+  private queueRemote(ops: Uint8Array[], cursor?: string): void {
+    this.inboundTail = this.inboundTail.then(async () => {
+      if (this.catchupFailed || this.disposed) return;
+      try {
+        await this.applyRemoteOps(ops, cursor);
+        if (cursor !== undefined) {
+          this.options.setCursor(cursor);
+          this.lastCursor = cursor;
+        }
+      } catch (error) {
+        this.catchupFailed = true;
+        this.reportLocalError(error);
+        this.transport.reconnect();
+      }
+    });
   }
 
   private async onReady(): Promise<void> {
     // Full reconnect semantics (M034): catch-up finished — now resend every
     // still-unacked local op (same identities; server dedups).
+    await this.inboundTail;
+    if (this.catchupFailed || this.disposed) return;
+    this.catchupComplete = true;
+    const store = this.store ?? (await this.storeReady);
+    if (typeof store.ackedIds === "function") {
+      const acked = await store.ackedIds();
+      await store.clearAcked(acked);
+    }
+    await this.enqueueTail;
+    await this.reportOutboxState(true);
     await this.flushOutbox();
   }
 
-  private async handleDurableAck(batchId: string, opIds: OpIdentityString[]): Promise<void> {
+  private async handleDurableAck(_batchId: string, opIds: OpIdentityString[]): Promise<void> {
     const store = this.store ?? (await this.storeReady);
     await store.markDurablyAcked(opIds);
+    this.serverConfirmed = false;
+    await this.reportOutboxState(false);
     // Once durably acked AND the cursor persisted past them, records are
     // safe to compact — but keep them until the next catch-up confirms.
-    const sent = this.sentBatches.get(batchId);
-    if (sent !== undefined) {
-      this.sentBatches.delete(batchId);
-    }
     // Continue flushing any ops generated while the batch was in flight.
-    void this.flushOutbox();
+    void this.flushOutbox().catch((error: unknown) => this.reportLocalError(error));
   }
 }

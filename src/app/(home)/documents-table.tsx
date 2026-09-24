@@ -38,7 +38,7 @@ interface DocumentsTableProps {
 }
 
 /** Column span covered by the table (icon, name, scope, created, actions). */
-const COLUMN_COUNT = 4;
+const COLUMN_COUNT = 5;
 
 export const DocumentsTable = ({
   documents,
@@ -62,6 +62,7 @@ export const DocumentsTable = ({
             <TableHead>&nbsp;</TableHead>
             <TableHead className="hidden md:table-cell">Shared</TableHead>
             <TableHead className="hidden md:table-cell">Created at</TableHead>
+            <TableHead><span className="sr-only">Actions</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

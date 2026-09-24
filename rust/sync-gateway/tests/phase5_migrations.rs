@@ -1,7 +1,9 @@
 //! Phase 5 migration tests (P5-M011).
 //!
-//! Runs against the isolated `concord_test` database (same convention
-//! as db_integration.rs); skipped when the DB is unreachable. Verifies:
+//! Runs against `DATABASE_TEST_URL` (defaulting to the repository's
+//! `concord_test` test DB); skipped when the DB is unreachable. The
+//! phase-4-shaped migration case uses a disposable schema so it never resets
+//! shared database state. Verifies:
 //! - v2 tables/columns/indexes/constraints exist after apply;
 //! - application is idempotent and version-stable;
 //! - applies cleanly on a "Phase 4-shaped" database (only migration 1
@@ -15,11 +17,11 @@ use sync_gateway::db::pool::Db;
 
 const TEST_URL: &str = "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test";
 
-async fn test_db() -> Option<Db> {
-    let config = Config {
+fn test_config(database_url: String) -> Config {
+    Config {
         bind_host: "127.0.0.1".into(),
         bind_port: 0,
-        database_url: TEST_URL.into(),
+        database_url,
         clerk_issuer: "https://fun-blowfish-5798.clerk.accounts.dev".into(),
         clerk_audience: None,
         clerk_authorized_party: None,
@@ -43,21 +45,32 @@ async fn test_db() -> Option<Db> {
         otel_exporter: "otlp".into(),
         debug_op_ids: false,
         worker_binary: None,
-    };
-    match Db::connect(&config).await {
+    }
+}
+
+fn test_database_url() -> String {
+    std::env::var("DATABASE_TEST_URL").unwrap_or_else(|_| TEST_URL.into())
+}
+
+async fn test_db_at(database_url: String) -> Option<Db> {
+    match Db::connect(&test_config(database_url)).await {
         Ok(db) => Some(db),
         Err(_) => {
-            eprintln!("SKIP: concord_test DB unreachable");
+            eprintln!("SKIP: DATABASE_TEST_URL database unreachable");
             None
         }
     }
+}
+
+async fn test_db() -> Option<Db> {
+    test_db_at(test_database_url()).await
 }
 
 async fn table_exists(client: &tokio_postgres::Client, name: &str) -> bool {
     let row = client
         .query_one(
             "SELECT COUNT(*) AS n FROM information_schema.tables
-             WHERE table_schema = 'public' AND table_name = $1",
+             WHERE table_schema = current_schema() AND table_name = $1",
             &[&name],
         )
         .await
@@ -124,11 +137,11 @@ async fn phase5_tables_and_columns_exist() {
 }
 
 #[tokio::test]
-async fn phase5_migration_version_is_three_and_idempotent() {
+async fn gateway_migration_version_is_five_and_idempotent() {
     let Some(db) = test_db().await else { return };
     run_migrations(&db).await.expect("first apply");
     let v1 = current_version(&db).await.expect("version");
-    assert_eq!(v1, 3, "all gateway migrations must be applied");
+    assert_eq!(v1, 5, "all gateway migrations must be applied");
     run_migrations(&db).await.expect("re-apply");
     let v2 = current_version(&db).await.expect("version after re-apply");
     assert_eq!(v1, v2, "re-apply must be a no-op");
@@ -136,52 +149,80 @@ async fn phase5_migration_version_is_three_and_idempotent() {
 
 #[tokio::test]
 async fn phase5_applies_on_phase4_shaped_database() {
-    let Some(db) = test_db().await else { return };
-    // Ensure the registry + all current tables exist first (fresh DBs
-    // and post-audit resets both land here).
-    run_migrations(&db).await.expect("initial apply");
-    let mut client = db.get().await.expect("pool");
-    // Simulate a Phase 4 database: only migration 1 recorded (the
-    // pre-Phase-5 state). Rolling the registry back is only safe in
-    // the isolated test DB; tables from v2/v3 are dropped so the apply
-    // truly recreates them. The v3 floor FK must be dropped before its
-    // columns go away.
-    let tx = client.transaction().await.expect("tx");
-    tx.batch_execute(
-        "DELETE FROM gateway_schema_migrations WHERE version >= 2;
-         ALTER TABLE documents
-           DROP CONSTRAINT IF EXISTS documents_floor_snapshot_fk;
-         DROP TABLE IF EXISTS crdt_snapshots, crdt_revisions, maintenance_jobs;
-         ALTER TABLE documents
-           DROP COLUMN IF EXISTS compaction_floor_seq,
-           DROP COLUMN IF EXISTS compaction_floor_snapshot_id;",
-    )
-    .await
-    .expect("reset to phase-4 shape");
-    tx.commit().await.expect("commit reset");
+    let base_url = test_database_url();
+    let Some(admin) = test_db_at(base_url.clone()).await else {
+        return;
+    };
+    let schema = format!("phase4_migration_{}", uuid::Uuid::new_v4().simple());
+    let schema_url = format!(
+        "{base_url}{}options=-csearch_path%3D{schema}%2Cpublic",
+        if base_url.contains('?') { '&' } else { '?' }
+    );
+    let Some(db) = test_db_at(schema_url).await else {
+        return;
+    };
+    let document = uuid::Uuid::new_v4();
+    let owner = uuid::Uuid::new_v4();
+    let client = admin.get().await.expect("admin connection");
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema};
+             CREATE TABLE {schema}.users (id UUID PRIMARY KEY);
+             CREATE TABLE {schema}.documents (
+                 id UUID PRIMARY KEY,
+                 compaction_floor_snapshot_id UUID);
+             CREATE TABLE {schema}.crdt_operations (
+                 id BIGSERIAL PRIMARY KEY,
+                 document_id UUID NOT NULL REFERENCES {schema}.documents(id) ON DELETE CASCADE,
+                 operation_id TEXT NOT NULL,
+                 replica_id BIGINT NOT NULL,
+                 replica_sequence BIGINT NOT NULL,
+                 payload BYTEA NOT NULL,
+                 payload_version SMALLINT NOT NULL DEFAULT 1,
+                 payload_checksum TEXT NOT NULL,
+                 accepted_at TIMESTAMPTZ NOT NULL DEFAULT now());
+             CREATE TABLE {schema}.gateway_schema_migrations (
+                 version INTEGER PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 applied_at TIMESTAMPTZ NOT NULL DEFAULT now());
+             INSERT INTO {schema}.gateway_schema_migrations (version, name)
+                 VALUES (1, 'crdt_operations operation log');
+             INSERT INTO {schema}.users (id) VALUES ('{owner}');
+             INSERT INTO {schema}.documents (id) VALUES ('{document}');"
+        ))
+        .await
+        .expect("seed disposable phase-4-shaped schema");
 
     run_migrations(&db).await.expect("apply on phase-4 shape");
     let client = db.get().await.expect("pool");
-    let v = current_version(&db).await.expect("version");
-    assert_eq!(v, 3);
-    // Phase 1/3/4 tables untouched by the apply.
-    for table in ["users", "organizations", "documents", "crdt_operations"] {
-        assert!(table_exists(&client, table).await);
+    let version = current_version(&db).await.expect("version");
+    let tables_exist = ["users", "documents", "crdt_operations"];
+    for table in tables_exist {
+        assert!(
+            table_exists(&client, table).await,
+            "{table} missing after apply"
+        );
     }
-    // Migration v3: the floor snapshot is FK-bound (a retention purge can
-    // never strand a dangling documents.compaction_floor_snapshot_id).
-    let row = client
+    let fk_count: i64 = client
         .query_one(
-            "SELECT COUNT(*) AS n FROM information_schema.table_constraints
-             WHERE constraint_schema = 'public'
+            "SELECT COUNT(*) FROM information_schema.table_constraints
+             WHERE constraint_schema = current_schema()
                AND constraint_type = 'FOREIGN KEY'
                AND constraint_name = 'documents_floor_snapshot_fk'",
             &[],
         )
         .await
-        .expect("fk query");
-    let n: i64 = row.get("n");
-    assert_eq!(n, 1, "documents_floor_snapshot_fk missing after apply");
+        .expect("fk query")
+        .get(0);
+    admin
+        .get()
+        .await
+        .expect("admin connection")
+        .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+        .await
+        .expect("cleanup disposable schema");
+    assert_eq!(version, 5);
+    assert_eq!(fk_count, 1, "floor snapshot FK missing after apply");
 }
 
 #[tokio::test]

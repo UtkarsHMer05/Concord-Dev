@@ -34,6 +34,7 @@ class MemoryPersistence implements PersistenceAdapter {
     snapshots = new Map<string, Uint8Array>();
     logs = new Map<string, { seq: number; op: Uint8Array }[]>();
     failNextAppend = false;
+    failNextSnapshot = false;
 
     async loadLocalState(documentId: string): Promise<LocalState> {
         const ops = (this.logs.get(documentId) ?? []).map((entry) => entry.op);
@@ -54,6 +55,10 @@ class MemoryPersistence implements PersistenceAdapter {
     }
 
     async saveSnapshot(documentId: string, snapshot: Uint8Array): Promise<void> {
+        if (this.failNextSnapshot) {
+            this.failNextSnapshot = false;
+            throw new Error("simulated IndexedDB snapshot failure");
+        }
         this.snapshots.set(documentId, snapshot);
     }
 
@@ -65,9 +70,10 @@ class MemoryPersistence implements PersistenceAdapter {
 
 const DOCUMENT = "test-document-1";
 
-async function newCore(persistence: PersistenceAdapter, replicaId = 7n) {
+async function newCore(persistence: PersistenceAdapter, replicaId = 7n, storageId?: string) {
     const core = new CrdtWorkerCore({
         documentId: DOCUMENT,
+        storageId,
         replicaId,
         loadFactory,
         persistence,
@@ -88,25 +94,63 @@ describe("worker core: local durability", () => {
         expect((result as { kind: string; ops: Uint8Array[] }).ops.length).toBe(1);
     });
 
-    it("surfaces persistence failures as structured errors without losing state", async () => {
+    it("discards an uncommitted edit after append failure and continues from durable state", async () => {
         const persistence = new MemoryPersistence();
         const core = await newCore(persistence);
+        const initialDigest = await core.handle({ id: 1, kind: "digest" });
 
         persistence.failNextAppend = true;
         await expect(
-            core.handle({ id: 1, kind: "localInsertText", streamIndex: 0, codepoint: 0x68 }),
+            core.handle({ id: 2, kind: "localInsertText", streamIndex: 0, codepoint: 0x68 }),
         ).rejects.toThrow("simulated IndexedDB write failure");
 
-        // The engine integrated the op (mutation happened before persistence);
-        // the failure is surfaced — the client must treat the document as in
-        // a degraded, recovery-required state. This is the documented honest
-        // behavior: never silently pretend the write persisted.
-        const digestAfterFailure = await core.handle({ id: 2, kind: "digest" });
-        expect((digestAfterFailure as { digest: string }).digest).toMatch(/^sha256:/);
+        // The failed engine mutation is discarded. Rehydrating the core from
+        // the durable log must show the same state as before the failed write.
+        expect(await core.handle({ id: 3, kind: "digest" })).toEqual(initialDigest);
+        expect(persistence.logs.get(DOCUMENT) ?? []).toHaveLength(0);
+
+        const retry = await core.handle({ id: 4, kind: "localInsertText", streamIndex: 0, codepoint: 0x69 });
+        expect((retry as { streamSize: number }).streamSize).toBe(1);
+        const acceptedOp = (retry as { ops: Uint8Array[] }).ops[0];
+        expect(new DataView(acceptedOp.buffer, acceptedOp.byteOffset, acceptedOp.byteLength).getBigUint64(10, true)).toBe(1n);
+        expect(persistence.logs.get(DOCUMENT)).toHaveLength(1);
+        const visible = JSON.parse((await core.handle({ id: 5, kind: "visibleJson" }) as { json: string }).json) as {
+            blocks: { runs: { t: string }[] }[];
+        };
+        const text = visible.blocks.flatMap((block) => block.runs.map((run) => run.t)).join("");
+        expect(text).toContain("i");
+        expect(text).not.toContain("h");
+    });
+
+    it("keeps the previous in-memory base when snapshot persistence fails", async () => {
+        const source = await newCore(new MemoryPersistence(), 8n);
+        await source.handle({ id: 1, kind: "localInsertText", streamIndex: 0, codepoint: 0x78 });
+        const snapshot = (await source.handle({ id: 2, kind: "exportSnapshot" }) as { snapshot: Uint8Array }).snapshot;
+
+        const persistence = new MemoryPersistence();
+        const target = await newCore(persistence, 7n);
+        const before = await target.handle({ id: 3, kind: "digest" });
+        persistence.failNextSnapshot = true;
+        await expect(target.handle({ id: 4, kind: "importSnapshot", snapshot })).rejects.toThrow("simulated IndexedDB snapshot failure");
+        expect(await target.handle({ id: 5, kind: "digest" })).toEqual(before);
     });
 });
 
 describe("worker core: reload/crash restoration (M037)", () => {
+    it("isolates local replica state for different authenticated users", async () => {
+        const persistence = new MemoryPersistence();
+        const firstUser = await newCore(persistence, 7n, `${DOCUMENT}:user:user-a`);
+        await firstUser.handle({ id: 1, kind: "localInsertText", streamIndex: 0, codepoint: 0x61 });
+
+        const secondUser = await newCore(persistence, 8n, `${DOCUMENT}:user:user-b`);
+        const visible = JSON.parse((await secondUser.handle({ id: 2, kind: "visibleJson" }) as { json: string }).json) as {
+            blocks: { runs: { t: string }[] }[];
+        };
+        expect(visible.blocks[0].runs.flatMap((run) => run.t).join("")).toBe("");
+        expect(persistence.logs.get(`${DOCUMENT}:user:user-a`)).toHaveLength(1);
+        expect(persistence.logs.has(`${DOCUMENT}:user:user-b`)).toBe(false);
+    });
+
     it("restores the replica from snapshot + durable log after reload", async () => {
         const persistence = new MemoryPersistence();
         const core = await newCore(persistence);

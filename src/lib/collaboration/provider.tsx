@@ -72,13 +72,14 @@ export function DocumentSessionProvider({
   // realtime session (ops → gateway → peers); the whole-document mirror
   // must NOT double-save (it would also 409-conflict with itself on stale
   // contentVersion). Only the fallback path (unsupported content / worker
-  // failure) saves here. The store read is safe outside the effect — the
-  // value is captured per render for the saveContent closure.
-  const bridgeMode = useBridgeStatusStore((s) => s.state.mode);
-  const crdtLive = bridgeMode === "crdt";
+  // failure) saves here. saveContent reads the bridge mode at call time so
+  // a mode transition cannot leave a stale closure.
 
   const contentVersionRef = useRef(initialContentVersion);
   const pendingContentRef = useRef<unknown>(null);
+  const inFlightRef = useRef(false);
+  const disposedRef = useRef(false);
+  const flushRef = useRef<() => Promise<void>>(async () => {});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(async () => {
@@ -95,6 +96,8 @@ export function DocumentSessionProvider({
     if (payload === null || payload === undefined) {
       return;
     }
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const response = await fetch(`/api/documents/${documentId}/content`, {
         method: "POST",
@@ -107,9 +110,11 @@ export function DocumentSessionProvider({
       if (response.ok) {
         const data = (await response.json()) as { contentVersion: number };
         contentVersionRef.current = data.contentVersion;
-        pendingContentRef.current = null;
+        if (pendingContentRef.current === payload) {
+          pendingContentRef.current = null;
+        }
         setSaveError(null);
-        setStatus((s) => (s === "saving" || s === "error" ? "idle" : s));
+        setStatus(pendingContentRef.current === null ? "saved" : "saving");
         return;
       }
       if (response.status === 409) {
@@ -134,16 +139,32 @@ export function DocumentSessionProvider({
         toast.error("You no longer have permission to edit this document.");
         return;
       }
-      // Transient/server error: keep pending content, allow bounded retries
-      // through the normal debounce cycle.
+      // Transient/server error: keep pending content for the timed retry.
       setStatus("error");
       setSaveError("Save failed. Retrying…");
     } catch {
       // Network failure: keep pending content for the next flush attempt.
       setStatus("error");
       setSaveError("Save failed. Retrying…");
+    } finally {
+      inFlightRef.current = false;
+      if (
+        !disposedRef.current &&
+        pendingContentRef.current !== null &&
+        !hasConflictRef.current &&
+        timerRef.current === null
+      ) {
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null;
+          void flushRef.current();
+        }, 2_000);
+      }
     }
   }, [documentId]);
+
+  useEffect(() => {
+    flushRef.current = flush;
+  }, [flush]);
 
   const saveContent = useCallback(
     (json: unknown) => {
@@ -152,7 +173,7 @@ export function DocumentSessionProvider({
       }
       // CRDT mode owns durability (worker + sync session); the mirror is
       // the fallback path only — never both (D16 exclusivity).
-      if (crdtLive) {
+      if (useBridgeStatusStore.getState().state.mode === "crdt") {
         return;
       }
       pendingContentRef.current = json;
@@ -162,17 +183,17 @@ export function DocumentSessionProvider({
       }
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
-        void flush().then(() => {
-          setStatus((s) => (s === "saving" ? "idle" : s));
-        });
+        void flush();
       }, SAVE_DEBOUNCE_MS);
     },
-    [canEditContent, crdtLive, flush],
+    [canEditContent, flush],
   );
 
-  // Flush pending saves when navigating away/unmounting (best effort).
+  // Prevent a late in-flight response from scheduling retries after unmount.
   useEffect(() => {
+    disposedRef.current = false;
     return () => {
+      disposedRef.current = true;
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;

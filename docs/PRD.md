@@ -17,7 +17,7 @@ Labels used throughout:
 - **TARGET** — a design goal. Not yet measured; must never be quoted as an
   achieved result.
 - **MEASURED** — a result reproduced by a documented benchmark against a pinned
-  commit. No MEASURED values exist yet.
+  commit. See [BENCHMARKS.md](BENCHMARKS.md) for measured values and their scope.
 
 ---
 

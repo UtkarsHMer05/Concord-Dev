@@ -9,9 +9,13 @@ variable a Concord deployment needs. The executable half of the contract is
 [`scripts/config/validate-env.mjs`](../scripts/config/validate-env.mjs):
 
 ```bash
-node scripts/config/validate-env.mjs --env-file .env.local --scope dev
+node scripts/config/validate-env.mjs --env-file .env.local --scope dev --service web
 node scripts/config/validate-env.mjs --scope prod --json   # CI-friendly
 ```
+
+`--service` accepts `web`, `gateway`, or `all` (the default). JSON output
+includes the selected `service` alongside `scope`, `checked`, `missing`,
+`malformed`, and `result`.
 
 It checks **presence + format only — never values**. It exits non-zero and
 names every missing/malformed variable.
@@ -97,7 +101,7 @@ it unset until its app origin is known.
 | Variable | Default | Validation |
 |---|---|---|
 | `GATEWAY_BIND_PORT` | `8787` | numeric port; non-numeric → exit 2. (Local cluster convention: 8791–8793.) |
-| `GATEWAY_MAX_FRAME_SIZE` | `8388608` (8 MiB) | must be ≥ 1024 bytes |
+| `GATEWAY_MAX_FRAME_SIZE` | `8388608` (8 MiB) | must be ≥ 1024 bytes; applies to inbound and outbound WebSocket frames, including catch-up and snapshots |
 | `GATEWAY_QUEUE_CAPACITY` | `512` | must be ≥ 1 |
 | `GATEWAY_HEARTBEAT_INTERVAL_SECS` | `30` | seconds |
 | `GATEWAY_IDLE_TIMEOUT_SECS` | `120` | seconds |
@@ -165,8 +169,9 @@ provider-specific wiring).
 node scripts/config/validate-env.mjs --scope prod
 ```
 
-CI/deploy pipeline usage: `--json` emits `{scope, checked, missing[],
-malformed[], result}` for machine consumption; exit code 1 on any finding.
+CI/deploy pipeline usage: `--json` emits `{scope, service, envFile, checked,
+missing[], malformed[], result}` for machine consumption; exit code 1 on any
+finding.
 
 ## Secret hygiene rules
 

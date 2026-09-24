@@ -27,6 +27,7 @@ import { useSyncStatusStore } from "@/store/use-sync-status-store";
 import { useBridgeStatusStore } from "@/store/use-bridge-status-store";
 import type { CrdtClient } from "@/lib/crdt/worker/client";
 import type { CrdtEditorBridge } from "@/lib/crdt/editor-bridge";
+import { hasReplicaData } from "@/lib/crdt/worker/idb";
 import { SyncSession } from "@/lib/sync/sync-session";
 import { WorkerEnginePort } from "@/lib/sync/worker-engine-port";
 
@@ -42,13 +43,14 @@ export function syncGatewayUrl(): string | null {
 const CURSOR_KEY_PREFIX = "concord.sync.";
 const CURSOR_KEY_SUFFIX = ".cursor";
 
-function cursorKey(documentId: string): string {
-    return `${CURSOR_KEY_PREFIX}${documentId}${CURSOR_KEY_SUFFIX}`;
+function cursorKey(documentId: string, userId?: string | null): string {
+    const scope = userId ? `${encodeURIComponent(userId)}.` : "";
+    return `${CURSOR_KEY_PREFIX}${scope}${documentId}${CURSOR_KEY_SUFFIX}`;
 }
 
-function readCursor(documentId: string): string {
+function readCursor(documentId: string, userId?: string | null): string {
     try {
-        const stored = window.localStorage.getItem(cursorKey(documentId));
+        const stored = window.localStorage.getItem(cursorKey(documentId, userId));
         if (stored !== null && /^(?:0|[1-9][0-9]*)$/.test(stored)) {
             return stored;
         }
@@ -58,9 +60,9 @@ function readCursor(documentId: string): string {
     return "0";
 }
 
-function writeCursor(documentId: string, cursor: string): void {
+function writeCursor(documentId: string, cursor: string, userId?: string | null): void {
     try {
-        window.localStorage.setItem(cursorKey(documentId), cursor);
+        window.localStorage.setItem(cursorKey(documentId, userId), cursor);
     } catch {
         // Best-effort persistence; the in-memory cursor still advances.
     }
@@ -81,26 +83,24 @@ export interface UseSyncSessionParams {
  * the Phase 1 mirror owns it instead).
  */
 export function useSyncSession({ documentId, crdtClient, bridge }: UseSyncSessionParams): void {
-    const { getToken, isLoaded, isSignedIn } = useAuth();
+    const { getToken, isLoaded, isSignedIn, userId } = useAuth();
     const setSyncStatus = useSyncStatusStore((s) => s.setStatus);
+    const setSyncError = useSyncStatusStore((s) => s.setError);
+    const setCompatibilityWarning = useSyncStatusStore((s) => s.setCompatibilityWarning);
+    const setLocalOnly = useSyncStatusStore((s) => s.setLocalOnly);
+    const setOutbox = useSyncStatusStore((s) => s.setOutbox);
     const clearSyncStatus = useSyncStatusStore((s) => s.clear);
     const bridgeMode = useBridgeStatusStore((s) => s.state.mode);
 
     useEffect(() => {
         const gatewayUrl = syncGatewayUrl();
-        // Local-only truth: no gateway URL, no worker, no Clerk session, or
-        // the bridge fell back to the whole-document save path. The CRDT
-        // replica keeps working; no connection status is implied.
-        if (
-            !gatewayUrl ||
-            !crdtClient ||
-            bridgeMode !== "crdt" ||
-            !bridge ||
-            !isLoaded ||
-            !isSignedIn ||
-            typeof getToken !== "function"
-        ) {
+        if (!isLoaded) {
             clearSyncStatus();
+            return;
+        }
+        clearSyncStatus();
+        if (!isSignedIn || !userId) {
+            setLocalOnly(bridgeMode === "crdt");
             return;
         }
         let cancelled = false;
@@ -109,7 +109,22 @@ export function useSyncSession({ documentId, crdtClient, bridge }: UseSyncSessio
 
         void (async () => {
             const { PendingOpStore } = await import("./pending-store");
-            const opened = await PendingOpStore.open(documentId);
+            const [legacyWorkerData, legacyOutboxData] = await Promise.all([
+                hasReplicaData(documentId),
+                PendingOpStore.hasLegacyUnacked(documentId),
+            ]);
+            if (cancelled) return;
+            setCompatibilityWarning(legacyWorkerData || legacyOutboxData
+                ? "Legacy local cache found: it may contain offline edits, but its owner and sync status cannot be verified. It was preserved and not loaded into this account. Keep this browser's site data until manual recovery or export is complete."
+                : null);
+            // Local-only or fallback paths still warn about retained legacy
+            // data, but never start a transport or read it into this account.
+            if (!gatewayUrl || !crdtClient || bridgeMode !== "crdt" || !bridge || typeof getToken !== "function") {
+                setLocalOnly(bridgeMode === "crdt");
+                return;
+            }
+            setLocalOnly(false);
+            const opened = await PendingOpStore.open(documentId, userId);
             if (cancelled) {
                 opened.close();
                 return;
@@ -138,10 +153,13 @@ export function useSyncSession({ documentId, crdtClient, bridge }: UseSyncSessio
                     return token;
                 },
                 engine,
-                getCursor: () => readCursor(documentId),
-                setCursor: (cursor) => writeCursor(documentId, cursor),
+                getCursor: () => readCursor(documentId, userId),
+                setCursor: (cursor) => writeCursor(documentId, cursor, userId),
                 store: opened,
                 onStatus: (status) => setSyncStatus(status),
+                onError: (code, message) => setSyncError(`${code}: ${message}`),
+                onLocalError: (message) => setSyncError(`Local sync storage failed: ${message}`),
+                onOutboxState: (state) => setOutbox(state),
             });
             // Unmount raced the async store open: stop immediately — a
             // session must never outlive its page.
@@ -153,6 +171,7 @@ export function useSyncSession({ documentId, crdtClient, bridge }: UseSyncSessio
             await session.start();
         })().catch((error: unknown) => {
             console.error("[sync] session failed to start:", error);
+            setSyncError(`Local sync could not start: ${error instanceof Error ? error.message : String(error)}`);
         });
 
         return () => {
@@ -164,5 +183,5 @@ export function useSyncSession({ documentId, crdtClient, bridge }: UseSyncSessio
         // getToken identity is stable from Clerk; the rest are per-mount.
         // bridgeMode re-runs the effect on bridge mode transitions.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [documentId, crdtClient, bridge, bridgeMode, isLoaded, isSignedIn, setSyncStatus, clearSyncStatus]);
+    }, [documentId, crdtClient, bridge, bridgeMode, isLoaded, isSignedIn, userId, setSyncStatus, setSyncError, setCompatibilityWarning, setLocalOnly, setOutbox, clearSyncStatus]);
 }

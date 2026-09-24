@@ -20,10 +20,11 @@ PIDS=()
 
 start() {
   test -x "$GW_BIN" || { echo "missing $GW_BIN — run cargo build --release"; exit 1; }
+  : "${GATEWAY_CLERK_ISSUER:?set GATEWAY_CLERK_ISSUER to your Clerk issuer}"
   docker compose up -d db nats redis >/dev/null
   common_env=(
     GATEWAY_DATABASE_URL="postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test"
-    GATEWAY_CLERK_ISSUER="https://fun-blowfish-5798.clerk.accounts.dev"
+    GATEWAY_CLERK_ISSUER="$GATEWAY_CLERK_ISSUER"
     GATEWAY_NATS_URL="nats://127.0.0.1:4222"
     GATEWAY_REDIS_URL="redis://127.0.0.1:6379"
     GATEWAY_NATS_SUBJECT_PREFIX="concord.dev"
@@ -43,7 +44,7 @@ start() {
     -p "127.0.0.1:${LB_PORT}:8890" \
     -v "$(pwd)/scripts/lb/nginx.conf:/etc/nginx/nginx.conf:ro" \
     --add-host=host.docker.internal:host-gateway \
-    nginx:1.29-alpine >/dev/null
+    nginx:1.31.5-alpine-slim@sha256:3b171d7224b669faa3cc2137fea0a65301791df1ec1f271ebd2a2b7461f7fade >/dev/null
   echo "cluster up: LB ws://127.0.0.1:${LB_PORT}/api/v1/sync over gateways ${GW_PORTS[*]}"
   echo "pids: ${PIDS[*]} (stop with $0 stop)"
 }

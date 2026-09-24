@@ -196,8 +196,8 @@ Unknown `v` → behavior defined in §9.12.
 All integers big-endian. `kind` byte selects the binary frame type.
 
 ```
-client_ops:  [0x01] [0x20] [batch_id u64] [count u16] { [op_len u16] [op bytes] }*
-sync_batch:  [0x01] [0x21] [next_cursor u64] [has_more u8] [count u16] { [op_len u16] [op bytes] }*
+client_ops:  [0x01] [0x20] [batch_id u64] [count u16] { [op_len u32] [op bytes] }*
+sync_batch:  [0x01] [0x21] [next_cursor u64] [has_more u8] [count u16] { [op_len u32] [op bytes] }*
 ```
 
 - `op bytes` are the Phase 2 canonical operation frames (§7, `payload_version
@@ -224,8 +224,8 @@ sync_batch:  [0x01] [0x21] [next_cursor u64] [has_more u8] [count u16] { [op_len
 | `snapshot_resync_required` | s→c | `{ boundary, snapshotId, snapshotChecksum, snapshotFormatVersion, coverageOpCount }` (u64s as decimal strings; sent instead of delta pages when the client's cursor precedes the document's compaction floor) |
 | `fetch_snapshot` | c→s | `{ snapshotId: uuid }` (rate-limited: `fetch` scope, 30/min/connection) |
 | `snapshot_payload` | s→c | `{ snapshotId, formatVersion, coverageSeq, coveredOpCount, stateDigest, checksum, payloadBase64, payloadSize }` — base64 wrapper bytes + declared size (the client's size/checksum defenses are live on this transport) |
-| `ping` | c→s | `{ nonce: u64 }` |
-| `pong` | s→c | `{ nonce: u64 }` |
+| `ping` | c→s | `{ nonce: string }` |
+| `pong` | s→c | `{ nonce: string }` |
 | `error` | both | `{ code, message, requestId? }` (§9.8) |
 | `server_draining` | s→c | `{ reason: "shutdown", graceMs: u32 }` |
 
@@ -307,8 +307,9 @@ context.
 
 ### 9.9 Heartbeat
 
-The server sends `ping {nonce}` when idle past the heartbeat interval; the
-client MUST reply `pong {nonce}`. The client may also ping. An idle
+The server sends `ping {nonce}` with a UUID string when idle past the
+heartbeat interval; the client MUST reply `pong {nonce}` with the same value.
+The client may also ping with an opaque string nonce. An idle
 connection past the idle timeout is closed and its session cleaned up.
 Heartbeats use control frames, not WebSocket-level ping frames, so they are
 visible to the protocol layer and proxies uniformly.
@@ -323,7 +324,9 @@ window, then closes. A client that was mid-batch reconnects and resends
 
 ### 9.11 Limits (wire)
 
-- max WebSocket frame size: **8 MiB**,
+- max WebSocket frame size: **8 MiB by default**; `GATEWAY_MAX_FRAME_SIZE`
+  configures the gateway's inbound and outbound limit in bytes (minimum 1024),
+  including catch-up and snapshot frames,
 - `client_ops` batch: `count ≤ 1024` ops and total payload ≤ 4 MiB,
 - per-operation size ≤ 64 KiB (Phase 2 §5),
 - `sync_batch` page: `count ≤ 1024` ops,

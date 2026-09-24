@@ -27,6 +27,12 @@ pub enum RepoError {
     /// the ingestion transaction — P3-M037 recheck-per-write policy).
     #[error("write denied")]
     WriteDenied,
+    #[error("replica belongs to another user")]
+    ReplicaOwnedByAnotherUser,
+    #[error("replica identity predates authenticated ownership and is quarantined")]
+    LegacyReplicaQuarantined,
+    #[error("operation identity already has different bytes")]
+    IdentityConflict,
 }
 
 /// Concord user id (uuid) for a verified Clerk user id.
@@ -168,6 +174,54 @@ impl GatewayRepo {
         let payloads: Vec<Vec<u8>> = envelopes.iter().map(|env| env.bytes.clone()).collect();
         let checksums: Vec<String> = payloads.iter().map(|p| hex_checksum(p)).collect();
 
+        // Claim each client replica in this transaction. The unique key
+        // serializes concurrent claims on different gateways. REST/SYSC are
+        // server-owned and rejected at the client frame decoder.
+        let client_replicas: Vec<i64> = replicas
+            .iter()
+            .copied()
+            .filter(|r| !matches!(*r as u64, 0x5245_5354 | 0x5359_5343))
+            .collect();
+        if !client_replicas.is_empty() {
+            if tx
+                .query_opt(
+                    "SELECT 1 FROM crdt_legacy_replicas
+                     WHERE document_id = $1 AND replica_id = ANY($2) LIMIT 1",
+                    &[&document, &client_replicas],
+                )
+                .await?
+                .is_some()
+            {
+                return Err(RepoError::LegacyReplicaQuarantined);
+            }
+            tx.execute(
+                "INSERT INTO crdt_replica_owners (document_id, replica_id, user_id)
+                 SELECT DISTINCT $1::uuid, replica_id, $2::uuid
+                 FROM unnest($3::bigint[]) AS t(replica_id)
+                 ON CONFLICT (document_id, replica_id) DO NOTHING",
+                &[&document, &user.0, &client_replicas],
+            )
+            .await?;
+            let owners = tx
+                .query(
+                    "SELECT user_id FROM crdt_replica_owners
+                 WHERE document_id = $1 AND replica_id = ANY($2)",
+                    &[&document, &client_replicas],
+                )
+                .await?;
+            if owners.len()
+                != client_replicas
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                || owners
+                    .iter()
+                    .any(|row| row.get::<_, Uuid>("user_id") != user.0)
+            {
+                return Err(RepoError::ReplicaOwnedByAnotherUser);
+            }
+        }
+
         let inserted_rows = tx
             .query(
                 "INSERT INTO crdt_operations
@@ -187,6 +241,27 @@ impl GatewayRepo {
             .iter()
             .map(|r| r.get::<&str, &str>("operation_id"))
             .collect();
+
+        // A duplicate ACK is valid only for exactly the same canonical
+        // bytes. PostgreSQL's unique key alone cannot enforce this.
+        let stored = tx
+            .query(
+                "SELECT operation_id, payload_checksum FROM crdt_operations
+             WHERE document_id = $1 AND operation_id = ANY($2)",
+                &[&document, &op_ids],
+            )
+            .await?;
+        let stored_checksums: std::collections::HashMap<&str, &str> = stored
+            .iter()
+            .map(|row| (row.get("operation_id"), row.get("payload_checksum")))
+            .collect();
+        if op_ids
+            .iter()
+            .zip(checksums.iter())
+            .any(|(id, checksum)| stored_checksums.get(id.as_str()) != Some(&checksum.as_str()))
+        {
+            return Err(RepoError::IdentityConflict);
+        }
 
         // 3. Report newly-inserted vs duplicates, in original batch order.
         let mut newly = Vec::with_capacity(envelopes.len());

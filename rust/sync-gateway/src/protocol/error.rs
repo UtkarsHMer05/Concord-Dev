@@ -7,7 +7,7 @@
 /// Structured decode failure for any inbound frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
-    /// The raw message (text or binary) exceeded `MAX_FRAME_BYTES`.
+    /// The raw message (text or binary) exceeded the configured frame limit.
     FrameTooLarge { size: usize },
     /// A text frame was not valid UTF-8.
     InvalidUtf8,

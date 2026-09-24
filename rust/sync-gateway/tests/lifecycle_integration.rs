@@ -136,7 +136,7 @@ fn base_config() -> Config {
     Config {
         bind_host: "127.0.0.1".into(),
         bind_port: 0,
-        database_url: TEST_DB_URL.into(),
+        database_url: std::env::var("DATABASE_TEST_URL").unwrap_or_else(|_| TEST_DB_URL.into()),
         clerk_issuer: ISSUER.into(),
         clerk_audience: None,
         clerk_authorized_party: None,
@@ -311,14 +311,10 @@ async fn ensure_user(clerk_id: &str) -> Uuid {
 // Test 1: shutdown stress
 // ---------------------------------------------------------------------------
 
-/// Opens N connections joined to one document, then performs main.rs's exact
-/// graceful-shutdown sequence (drain flag → `begin_drain` → bounded grace →
-/// server future dropped). Asserts: all N receive `server_draining`, the
-/// server task terminates well within a generous bound (no hang), and the
-/// session registry drains to zero rooms once sockets close (no leaked
-/// per-connection state behind a detached task).
+/// Opens N connections joined to one document, notifies them, then signals
+/// closure. Asserts all N receive the notice and a WebSocket close frame.
 #[tokio::test]
-async fn graceful_shutdown_notifies_all_and_exits_cleanly() {
+async fn graceful_shutdown_notifies_and_closes_all_connections() {
     let Some((server, server_task)) = boot().await else {
         eprintln!("SKIP: db down");
         return;
@@ -376,19 +372,23 @@ async fn graceful_shutdown_notifies_all_and_exits_cleanly() {
     }
     assert_eq!(notices, N, "every live connection got the drain notice");
 
-    // 4. Stop serving (abort the server task, as process exit would) —
-    //    the task must END promptly, not hang. Any resolution counts:
-    //    Ok(Ok(())) = ran to completion; Ok(Err(_)) = aborted (the
-    //    expected abort outcome resolves as JoinError::Cancelled);
-    //    Err(_)-elapsed would mean a hang, but it still resolves the
-    //    assert only after the 5s bound — the important property is the
-    //    handle RESOLVED and never wedged.
+    // The registry signal bypasses the per-connection outbound queues.
+    sync_gateway::ws::close_drained(&server.registry).await;
+    for ws in &mut sockets {
+        let close = tokio::time::timeout(Duration::from_secs(2), ws.next())
+            .await
+            .expect("close frame within timeout");
+        assert!(
+            matches!(close, Some(Ok(WsMessage::Close(_)))),
+            "expected WebSocket close frame"
+        );
+    }
+
+    // The harness serves indefinitely, so stop its listener after checking
+    // that every upgraded connection received the close frame.
     server_task.abort();
     let exited = tokio::time::timeout(Duration::from_secs(5), server_task).await;
-    assert!(
-        matches!(exited, Ok(Ok(())) | Ok(Err(_)) | Err(_)),
-        "JoinHandle resolved (aborted or finished) — never a hang"
-    );
+    assert!(matches!(exited, Ok(Err(e)) if e.is_cancelled()));
 
     // 5. Clients close; every connection's cleanup path runs (leave room).
     //    Drive it by dropping the sockets and polling the registry.
@@ -403,6 +403,15 @@ async fn graceful_shutdown_notifies_all_and_exits_cleanly() {
         room_count, 0,
         "registry must drain to zero rooms after sockets close (no leaked state)"
     );
+    let client = server.repo.db.get().await.expect("pool");
+    client
+        .execute("DELETE FROM documents WHERE id = $1", &[&doc])
+        .await
+        .expect("cleanup doc");
+    client
+        .execute("DELETE FROM users WHERE id = $1", &[&user])
+        .await
+        .expect("cleanup user");
 }
 
 impl TestServer {
@@ -442,6 +451,7 @@ async fn registry_fanout_stalled_consumer_is_marked_and_bounded() {
                 user_id: Uuid::new_v4(),
                 join_role: sync_gateway::db::authz::EffectiveRole::Editor,
                 outbound: tx,
+                close: tokio::sync::watch::channel(false).0,
             },
             rx,
         )

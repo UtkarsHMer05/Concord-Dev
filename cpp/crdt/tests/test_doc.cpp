@@ -120,6 +120,20 @@ CONCORD_TEST(block_attribute_registers) {
     CHECK(cleared.attrs.find("align") == cleared.attrs.end());
 }
 
+CONCORD_TEST(stream_export_matches_indexed_entries) {
+    Doc doc(ReplicaId{1});
+    (void)doc.local_insert_text(0, U'a');
+    (void)doc.local_insert_delimiter(1, "heading-1");
+    (void)doc.local_insert_text(2, U'b');
+    (void)doc.local_set_attr(1, "align", std::string{"center"});
+    (void)doc.local_delete(0);
+    const auto entries = doc.stream_entries();
+    CHECK_EQ(entries.size(), doc.stream_size());
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        CHECK(entries[i] == doc.stream_entry(i));
+    }
+}
+
 CONCORD_TEST(text_mark_registers) {
     Doc doc(ReplicaId{1});
 (void)    doc.local_insert_text(0, U'a');

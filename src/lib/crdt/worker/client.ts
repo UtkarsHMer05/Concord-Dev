@@ -120,15 +120,24 @@ export class CrdtClient {
     // Typed API.
     // ------------------------------------------------------------------
 
-    async init(documentId: string, replicaId: bigint): Promise<void> {
-        await this.call({ kind: "init", documentId, replicaId: replicaId.toString() });
+    async init(documentId: string, replicaId: bigint, storageId?: string): Promise<void> {
+        await this.call({ kind: "init", documentId, replicaId: replicaId.toString(), storageId });
     }
 
-    applyRemote(ops: Uint8Array[]): Promise<{ applied: number; duplicates: number }> {
-        return this.call({ kind: "applyRemote", ops }) as Promise<{
+    applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }> {
+        return this.call({ kind: "applyRemote", ops, cursor }) as Promise<{
             applied: number;
             duplicates: number;
         }>;
+    }
+
+    async syncCursor(): Promise<string> {
+        const result = await this.call({ kind: "getSyncCursor" });
+        return (result as { kind: "getSyncCursor"; cursor: string }).cursor;
+    }
+
+    async persistSyncCursor(cursor: string): Promise<void> {
+        await this.call({ kind: "persistSyncCursor", cursor });
     }
 
     localInsertText(streamIndex: number, codepoint: number): Promise<Uint8Array[]> {

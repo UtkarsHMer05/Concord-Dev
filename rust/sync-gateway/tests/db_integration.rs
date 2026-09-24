@@ -10,6 +10,7 @@
 
 use std::str::FromStr;
 
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use sync_gateway::config::Config;
@@ -22,8 +23,12 @@ use sync_gateway::protocol::envelope::{validate_op, OpEnvelope};
 
 const TEST_URL: &str = "postgres://concord:concord_local_dev@127.0.0.1:5433/concord_test";
 
+fn test_url() -> String {
+    std::env::var("DATABASE_TEST_URL").unwrap_or_else(|_| TEST_URL.into())
+}
+
 async fn test_db() -> Option<Db> {
-    test_db_at(TEST_URL).await
+    test_db_at(&test_url()).await
 }
 
 async fn test_db_at(database_url: &str) -> Option<Db> {
@@ -77,7 +82,7 @@ async fn concurrent_first_start_migrations_are_idempotent() {
         ))
         .await
         .expect("isolated application schema");
-    let url = format!("{TEST_URL}?options=-csearch_path%3D{schema}");
+    let url = format!("{}?options=-csearch_path%3D{schema}", test_url());
     let db = test_db_at(&url).await.expect("isolated pool");
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(4));
     let mut starts = Vec::new();
@@ -114,13 +119,97 @@ async fn concurrent_first_start_migrations_are_idempotent() {
         errors.is_empty(),
         "concurrent migration failures: {errors:?}"
     );
-    assert_eq!(version.expect("current version"), 3);
+    assert_eq!(version.expect("current version"), 5);
     let versions: Vec<i32> = rows
         .expect("registry rows")
         .iter()
         .map(|row| row.get(0))
         .collect();
-    assert_eq!(versions, vec![1, 2, 3], "each migration is recorded once");
+    assert_eq!(
+        versions,
+        vec![1, 2, 3, 4, 5],
+        "each migration is recorded once"
+    );
+}
+
+#[tokio::test]
+async fn v5_quarantines_existing_client_replicas_and_preserves_operations() {
+    let Some(admin) = test_db().await else { return };
+    let client = admin.get().await.expect("admin connection");
+    let schema = format!("replica_quarantine_{}", Uuid::new_v4().simple());
+    let document = Uuid::new_v4();
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema};
+             CREATE TABLE {schema}.users (id UUID PRIMARY KEY);
+             CREATE TABLE {schema}.documents (id UUID PRIMARY KEY);
+             CREATE TABLE {schema}.crdt_operations (
+                 document_id UUID NOT NULL, replica_id BIGINT NOT NULL);
+             CREATE TABLE {schema}.crdt_replica_owners (
+                 document_id UUID NOT NULL, replica_id BIGINT NOT NULL,
+                 user_id UUID NOT NULL, PRIMARY KEY (document_id, replica_id));
+             CREATE TABLE {schema}.gateway_schema_migrations (
+                 version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+                 applied_at TIMESTAMPTZ NOT NULL DEFAULT now());"
+        ))
+        .await
+        .expect("isolated v4 schema");
+    client
+        .execute(
+            &format!("INSERT INTO {schema}.documents VALUES ($1)"),
+            &[&document],
+        )
+        .await
+        .expect("seed document");
+    client
+        .execute(
+            &format!(
+                "INSERT INTO {schema}.crdt_operations (document_id, replica_id)
+                 VALUES ($1, 9101), ($1, 1380275028), ($1, 1398362947)"
+            ),
+            &[&document],
+        )
+        .await
+        .expect("seed v4 operation history");
+    client
+        .batch_execute(&format!(
+            "INSERT INTO {schema}.gateway_schema_migrations (version, name)
+             SELECT version, 'v' || version FROM generate_series(1, 4) AS s(version)"
+        ))
+        .await
+        .expect("seed v4 migration registry");
+
+    let url = format!("{}?options=-csearch_path%3D{schema}", test_url());
+    let db = test_db_at(&url).await.expect("isolated pool");
+    run_migrations(&db).await.expect("apply v5");
+    let client = db.get().await.expect("isolated connection");
+    let legacy_ids: Vec<i64> = client
+        .query(
+            "SELECT replica_id FROM crdt_legacy_replicas ORDER BY replica_id",
+            &[],
+        )
+        .await
+        .expect("quarantined replicas")
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    let operation_count: i64 = client
+        .query_one("SELECT COUNT(*) FROM crdt_operations", &[])
+        .await
+        .expect("operation count")
+        .get(0);
+    let version = current_version(&db).await.expect("migration version");
+    admin
+        .get()
+        .await
+        .expect("admin connection")
+        .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+        .await
+        .expect("cleanup isolated schema");
+
+    assert_eq!(legacy_ids, vec![9_101], "maintenance replicas stay exempt");
+    assert_eq!(operation_count, 3, "v5 leaves the durable log intact");
+    assert_eq!(version, 5);
 }
 
 /// Canonical minimal insert op bytes (matches protocol::envelope tests).
@@ -234,7 +323,7 @@ fn test_config() -> Config {
     Config {
         bind_host: "127.0.0.1".into(),
         bind_port: 0,
-        database_url: TEST_URL.into(),
+        database_url: test_url(),
         clerk_issuer: "https://fun-blowfish-5798.clerk.accounts.dev".into(),
         clerk_audience: None,
         clerk_authorized_party: None,
@@ -490,6 +579,368 @@ async fn concurrent_duplicate_ingest_is_idempotent() {
         },
     )
     .await;
+}
+
+#[tokio::test]
+async fn independent_gateways_resolve_duplicate_and_conflicting_identity_races() {
+    let Some(db_a) = test_db().await else {
+        eprintln!("SKIP: concord_test DB unreachable");
+        return;
+    };
+    run_migrations(&db_a).await.expect("apply");
+    let db_b = test_db_at(&test_url()).await.expect("second gateway pool");
+    let repo_a = GatewayRepo::new(db_a.clone());
+    let repo_b = GatewayRepo::new(db_b);
+    let owner = seed_user(
+        &db_a,
+        &format!("it-independent-owner-{}", Uuid::new_v4()),
+        None,
+    )
+    .await;
+    let doc = seed_document(&db_a, owner, None).await;
+    let uid = sync_gateway::db::repo::UserId(owner);
+
+    let identical = make_op(9_104, 1);
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let (a, b) = tokio::join!(
+        async {
+            barrier.wait().await;
+            repo_a
+                .ingest_batch(uid, doc, std::slice::from_ref(&identical))
+                .await
+        },
+        async {
+            barrier.wait().await;
+            repo_b
+                .ingest_batch(uid, doc, std::slice::from_ref(&identical))
+                .await
+        },
+    );
+    let a = a.expect("gateway A duplicate race");
+    let b = b.expect("gateway B duplicate race");
+    assert_eq!(a.newly_inserted.len() + b.newly_inserted.len(), 1);
+    assert_eq!(a.duplicates.len() + b.duplicates.len(), 1);
+    assert_eq!(
+        a.all_ids, b.all_ids,
+        "duplicate ACK resolves to the same identity"
+    );
+
+    let mut collision_a = make_op(9_105, 1);
+    let mut collision_b = make_op(9_105, 1);
+    let scalar = collision_a.bytes.len() - 2;
+    collision_a.bytes[scalar] = b'b';
+    collision_b.bytes[scalar] = b'c';
+    assert_eq!(collision_a.identity, collision_b.identity);
+    assert_ne!(collision_a.bytes, collision_b.bytes);
+    let extra_a = make_op(9_106, 1);
+    let extra_b = make_op(9_107, 1);
+    let batch_a = [collision_a.clone(), extra_a.clone()];
+    let batch_b = [collision_b.clone(), extra_b.clone()];
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let (a, b) = tokio::join!(
+        async {
+            barrier.wait().await;
+            repo_a.ingest_batch(uid, doc, &batch_a).await
+        },
+        async {
+            barrier.wait().await;
+            repo_b.ingest_batch(uid, doc, &batch_b).await
+        },
+    );
+    let (winning_payload, winning_extra, losing_extra, losing_replica) = match (a, b) {
+        (Ok(result), Err(sync_gateway::db::repo::RepoError::IdentityConflict)) => {
+            assert_eq!(result.newly_inserted.len(), 2);
+            (
+                collision_a.bytes,
+                extra_a.identity.to_wire(),
+                extra_b.identity.to_wire(),
+                9_107i64,
+            )
+        }
+        (Err(sync_gateway::db::repo::RepoError::IdentityConflict), Ok(result)) => {
+            assert_eq!(result.newly_inserted.len(), 2);
+            (
+                collision_b.bytes,
+                extra_b.identity.to_wire(),
+                extra_a.identity.to_wire(),
+                9_106i64,
+            )
+        }
+        (a, b) => panic!("expected one commit and one identity conflict, got {a:?} / {b:?}"),
+    };
+
+    let client = db_a.get().await.expect("pool");
+    let rows = client
+        .query(
+            "SELECT operation_id, payload FROM crdt_operations WHERE document_id = $1",
+            &[&doc],
+        )
+        .await
+        .expect("durable operations");
+    assert_eq!(
+        rows.len(),
+        3,
+        "the rejected batch leaves no partial operation"
+    );
+    let collision_id = collision_a.identity.to_wire();
+    let stored_collision = rows
+        .iter()
+        .find(|row| row.get::<_, String>("operation_id") == collision_id)
+        .expect("one committed payload for the colliding identity");
+    assert_eq!(
+        stored_collision.get::<_, Vec<u8>>("payload"),
+        winning_payload
+    );
+    let stored_ids: Vec<String> = rows.iter().map(|row| row.get("operation_id")).collect();
+    assert!(stored_ids.contains(&winning_extra));
+    assert!(!stored_ids.contains(&losing_extra));
+    let losing_owner_count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM crdt_replica_owners
+             WHERE document_id = $1 AND replica_id = $2",
+            &[&doc, &losing_replica],
+        )
+        .await
+        .expect("losing replica owner count")
+        .get(0);
+    assert_eq!(
+        losing_owner_count, 0,
+        "the failed batch rolls back its replica claim"
+    );
+
+    cleanup(
+        &db_a,
+        &Fixture {
+            user: owner,
+            document: doc,
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn conflicting_identity_and_cross_user_replica_claims_are_rejected() {
+    let Some(db) = test_db().await else {
+        eprintln!("SKIP: concord_test DB unreachable");
+        return;
+    };
+    run_migrations(&db).await.expect("apply");
+    let owner = seed_user(&db, &format!("it-collision-owner-{}", Uuid::new_v4()), None).await;
+    let editor = seed_user(
+        &db,
+        &format!("it-collision-editor-{}", Uuid::new_v4()),
+        None,
+    )
+    .await;
+    let doc = seed_document(&db, owner, None).await;
+    seed_acl(&db, doc, editor, "EDITOR").await;
+    let repo = GatewayRepo::new(db.clone());
+    let repo2 = GatewayRepo::new(test_db_at(&test_url()).await.expect("second gateway pool"));
+
+    // Server-generated REST/SYSC operations use reserved identities and
+    // must not claim a client replica owner row.
+    for replica in [0x5245_5354, 0x5359_5343] {
+        repo.ingest_batch(
+            sync_gateway::db::repo::UserId(owner),
+            doc,
+            &[make_op(replica, 1)],
+        )
+        .await
+        .expect("server maintenance operation");
+    }
+    let maintenance_owners: i64 = db
+        .get()
+        .await
+        .expect("pool")
+        .query_one(
+            "SELECT COUNT(*) FROM crdt_replica_owners
+             WHERE document_id = $1 AND replica_id = ANY($2)",
+            &[&doc, &vec![0x5245_5354i64, 0x5359_5343i64]],
+        )
+        .await
+        .expect("maintenance owner count")
+        .get(0);
+    assert_eq!(maintenance_owners, 0);
+
+    let op = make_op(9_101, 1);
+    repo.ingest_batch(
+        sync_gateway::db::repo::UserId(owner),
+        doc,
+        std::slice::from_ref(&op),
+    )
+    .await
+    .expect("initial ingest");
+
+    let mut changed = op.clone();
+    let scalar = changed.bytes.len() - 2;
+    changed.bytes[scalar] = b'b';
+    let conflict = repo
+        .ingest_batch(sync_gateway::db::repo::UserId(owner), doc, &[changed])
+        .await;
+    assert!(matches!(
+        conflict,
+        Err(sync_gateway::db::repo::RepoError::IdentityConflict)
+    ));
+
+    let stolen = repo
+        .ingest_batch(
+            sync_gateway::db::repo::UserId(editor),
+            doc,
+            &[make_op(9_101, 2)],
+        )
+        .await;
+    assert!(matches!(
+        stolen,
+        Err(sync_gateway::db::repo::RepoError::ReplicaOwnedByAnotherUser)
+    ));
+
+    let first_claim = [make_op(9_102, 1)];
+    let second_claim = [make_op(9_102, 2)];
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let (a, b) = tokio::join!(
+        async {
+            barrier.wait().await;
+            repo.ingest_batch(sync_gateway::db::repo::UserId(owner), doc, &first_claim)
+                .await
+        },
+        async {
+            barrier.wait().await;
+            repo2
+                .ingest_batch(sync_gateway::db::repo::UserId(editor), doc, &second_claim)
+                .await
+        },
+    );
+    let a_won = a.is_ok();
+    let b_won = b.is_ok();
+    assert_eq!(a_won as u8 + b_won as u8, 1, "one gateway owns the replica");
+    let loser = if a_won { b } else { a };
+    assert!(matches!(
+        loser,
+        Err(sync_gateway::db::repo::RepoError::ReplicaOwnedByAnotherUser)
+    ));
+    let claim_owner: Uuid = db
+        .get()
+        .await
+        .expect("pool")
+        .query_one(
+            "SELECT user_id FROM crdt_replica_owners WHERE document_id = $1 AND replica_id = 9_102",
+            &[&doc],
+        )
+        .await
+        .expect("replica owner")
+        .get(0);
+    assert_eq!(claim_owner, if a_won { owner } else { editor });
+
+    cleanup(
+        &db,
+        &Fixture {
+            user: owner,
+            document: doc,
+        },
+    )
+    .await;
+    db.get()
+        .await
+        .expect("pool")
+        .execute("DELETE FROM users WHERE id = $1", &[&editor])
+        .await
+        .expect("cleanup editor");
+}
+
+#[tokio::test]
+async fn quarantined_legacy_replica_is_readable_but_rejects_new_writes() {
+    let Some(db) = test_db().await else {
+        eprintln!("SKIP: concord_test DB unreachable");
+        return;
+    };
+    run_migrations(&db).await.expect("apply");
+    let owner = seed_user(&db, &format!("it-legacy-owner-{}", Uuid::new_v4()), None).await;
+    let editor = seed_user(&db, &format!("it-legacy-editor-{}", Uuid::new_v4()), None).await;
+    let doc = seed_document(&db, owner, None).await;
+    seed_acl(&db, doc, editor, "EDITOR").await;
+
+    // Model an operation row without an authenticated author, then apply the
+    // v5 quarantine marker as if the row predated that migration.
+    let replica = 9_103;
+    let legacy = make_op(replica, 1);
+    let checksum = format!("{:x}", Sha256::digest(&legacy.bytes));
+    db.get()
+        .await
+        .expect("pool")
+        .execute(
+            "INSERT INTO crdt_operations
+                (document_id, operation_id, replica_id, replica_sequence,
+                 payload, payload_version, payload_checksum)
+             VALUES ($1, $2, $3, $4, $5, 1, $6)",
+            &[
+                &doc,
+                &legacy.identity.to_wire(),
+                &(replica as i64),
+                &(legacy.identity.counter as i64),
+                &legacy.bytes,
+                &checksum,
+            ],
+        )
+        .await
+        .expect("seed legacy operation");
+    db.get()
+        .await
+        .expect("pool")
+        .execute(
+            "INSERT INTO crdt_legacy_replicas (document_id, replica_id)
+             VALUES ($1, $2)",
+            &[&doc, &(replica as i64)],
+        )
+        .await
+        .expect("mark legacy identity quarantined");
+
+    let repo = GatewayRepo::new(db.clone());
+    for actor in [owner, editor] {
+        let rejected = repo
+            .ingest_batch(
+                sync_gateway::db::repo::UserId(actor),
+                doc,
+                &[make_op(replica, 2)],
+            )
+            .await;
+        assert!(matches!(
+            rejected,
+            Err(sync_gateway::db::repo::RepoError::LegacyReplicaQuarantined)
+        ));
+    }
+    let page = repo
+        .catchup_page(doc, 0, 10)
+        .await
+        .expect("legacy catch-up");
+    assert_eq!(page.ops.len(), 1, "legacy operations remain readable");
+    let owner_count: i64 = db
+        .get()
+        .await
+        .expect("pool")
+        .query_one(
+            "SELECT COUNT(*) FROM crdt_replica_owners
+             WHERE document_id = $1 AND replica_id = $2",
+            &[&doc, &(replica as i64)],
+        )
+        .await
+        .expect("legacy owner count")
+        .get(0);
+    assert_eq!(owner_count, 0);
+
+    cleanup(
+        &db,
+        &Fixture {
+            user: owner,
+            document: doc,
+        },
+    )
+    .await;
+    db.get()
+        .await
+        .expect("pool")
+        .execute("DELETE FROM users WHERE id = $1", &[&editor])
+        .await
+        .expect("cleanup editor");
 }
 
 // ---------------------------------------------------------------------------

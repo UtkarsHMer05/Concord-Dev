@@ -461,7 +461,10 @@ StreamEntry Doc::make_entry(std::size_t position) const {
     for (std::size_t i = 0; i < position; ++i) {
         cursor = at_index(cursor).next;
     }
-    const Item& item = at_index(cursor);
+    return entry_from_item(at_index(cursor));
+}
+
+StreamEntry Doc::entry_from_item(const Item& item) {
     StreamEntry entry;
     entry.id = item.id;
     entry.kind = item.kind;
@@ -473,6 +476,18 @@ StreamEntry Doc::make_entry(std::size_t position) const {
         }
     }
     return entry;
+}
+
+std::vector<StreamEntry> Doc::stream_entries() const {
+    std::vector<StreamEntry> entries;
+    entries.reserve(size_);
+    std::int64_t cursor = head_;
+    while (cursor != -1) {
+        const Item& item = at_index(cursor);
+        entries.push_back(entry_from_item(item));
+        cursor = item.next;
+    }
+    return entries;
 }
 
 StreamEntry Doc::stream_entry(std::size_t index) const {

@@ -414,6 +414,7 @@ cargo test --test redis_integration -- --test-threads=1   # 4: presence, distrib
 cargo test --test multi_gateway -- --test-threads=1        # 9: REAL gateway processes + faults
 
 # Local cluster (3 gateways + nginx LB) for manual/E2E use:
+export GATEWAY_CLERK_ISSUER=https://your-instance.clerk.accounts.dev
 ./scripts/gateway-cluster.sh start   # ws://127.0.0.1:8890/api/v1/sync
 ./scripts/gateway-cluster.sh stop
 

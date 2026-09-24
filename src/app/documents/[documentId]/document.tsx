@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useAuth } from "@clerk/nextjs";
 
 import type { DocumentDetailDto } from "@/server/services/documents";
 import { CrdtClient } from "@/lib/crdt/worker/client";
@@ -16,6 +17,8 @@ interface DocumentProps {
 }
 
 export const Document = ({ document }: DocumentProps) => {
+  const { isLoaded, userId } = useAuth();
+  const documentId = document.id;
   // Transitional content loading: stored TipTap JSON (versioned envelope) if
   // present, otherwise the template's initial HTML content.
   const editorContent = parseDocumentContent(
@@ -27,17 +30,24 @@ export const Document = ({ document }: DocumentProps) => {
 
   // Phase 2 local-first session: the worker owns the CRDT replica and its
   // IndexedDB durability; the editor bridge (created inside <Editor>) syncs
-  // the TipTap document both ways. The client is created once per document.
+  // the TipTap document both ways. The client is scoped to this account and document.
   const crdtClient = useMemo(() => {
-    if (typeof window === "undefined" || typeof Worker === "undefined") {
+    if (
+      typeof window === "undefined" ||
+      typeof Worker === "undefined" ||
+      !isLoaded ||
+      !userId
+    ) {
       return null;
     }
     return new CrdtClient();
-  }, []);
+    // Worker instances own one document's state and must be replaced on route changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- document-scoped worker lifetime
+  }, [documentId, isLoaded, userId]);
 
   return (
     <DocumentSessionProvider
-      documentId={document.id}
+      documentId={documentId}
       initialContentVersion={document.contentVersion}
       canEditContent={canEdit}
       editorContent={editorContent}
@@ -59,7 +69,7 @@ export const Document = ({ document }: DocumentProps) => {
             The 816px page below scrolls horizontally inside its container
             on narrow viewports (documented desktop-first limitation). */}
         <div className="pt-[114px] print:pt-0">
-          <Editor crdtClient={crdtClient} documentId={document.id} seedPmDoc={(editorContent ?? null) as never} />
+          <Editor crdtClient={crdtClient} documentId={documentId} userId={userId ?? null} />
         </div>
       </div>
     </DocumentSessionProvider>

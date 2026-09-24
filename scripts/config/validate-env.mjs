@@ -20,6 +20,7 @@
 //
 // Usage:
 //   node scripts/config/validate-env.mjs                     # dev scope
+//   node scripts/config/validate-env.mjs --service web       # local web app only
 //   node scripts/config/validate-env.mjs --scope prod
 //   node scripts/config/validate-env.mjs --env-file .env.local
 //   node scripts/config/validate-env.mjs --scope prod --json # CI-friendly
@@ -52,7 +53,7 @@ const CLERK_ISSUER = (v) => /^https:\/\/[a-z0-9-]+\.clerk\.accounts\.dev\/?$/.te
 
 /**
  * @typedef {Object} VarSpec
- * @property {string} service - web | gateway | infra
+ * @property {"web"|"gateway"} service
  * @property {string[]} required - scopes where the variable is required
  * @property {"secret"|"public"} kind
  * @property {string} what - human description (no values)
@@ -312,6 +313,7 @@ function parseEnvFile(path) {
 const { values: argv } = parseArgs({
   options: {
     scope: { type: "string", default: "dev" },
+    service: { type: "string", default: "all" },
     "env-file": { type: "string" },
     json: { type: "boolean", default: false },
     help: { type: "boolean", default: false },
@@ -319,16 +321,22 @@ const { values: argv } = parseArgs({
 });
 
 if (argv.help) {
-  console.log(`Usage: node scripts/config/validate-env.mjs [--scope dev|staging|prod] [--env-file FILE] [--json]
+  console.log(`Usage: node scripts/config/validate-env.mjs [--scope dev|staging|prod] [--service all|web|gateway] [--env-file FILE] [--json]
 
 Validates presence + format (never values) of every environment variable
-the chosen scope requires. Matrix source of truth: docs/CONFIGURATION.md.`);
+the selected service needs for the chosen scope. Service defaults to all.
+Matrix source of truth: docs/CONFIGURATION.md.`);
   process.exit(0);
 }
 
 const scope = argv.scope;
 if (!SCOPES.includes(scope)) {
   console.error(`error: unknown scope "${scope}" (expected one of: ${SCOPES.join(", ")})`);
+  process.exit(1);
+}
+const service = argv.service;
+if (!["all", "web", "gateway"].includes(service)) {
+  console.error(`error: unknown service "${service}"`);
   process.exit(1);
 }
 
@@ -349,7 +357,10 @@ const env = { ...fileEnv, ...process.env };
 const missing = [];
 const malformed = [];
 
-for (const [name, spec] of Object.entries(MATRIX)) {
+const selected = Object.entries(MATRIX).filter(
+  ([, spec]) => service === "all" || spec.service === service,
+);
+for (const [name, spec] of selected) {
   const value = env[name];
   const requiredHere = spec.required.includes(scope);
   const isSet = value !== undefined && value !== "";
@@ -364,18 +375,14 @@ for (const [name, spec] of Object.entries(MATRIX)) {
   }
 }
 
-// Scoping note: --env-file + dev scope by default mirrors the local dev
-// flow (.env.local). GATEWAY_* values belong to gateway deployments; a dev
-// scope check passes them as OPTIONAL (absence = single-gateway mode) but
-// still validates FORMAT when present.
-
 if (argv.json) {
   console.log(
     JSON.stringify(
       {
         scope,
+        service,
         envFile: argv["env-file"] ?? null,
-        checked: Object.keys(MATRIX).length,
+        checked: selected.length,
         missing,
         malformed,
         result: missing.length === 0 && malformed.length === 0 ? "pass" : "fail",
@@ -385,7 +392,7 @@ if (argv.json) {
     ),
   );
 } else {
-  console.log(`scope: ${scope}${argv["env-file"] ? ` (env file: ${argv["env-file"]})` : ""}`);
+  console.log(`scope: ${scope}, service: ${service}${argv["env-file"] ? ` (env file: ${argv["env-file"]})` : ""}`);
   for (const name of missing) {
     console.log(`  MISSING   ${name} — ${MATRIX[name].what}`);
   }
@@ -394,7 +401,7 @@ if (argv.json) {
   }
   if (missing.length === 0 && malformed.length === 0) {
     console.log(
-      `OK: ${Object.keys(MATRIX).length} variables checked — all required-for-${scope} present, all set values well-formed.`,
+      `OK: ${selected.length} variables checked — all required-for-${scope} present, all set values well-formed.`,
     );
   } else {
     console.log(`FAIL: ${missing.length} missing, ${malformed.length} malformed.`);

@@ -173,7 +173,6 @@ export class SyncTransport {
     this.ws = ws;
 
     ws.onopen = () => {
-      this.attempt = 0;
       this.send("hello", { clientProtocolVersion: 1 }, undefined);
     };
     ws.onmessage = (event) => this.handleMessage(event.data);
@@ -299,6 +298,8 @@ export class SyncTransport {
         this.options.events.onJoinAccepted();
         break;
       case "sync_done":
+        // Keep accumulating backoff until the full join and catch-up succeeds.
+        this.attempt = 0;
         this.setStatus("ready");
         this.options.events.onSyncDone();
         break;
@@ -348,6 +349,13 @@ export class SyncTransport {
     }
     this.teardownSocket();
     this.draining = false;
+    this.scheduleReconnect();
+  }
+
+  /** Retry the full handshake after local catch-up persistence fails. */
+  reconnect(): void {
+    if (this.closedByUser) return;
+    this.teardownSocket();
     this.scheduleReconnect();
   }
 

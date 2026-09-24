@@ -241,9 +241,11 @@ async fn main() {
         // 2. Mark draining: new connections/auth/writes rejected.
         drain_state.draining.store(true, Ordering::SeqCst);
         // 3. Notify live connections (best-effort, bounded queues).
-        ws::begin_drain(&drain_state.registry, 5000).await;
+        const DRAIN_GRACE_MS: u32 = 5_000;
+        ws::begin_drain(&drain_state.registry, DRAIN_GRACE_MS).await;
         // 4. Bounded grace for in-flight persistence.
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_millis(u64::from(DRAIN_GRACE_MS))).await;
+        ws::close_drained(&drain_state.registry).await;
     };
 
     if let Err(e) = server.with_graceful_shutdown(shutdown).await {

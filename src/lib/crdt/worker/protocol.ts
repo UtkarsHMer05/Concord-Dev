@@ -6,9 +6,9 @@
 // client where the buffer is not needed afterwards.
 
 export type WorkerRequest =
-    | { id: number; kind: "init"; documentId: string; replicaId: string }
+    | { id: number; kind: "init"; documentId: string; replicaId: string; storageId?: string }
     | { id: number; kind: "loadSnapshot"; snapshot: Uint8Array }
-    | { id: number; kind: "applyRemote"; ops: Uint8Array[] }
+    | { id: number; kind: "applyRemote"; ops: Uint8Array[]; cursor?: string }
     | { id: number; kind: "localInsertText"; streamIndex: number; codepoint: number }
     | { id: number; kind: "localInsertDelimiter"; streamIndex: number; blockType: string }
     | { id: number; kind: "localDelete"; streamIndex: number }
@@ -25,7 +25,9 @@ export type WorkerRequest =
     // identity stream, and atomic snapshot import over the same RPC channel.
     | { id: number; kind: "replicaInfo" }
     | { id: number; kind: "localOpsSince"; counter: string }
-    | { id: number; kind: "importSnapshot"; snapshot: Uint8Array };
+    | { id: number; kind: "importSnapshot"; snapshot: Uint8Array }
+    | { id: number; kind: "getSyncCursor" }
+    | { id: number; kind: "persistSyncCursor"; cursor: string };
 
 export type CrdtWorkerError = {
     code: string;
@@ -58,4 +60,6 @@ export type WorkerResultPayload =
     // ---- Phase 7 sync-seam additions (D16, additive only) -----------------
     | { kind: "replicaInfo"; replicaId: string; sequence: string }
     | { kind: "localOpsSince"; ops: Uint8Array[]; nextCounter: string }
-    | { kind: "importSnapshot"; streamSize: number };
+    | { kind: "importSnapshot"; streamSize: number }
+    | { kind: "getSyncCursor"; cursor: string }
+    | { kind: "persistSyncCursor"; cursor: string };

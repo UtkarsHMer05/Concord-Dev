@@ -18,14 +18,13 @@
   <img src="https://img.shields.io/badge/License-MIT-black" alt="License: MIT" />
 </p>
 
-> Verification boundary — 2026-09-14: this page presents the checked-in
-> v1.0.1 implementation candidate and its traceable local evidence. It does
-> not claim a published v1.0.1 release, a live deployment, a current Vercel
-> runtime, or a production authenticated-browser result. The strict local
-> orchestrator recorded **25 passes, 1 release-blocking dependency-scan
-> failure, and 0 skips**; the container scan reported **44 critical** and
-> **180 high** findings. The failure is kept visible instead of being hidden
-> behind a green badge. See the [fresh evidence ledger](docs/audits/CANONICAL_FRESH_EVIDENCE.md).
+> Verification boundary — 2026-09-24: this page documents the current local
+> implementation and a fresh reliability-fix pass. TypeScript, lint, web,
+> database, realtime, Rust gateway, native, WASM, production-build, and
+> dependency-audit checks passed locally. This is not a release verdict: no
+> hosted deployment, authenticated Clerk browser journey, or fresh container
+> image scan is claimed. The release and image-scan evidence dated
+> 2026-09-14 below remains historical and is linked to its original record.
 
 ## The short version
 
@@ -159,6 +158,28 @@ the operation remains pending and can be retried with the same identity. If a
 message is delivered twice, the database and replicas have idempotent
 boundaries.
 
+### Durability and failure handling
+
+The current implementation makes the local and server durability boundaries
+explicit across reloads and failures:
+
+| Area | Current behavior | Regression coverage |
+|---|---|---|
+| Editor seed and local fallback | Template HTML is parsed into editor JSON before it seeds the CRDT. If a local CRDT append fails, the provider switches to local document persistence and saves the editor's current content. | `tests/crdt/bridge.test.ts`, `tests/crdt/worker.test.ts` |
+| Catch-up cursor | Remote operations and their cursor are committed together in IndexedDB. A failed apply does not advance the cursor; duplicate-only pages still persist the cursor safely. | `tests/sync/worker-engine-port.test.ts`, `tests/sync/sync-unit.test.ts` |
+| Local outbox recovery | On startup and authentication, the sync session compares the durable CRDT log with the outbox and restores missing resend records. ACKed records are compacted only after exact operations are covered by the durable catch-up state. | `tests/sync/worker-engine-port.test.ts`, `tests/realtime/reliability.test.ts` |
+| Operation identity and ownership | A repeated operation identity with different payload bytes is rejected transactionally. Replica identities are associated with the authenticated user, and concurrent gateway tests use independent PostgreSQL pools. | `rust/sync-gateway/tests/db_integration.rs` |
+| Save and sync feedback | The editor distinguishes local-only work, pending/sent operations, durable ACKs, confirmed synchronization, and sync errors. A transport reconnect alone cannot clear a sync error or claim a server save. | `tests/save-status.test.ts`, `tests/sync/sync-status-store.test.ts` |
+| API and audited mutations | Content accepts the supported envelope version; document pagination preserves requested offsets; rename and permission changes commit with their audit event. | `tests/content.test.ts`, `tests/db/documents.test.ts` |
+| Gateway frame and shutdown limits | The configured frame ceiling covers inbound and outbound traffic, catch-up batches are split to fit, snapshot size uses a rounded-up base64 estimate, and slow-consumer or shutdown closure bypasses the data queue. | Rust WebSocket and lifecycle integration tests |
+| Editor export cost | WASM export traverses the CRDT stream once instead of repeatedly walking it from the head. The local export benchmark includes serialization and JSON parsing, but excludes worker RPC, IndexedDB, and TipTap rendering. | [`wasm/bench-export.mjs`](wasm/bench-export.mjs) |
+
+The document and permission mutations write their audit records in the same
+database transaction as the change. The gateway's idempotency and replica
+checks likewise run at the PostgreSQL transaction boundary, so competing
+gateway processes cannot accept different content for one operation identity
+or claim one replica for different users.
+
 ### Failure and recovery shape
 
 ```mermaid
@@ -176,14 +197,49 @@ flowchart TD
     Tail --> Converged
 ```
 
-## Current verification — candidate, not release verdict
+## Current local verification — 2026-09-24
+
+These checks were run against the current local change set. They establish
+that the affected code paths build and pass their local test suites; they do
+not replace the release orchestrator, authenticated browser journey, image
+scan, or deployment checks.
+
+| Surface | Result |
+|---|---|
+| Web quality and production build | `npm run typecheck`, `npm run lint`, and `npm run build` passed. |
+| Web and database tests | `npm run test:all`: **230 unit tests and 71 database tests passed**. |
+| Realtime tests | `npm run test:realtime`: **21 tests passed** with the local test database and generated disposable signing keys. |
+| Rust gateway | `cargo test --manifest-path rust/Cargo.toml -p sync-gateway -- --test-threads=1`: all enabled unit and integration groups passed; **1 test ignored**. Rust release build and formatting check passed. |
+| Native C++ | Release build was current; CTest passed **3/3**. |
+| WebAssembly | `npm run wasm:smoke` passed engine creation, operation application, duplicate handling, snapshot validation, and restore checks. |
+| Dependency advisories | `npm audit` found **0 vulnerabilities**; `cargo audit --file rust/Cargo.lock` found no vulnerable locked crates. |
+| Patch hygiene | `git diff --check` passed. |
+
+The local realtime suite used the repository's generated E2E key fixture; it
+does not exercise a live Clerk account or hosted identity provider. The local
+PostgreSQL service was stopped after the checks, with its data volume
+preserved.
+
+### Editor export microbenchmark
+
+The latest local run measured **0.287 ms** per export for 100 entries,
+**1.073 ms** for 1,000, and **3.922 ms** for 5,000. Each measurement includes
+stream serialization and JSON parsing on this host. It does not measure
+worker messaging, IndexedDB, TipTap mapping, or end-to-end editor latency, and
+it is not a cross-machine performance claim. Re-run it with:
+
+```bash
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+  --experimental-strip-types wasm/bench-export.mjs
+```
+
+## Historical candidate verification — 2026-09-14
 
 The following values are bound to implementation candidate
 `42dcb17dd26c11a05dd20109102f37ea3fb5135a`, run locally on 2026-09-14. They
-are reported with denominators and remain separate from historical phase
-records.
+are retained as a dated record and are not current results for this checkout.
 
-| Surface | Fresh result | Evidence |
+| Surface | Result recorded on 2026-09-14 | Evidence |
 |---|---:|---|
 | TypeScript quality gates | `typecheck` pass; `lint` pass | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
 | Web unit tests | **16 files / 209 tests** | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
@@ -199,16 +255,16 @@ records.
 | Chaos matrix | **27/27 passed**, 0 lost durable-ACKed operations, 0 divergent replicas | [chaos summary](evidence/v1.0.1/chaos-summary.json) |
 | Container dependency scan | **Release blocker:** 44 critical, 180 high, 158 moderate, 20 low | [fresh evidence](docs/audits/CANONICAL_FRESH_EVIDENCE.md) |
 
-The fresh evidence also records image smoke **3/3**, immutable image pins
+That dated evidence also records image smoke **3/3**, immutable image pins
 **19**, SBOM inventories for Web/Rust/native, secret-history checks, and
 provenance assertions. Those checks do not override the container scan or
 turn a candidate into a release.
 
-### Current native benchmark baseline
+### Historical native benchmark baseline — 2026-09-14
 
-These are fresh Release-mode measurements on the recorded local environment
-(Apple M2, 8 cores, 8 GB RAM). They are a baseline for this candidate, not a
-cross-version improvement claim.
+These were Release-mode measurements on the recorded local environment
+(Apple M2, 8 cores, 8 GB RAM). They are a baseline for that candidate, not a
+current result or a cross-version improvement claim.
 
 | Operation | Measurement |
 |---|---:|
@@ -313,7 +369,8 @@ evidence of a hosted runtime.
 
 The authenticated browser journey provisions disposable Clerk users, resets a
 dedicated `concord_e2e` database, starts the real gateway and Next app, and
-cleans up the temporary resources when it exits:
+cleans up the temporary resources when it exits. This Clerk-backed flow is
+separate from the locally signed Vitest realtime suite:
 
 ```bash
 CONCORD_E2E_VERBOSE=1 \
@@ -323,8 +380,8 @@ CONCORD_E2E_VERBOSE=1 \
   tests/browser/journey.spec.ts
 ```
 
-The fresh run used for this README completed **7 tests**. The local capture
-script is retained at
+The last recorded run completed **7 tests on 2026-09-14**; it was not rerun in
+the 2026-09-24 reliability pass. The local capture script is retained at
 [`scripts/readme/capture-screenshots.mjs`](scripts/readme/capture-screenshots.mjs)
 so the gallery can be refreshed from the same real application path.
 
@@ -333,16 +390,25 @@ so the gallery can be refreshed from the same real application path.
 ```bash
 npm run typecheck
 npm run lint
-npm test
+npm run test:all
 npm run test:coverage
-npm run db:test:prepare && npm run db:migrate:test && npm run test:db
 npm run test:realtime
+npm run build
+npm audit
+npm run wasm:smoke
 bash scripts/verify-native.sh Release
 bash scripts/verify-wasm.sh
-cargo test --manifest-path rust/Cargo.toml --workspace -- --test-threads=1
+cargo test --manifest-path rust/Cargo.toml -p sync-gateway -- --test-threads=1
+cargo audit --file rust/Cargo.lock
 bash scripts/native/campaign.sh pr
 bash scripts/chaos/run-suite.sh all
 ```
+
+The database and realtime suites require the dedicated local `concord_test`
+database through `DATABASE_TEST_URL`. The realtime suite also requires the
+gateway/native test binaries and disposable local signing keys; generate the
+keys with `node scripts/ci/generate-e2e-keys.mjs` before the run. Those keys
+are test-only and must never be used for a deployed issuer.
 
 The strict release orchestrator and the evidence ledger are the source of
 truth for the current candidate. Run the whole release-shaped suite before
@@ -396,10 +462,12 @@ The current state is deliberately bounded:
   and recovery machinery are exercised.
 - Embedded WebViews and hosted production behavior need separate verification.
 
-Before publishing a portfolio link, an owner should resolve the dependency
-scan findings, complete the legal/provenance review, verify account-side CI
-and release settings, and independently verify any hosted runtime. This
-README intentionally does not perform those external actions.
+Before publishing a release or portfolio link, rerun the complete release
+gate, including a fresh container image scan, complete the legal/provenance
+review, verify account-side CI and release settings, and independently
+verify any hosted runtime. The 2026-09-24 source dependency audits passed,
+but the container image scan was not rerun as part of that local code pass.
+This README does not claim those external actions were completed.
 
 ## Provenance and attribution
 

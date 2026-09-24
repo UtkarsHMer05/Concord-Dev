@@ -299,6 +299,48 @@ describe("SyncTransport (mock socket)", () => {
     expect(timers.pendingMs()).toBeNull();
   });
 
+  it("keeps backoff across socket opens and resets after successful catch-up", () => {
+    const timers = makeTimers();
+    const { events } = baseEvents();
+    const transport = new SyncTransport({
+      url: "ws://t",
+      getToken: async () => "x",
+      events,
+      timers,
+      random: () => 0,
+      backoff: { baseMs: 100, maxMs: 1000, immediateFirstRetry: true },
+    });
+
+    transport.connect();
+    let socket = MockWebSocket.instances.at(-1)!;
+    socket.onopen?.();
+    socket.onclose?.();
+    expect(timers.pendingMs()).toBe(0);
+
+    timers.fire();
+    socket = MockWebSocket.instances.at(-1)!;
+    socket.onopen?.();
+    socket.onclose?.();
+    expect(timers.pendingMs()).toBe(100);
+
+    timers.fire();
+    socket = MockWebSocket.instances.at(-1)!;
+    socket.onopen?.();
+    socket.serverSend('{"v":1,"type":"authenticated","payload":{"userId":"u1","clerkUserId":"cu1"}}');
+    socket.onclose?.();
+    expect(timers.pendingMs()).toBe(200);
+
+    timers.fire();
+    socket = MockWebSocket.instances.at(-1)!;
+    socket.onopen?.();
+    socket.serverSend('{"v":1,"type":"authenticated","payload":{"userId":"u1","clerkUserId":"cu1"}}');
+    socket.serverSend('{"v":1,"type":"join_accepted","payload":{"documentId":"doc-1","role":"owner","durableCursor":"0"}}');
+    socket.serverSend('{"v":1,"type":"sync_done","payload":{}}');
+    socket.onclose?.();
+    expect(timers.pendingMs()).toBe(0);
+    transport.close();
+  });
+
   it("fatal error tears down without reconnect", () => {
     const { events, errors } = baseEvents();
     const timers = makeTimers();

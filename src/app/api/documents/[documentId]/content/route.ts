@@ -24,7 +24,7 @@ import { documentsService } from "@/server/services/documents";
  */
 
 const saveSchema = z.object({
-  content: z.object({ v: z.number(), doc: z.unknown() }).passthrough(),
+  content: z.object({ v: z.literal(1), doc: z.unknown() }).passthrough(),
   expectedContentVersion: z.number().int().min(1),
 });
 

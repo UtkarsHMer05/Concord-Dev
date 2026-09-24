@@ -4,9 +4,9 @@
  * Save/sync status indicator (Phase 7, M007/M008).
  *
  * Renders the honest per-document save state. Truthfulness rules:
- * - local-first means "saved locally" is honest BEFORE any server ack;
+ * - only the CRDT path may say "saved locally" before a server ack;
  * - "Saved" (server) only after the durable/mirror save point;
- * - offline/error copy always says edits are safe on the device.
+ * - fallback save errors never claim in-memory edits are durable on the device.
  *
  * The chip is subtle by design: a small icon + label next to the document
  * title, with the full explanation in the accessible description
@@ -23,9 +23,14 @@ import {
 
 import { useDocumentSession } from "@/lib/collaboration/provider";
 import { toSaveStatusView, type EditorSaveState } from "@/lib/collaboration/save-status";
+import { useBridgeStatusStore } from "@/store/use-bridge-status-store";
+import { useSyncStatusStore } from "@/store/use-sync-status-store";
 
 const ICONS: Record<EditorSaveState, typeof CloudCheckIcon> = {
   "saved-locally": CloudCheckIcon,
+  "local-only": CloudOffIcon,
+  "pending-sync": CloudUploadIcon,
+  "server-acknowledged": CloudCheckIcon,
   saving: CloudUploadIcon,
   "saved-mirror": CloudCheckIcon,
   offline: CloudOffIcon,
@@ -55,7 +60,15 @@ export function useOnline(): boolean {
 export const SaveStatusIndicator = () => {
   const { content } = useDocumentSession();
   const online = useOnline();
-  const view = toSaveStatusView(content.status, online);
+  const locallyDurable = useBridgeStatusStore((s) => s.state.mode === "crdt");
+  const localOnly = useSyncStatusStore((s) => s.localOnly);
+  const outbox = useSyncStatusStore((s) => s.outbox);
+  const syncError = useSyncStatusStore((s) => s.error);
+  const view = toSaveStatusView(content.status, online, locallyDurable, {
+    localOnly,
+    outbox,
+    error: syncError,
+  });
   const Icon = ICONS[view.state];
 
   return (
@@ -63,6 +76,7 @@ export const SaveStatusIndicator = () => {
       className={`inline-flex items-center gap-1 text-sm ${view.className}`}
       role="status"
       aria-live="polite"
+      title={view.description}
     >
       <Icon
         className={`size-4 ${view.state === "saving" ? "animate-pulse motion-reduce:animate-none" : ""}`}

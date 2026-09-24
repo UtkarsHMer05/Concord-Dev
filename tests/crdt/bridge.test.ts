@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Editor } from "@tiptap/react";
 
 import { CrdtEditorBridge, replicaIdForDocument, type BridgeState } from "@/lib/crdt/editor-bridge";
+import { replicaStorageId } from "@/lib/crdt/worker/idb";
 
 it("allocates client replicas outside the maintenance namespace and retains legacy IDs", () => {
     const stored = new Map<string, string>();
@@ -26,6 +27,27 @@ it("allocates client replicas outside the maintenance namespace and retains lega
         expect(fresh).not.toBe(0x52455354n);
         stored.set("concord.replica.existing", "42");
         expect(replicaIdForDocument("existing")).toBe(42n);
+    } finally {
+        vi.unstubAllGlobals();
+    }
+});
+
+it("isolates authenticated replica IDs and local storage by account", () => {
+    const stored = new Map<string, string>([
+        ["concord.replica.user-a.shared", "43"],
+        ["concord.replica.user-b.shared", "44"],
+        ["concord.replica.shared", "42"],
+    ]);
+    vi.stubGlobal("localStorage", {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+    });
+    try {
+        expect(replicaIdForDocument("shared", "user-a")).toBe(43n);
+        expect(replicaIdForDocument("shared", "user-b")).toBe(44n);
+        expect(replicaIdForDocument("shared")).toBe(42n);
+        expect(replicaStorageId("shared", "user-a")).toBe("shared:user:user-a");
+        expect(replicaStorageId("shared", "user-b")).toBe("shared:user:user-b");
     } finally {
         vi.unstubAllGlobals();
     }
@@ -174,6 +196,24 @@ interface VisibleDoc {
 }
 
 describe("editor bridge seed path (final gate)", () => {
+    it("seeds from the editor's parsed template content when no JSON seed is supplied", async () => {
+        const persistence = new MemoryPersistence();
+        const core = new CrdtWorkerCore({ documentId: DOC, replicaId: 7n, loadFactory, persistence });
+        const client = new CoreBackedClient(core, DOC);
+        const editor = fakeEditor();
+        editor.current = pmDocWithText("Template heading");
+
+        const bridge = new CrdtEditorBridge({
+            editor,
+            client: client as unknown as CrdtClient,
+            documentId: DOC,
+        });
+        expect((await bridge.start()).mode).toBe("crdt");
+        const visible = JSON.parse(await client.visibleJson()) as VisibleDoc;
+        expect(visible.blocks[0].runs[0].t).toBe("Template heading");
+        expect((await client.exportOps()).length).toBeGreaterThan(0);
+    });
+
     it("emits the server seed into the replica and keeps a stable baseline", async () => {
         const persistence = new MemoryPersistence();
         const core = new CrdtWorkerCore({ documentId: DOC, replicaId: 7n, loadFactory, persistence });

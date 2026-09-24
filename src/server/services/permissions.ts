@@ -5,6 +5,7 @@ import { z } from "zod";
 import { assertCapability } from "../auth/authorization";
 import type { ActorContext } from "../auth/actor-context";
 import type { DocumentRole } from "../db/schema";
+import { getDb } from "../db/client";
 import { ForbiddenError, NotFoundError, ValidationError } from "../errors";
 import { AUDIT_ACTIONS, auditRepository } from "../repositories/audit";
 import { documentsRepository } from "../repositories/documents";
@@ -100,29 +101,26 @@ export const permissionsService = {
       throw new ValidationError("Cannot change the owner's role");
     }
 
-    const existing = await permissionsRepository.findGrant(
-      document.id,
-      targetUserId,
-    );
-    const row = await permissionsRepository.upsertGrant({
-      documentId: document.id,
-      userId: targetUserId,
-      role: role.data,
-      grantedByUserId: actor.userId,
+    return getDb().transaction(async (tx) => {
+      const existing = await permissionsRepository.findGrant(document.id, targetUserId, tx);
+      const row = await permissionsRepository.upsertGrant({
+        documentId: document.id,
+        userId: targetUserId,
+        role: role.data,
+        grantedByUserId: actor.userId,
+      }, tx);
+      await auditRepository.insert({
+        actorUserId: actor.userId,
+        action: existing
+          ? AUDIT_ACTIONS.documentPermissionUpdated
+          : AUDIT_ACTIONS.documentPermissionGranted,
+        resourceType: "document_permission",
+        resourceId: document.id,
+        organizationId: document.organizationId,
+        metadata: { targetUserId, role: role.data },
+      }, tx);
+      return { role: row.role };
     });
-
-    await auditRepository.insert({
-      actorUserId: actor.userId,
-      action: existing
-        ? AUDIT_ACTIONS.documentPermissionUpdated
-        : AUDIT_ACTIONS.documentPermissionGranted,
-      resourceType: "document_permission",
-      resourceId: document.id,
-      organizationId: document.organizationId,
-      metadata: { targetUserId, role: role.data },
-    });
-
-    return { role: row.role };
   },
 
   /** Revokes a direct role. OWNER-only. Revoking a non-existent grant is a no-op success. */
@@ -141,21 +139,20 @@ export const permissionsService = {
     const document = await requireOwnedDocument(actor, idParsed.data);
     const targetUserId = validateTarget(actor, input.targetUserId);
 
-    const revoked = await permissionsRepository.deleteGrant(
-      document.id,
-      targetUserId,
-    );
-    if (revoked) {
-      await auditRepository.insert({
-        actorUserId: actor.userId,
-        action: AUDIT_ACTIONS.documentPermissionRevoked,
-        resourceType: "document_permission",
-        resourceId: document.id,
-        organizationId: document.organizationId,
-        metadata: { targetUserId },
-      });
-    }
-    return { revoked };
+    return getDb().transaction(async (tx) => {
+      const revoked = await permissionsRepository.deleteGrant(document.id, targetUserId, tx);
+      if (revoked) {
+        await auditRepository.insert({
+          actorUserId: actor.userId,
+          action: AUDIT_ACTIONS.documentPermissionRevoked,
+          resourceType: "document_permission",
+          resourceId: document.id,
+          organizationId: document.organizationId,
+          metadata: { targetUserId },
+        }, tx);
+      }
+      return { revoked };
+    });
   },
 
   /** Lists direct grants for a document. OWNER-only (management view). */
