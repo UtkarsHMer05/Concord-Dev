@@ -9,8 +9,8 @@
  *   whole-document saves via /api/documents/[id]/content, debounced, with
  *   optimistic concurrency: a stale writer conflicts instead of overwriting);
  * - per-document layout settings (transitional localStorage-backed margins);
- * - honest "unavailable" capability states for realtime, presence, threads,
- *   and inbox.
+ * - explicit capability states: authenticated CRDT-anchored threads are
+ *   available, while presence and inbox remain unavailable.
  *
  * This is explicitly temporary: Phase 2 moves shared document state into the
  * CRDT document model and Phase 3 introduces the realtime transport. Do not
@@ -295,7 +295,7 @@ export function DocumentSessionProvider({
       },
       realtime: { state: "unavailable" },
       presence: { state: "unavailable" },
-      threads: { state: "unavailable" },
+      threads: { state: "available" },
       inbox: { state: "unavailable" },
     }),
     [

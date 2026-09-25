@@ -35,6 +35,9 @@ import { useBridgeStatusStore } from '@/store/use-bridge-status-store';
 import { useDocumentSession } from '@/lib/collaboration/provider';
 import { CrdtEditorBridge } from '@/lib/crdt/editor-bridge';
 import { useSyncSession } from '@/lib/sync/use-sync-session';
+import { usePresenceCursors } from '@/lib/presence/use-presence-cursors';
+import { PresenceOverlay } from '@/components/presence-overlay';
+import type { CatchupBriefing } from '@/lib/sync/catchup-briefing';
 import type { CrdtClient } from '@/lib/crdt/worker/client';
 import { FontSizeExtension } from '@/extensions/font-size';
 import { LineHeightExtension } from '@/extensions/line-height';
@@ -48,6 +51,8 @@ interface EditorProps {
   documentId: string;
   /** Clerk principal that owns this browser's local replica. */
   userId: string | null;
+  onCatchupBriefing: (briefing: CatchupBriefing) => void;
+  onSyncNowReady: (syncNow: () => void) => void;
 }
 
 /**
@@ -71,9 +76,9 @@ const publishEditorToStore =
     setEditor(editor);
   };
 
-export const Editor = ({ crdtClient, documentId, userId }: EditorProps) => {
+export const Editor = ({ crdtClient, documentId, userId, onCatchupBriefing, onSyncNowReady }: EditorProps) => {
   const { editorContent, content, settings, canEditContent } = useDocumentSession();
-  const { setEditor } = useEditorStore();
+  const { setEditor, setFlushEditorBridge } = useEditorStore();
   const setBridgeStatus = useBridgeStatusStore((s) => s.setState);
   const bridgeMode = useBridgeStatusStore((s) => s.state.mode);
   // The bridge exists only after the editor instance does; onUpdate routes
@@ -182,22 +187,35 @@ export const Editor = ({ crdtClient, documentId, userId }: EditorProps) => {
       return;
     }
     bridgeRef.current = bridge;
+    setFlushEditorBridge(() => bridge.flushLocalChanges());
     void bridge.start();
     return () => {
       bridgeRef.current = null;
+      setFlushEditorBridge(null);
       setBridgeStatus({ mode: "idle" });
     };
     // Bridge identity IS the dependency: start once per instance.
-  }, [bridge, setBridgeStatus]);
+  }, [bridge, setBridgeStatus, setFlushEditorBridge]);
 
   // Realtime layer: only when the bridge is on the CRDT path does the
   // SyncSession start against the gateway. Signed out / no gateway URL /
   // fallback mode ⇒ the session stays local-only and truthful about it.
-  useSyncSession({
+  const { syncNow, sendPresence } = useSyncSession({
     documentId,
     crdtClient,
     bridge,
+    onCatchupBriefing,
   });
+
+  // Live-cursor presence: broadcast this editor's own caret (CRDT-anchored,
+  // ~8 Hz) and expire silent peers. Gated on the CRDT path so it never
+  // touches the worker before init or in fallback mode.
+  usePresenceCursors({ editor, crdtClient, sendPresence, enabled: bridgeMode === "crdt" });
+
+  useEffect(() => {
+    onSyncNowReady(syncNow);
+    return () => onSyncNowReady(() => {});
+  }, [onSyncNowReady, syncNow]);
 
   return (
     <div
@@ -209,7 +227,10 @@ export const Editor = ({ crdtClient, documentId, userId }: EditorProps) => {
       {/* Fixed 816px sheet, horizontally centered; the outer container
           scrolls on viewports narrower than the page. */}
       <div className="min-w-max flex justify-center w-[816px] py-4 print:py-0 mx-auto print:w-full print:min-w-0">
-        <EditorContent editor={editor} />
+        <div className="relative">
+          <EditorContent editor={editor} />
+          <PresenceOverlay editor={editor} crdtClient={crdtClient} />
+        </div>
       </div>
     </div>
   );

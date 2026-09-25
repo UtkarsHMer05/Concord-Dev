@@ -9,6 +9,7 @@ export type WorkerRequest =
     | { id: number; kind: "init"; documentId: string; replicaId: string; storageId?: string }
     | { id: number; kind: "loadSnapshot"; snapshot: Uint8Array }
     | { id: number; kind: "applyRemote"; ops: Uint8Array[]; cursor?: string }
+    | { id: number; kind: "seed"; ops: SeedOperation[] }
     | { id: number; kind: "localInsertText"; streamIndex: number; codepoint: number }
     | { id: number; kind: "localInsertDelimiter"; streamIndex: number; blockType: string }
     | { id: number; kind: "localDelete"; streamIndex: number }
@@ -34,6 +35,16 @@ export type CrdtWorkerError = {
     message: string;
 };
 
+/** Deterministic first-open edits generated under the document seed origin. */
+export interface SeedOperation {
+    kind: "insertText" | "insertDelimiter" | "delete" | "setAttr";
+    streamIndex: number;
+    codepoint?: number;
+    blockType?: string;
+    name?: string;
+    value?: string | null;
+}
+
 export type WorkerResponse =
     | { id: number; ok: true; result: WorkerResultPayload }
     | { id: number; ok: false; error: CrdtWorkerError };
@@ -50,6 +61,7 @@ export type WorkerResultPayload =
     | { kind: "init"; ready: true }
     | { kind: "loadSnapshot"; streamSize: number }
     | { kind: "applyRemote"; applied: number; duplicates: number; ops: Uint8Array[] }
+    | { kind: "seed"; ops: Uint8Array[] }
     | { kind: "localOps"; ops: Uint8Array[]; streamSize: number }
     | { kind: "visibleJson"; json: string }
     | { kind: "digest"; digest: string }

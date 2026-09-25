@@ -28,6 +28,7 @@
 
 #include "concord/crdt/doc.hpp"
 #include "concord/crdt/errors.hpp"
+#include "concord/crdt/json.hpp"
 #include "concord/crdt/serialize.hpp"
 #include "concord/crdt/validation.hpp"
 
@@ -48,6 +49,8 @@ constexpr std::uint32_t kCmdImportVerify = 3;
 constexpr std::uint32_t kCmdDigestAfter = 4;
 constexpr std::uint32_t kCmdVerifySnapshot = 5;
 constexpr std::uint32_t kCmdGenerateOps = 6;
+constexpr std::uint32_t kCmdVisibleAfter = 8;
+constexpr std::uint32_t kCmdFoldAfter = 9;
 
 constexpr std::uint32_t kStatusOk = 0;
 constexpr std::uint32_t kStatusMalformed = 1;
@@ -288,6 +291,20 @@ std::string digest_after_request(const std::string& snapshot, const std::vector<
     return append_ops_payload(b, tail);
 }
 
+std::string fold_after_request(const std::string& snapshot, const std::vector<std::string>& tail) {
+    Bytes b;
+    b.u32(kCmdFoldAfter);
+    b.blob(snapshot);
+    return append_ops_payload(b, tail);
+}
+
+std::string visible_after_request(const std::string& snapshot, const std::vector<std::string>& tail) {
+    Bytes b;
+    b.u32(kCmdVisibleAfter);
+    b.blob(snapshot);
+    return append_ops_payload(b, tail);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -326,6 +343,25 @@ CONCORD_TEST(reconstruct_returns_exportable_snapshot) {
     const Doc imported = Doc::import_snapshot(ReplicaId{42}, snapshot);
     CHECK_EQ(imported.canonical_digest(), h.doc.canonical_digest());
     CHECK(imported.visible_document() == h.doc.visible_document());
+}
+
+CONCORD_TEST(visible_after_returns_the_exact_reconstructed_document) {
+    const History h = sample_history();
+    const WorkerRun run = run_worker(visible_after_request("", h.log));
+    CHECK_EQ(run.exit_code, 0);
+    Reader r{run.stdout_bytes};
+    CHECK_EQ(r.u32(), kStatusOk);
+    CHECK_EQ(r.blob(), h.doc.canonical_digest());
+    CHECK_EQ(r.blob(), concord::crdt::doc_to_json(h.doc));
+    CHECK(r.done());
+
+    const std::string snapshot = h.doc.export_snapshot();
+    const WorkerRun covered = run_worker(visible_after_request(snapshot, {}));
+    Reader covered_reader{covered.stdout_bytes};
+    CHECK_EQ(covered_reader.u32(), kStatusOk);
+    CHECK_EQ(covered_reader.blob(), h.doc.canonical_digest());
+    CHECK_EQ(covered_reader.blob(), concord::crdt::doc_to_json(h.doc));
+    CHECK(covered_reader.done());
 }
 
 CONCORD_TEST(export_snapshot_command_emits_snapshot_only) {
@@ -422,6 +458,30 @@ CONCORD_TEST(digest_after_with_empty_tail) {
     CHECK_EQ(r.u32(), kStatusOk);
     CHECK_EQ(r.blob(), h.doc.canonical_digest());
     CHECK(r.done());
+}
+
+CONCORD_TEST(fold_after_returns_snapshot_and_matches_full_replay) {
+    const History h = sample_history();
+    CHECK(h.log.size() >= 2);
+    const std::size_t split = h.log.size() / 2;
+    const WorkerRun half_run = run_worker(snapshot_ops_request(
+        kCmdReconstruct, std::vector<std::string>(h.log.begin(), h.log.begin() + split)));
+    Reader hr{half_run.stdout_bytes};
+    CHECK_EQ(hr.u32(), kStatusOk);
+    (void)hr.blob();
+    const std::string snapshot = hr.blob();
+    CHECK(hr.done());
+
+    const std::vector<std::string> tail(h.log.begin() + split, h.log.end());
+    const WorkerRun run = run_worker(fold_after_request(snapshot, tail));
+    Reader r{run.stdout_bytes};
+    CHECK_EQ(r.u32(), kStatusOk);
+    CHECK_EQ(r.blob(), h.doc.canonical_digest());
+    const std::string folded = r.blob();
+    CHECK(r.done());
+    const Doc imported = Doc::import_snapshot(ReplicaId{42}, folded);
+    CHECK_EQ(imported.canonical_digest(), h.doc.canonical_digest());
+    CHECK(imported.visible_document() == h.doc.visible_document());
 }
 
 CONCORD_TEST(digest_after_survives_duplicate_tail_delivery) {

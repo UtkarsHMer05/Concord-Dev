@@ -27,7 +27,7 @@
     "wasm:build": "node scripts/wasm-build.mjs",
     "worker:bundle": "node scripts/worker-bundle.mjs",
     "wasm:smoke": "node wasm/smoke.mjs",
-    "test:browser": "playwright test --project=chromium tests/browser/journey.spec.ts tests/browser/a11y.spec.ts",
+    "test:browser": "playwright test --project=chromium tests/browser/journey.spec.ts tests/browser/a11y.spec.ts tests/browser/review-tools.spec.ts",
     "test:browser:smoke:chromium": "playwright test --project=chromium tests/browser/smoke.spec.ts",
     "test:browser:smoke:firefox": "playwright test --project=firefox tests/browser/smoke.spec.ts",
     "test:browser:smoke:webkit": "playwright test --project=webkit tests/browser/smoke.spec.ts"

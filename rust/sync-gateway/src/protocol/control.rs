@@ -63,6 +63,12 @@ pub enum Frame {
     Error(ErrorFrame),
     #[serde(rename = "server_draining")]
     ServerDraining(ServerDraining),
+    #[serde(rename = "presence")]
+    Presence(PresenceState),
+    #[serde(rename = "presence_update")]
+    PresenceUpdate(PresenceUpdate),
+    #[serde(rename = "presence_leave")]
+    PresenceLeave(PresenceLeave),
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +254,58 @@ pub struct ServerDraining {
     pub grace_ms: u32,
 }
 
+/// Which side of a CRDT item a presence caret/selection endpoint sits on
+/// (mirrors `CrdtAnchorPoint.side` on the client). Bounded enum keeps the
+/// `Frame` `Eq` derive valid — presence state is opaque, not `serde_json`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PresenceSide {
+    Before,
+    After,
+}
+
+/// c→s (Feature 2, ephemeral/NON-durable): the sender's live caret/selection,
+/// anchored to CRDT item ids ("r:c") so it stays glued to the right text while
+/// peers edit concurrently. Relayed to room peers; NEVER persisted and never
+/// authorization truth. Legal only in READY. `*_item` is None when the caret
+/// cannot be anchored to a live item (e.g. empty document).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PresenceState {
+    pub replica_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_item: Option<String>,
+    pub anchor_side: PresenceSide,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_item: Option<String>,
+    pub head_side: PresenceSide,
+}
+
+/// s→c: one peer's relayed presence. `connection_id` and `user_id` are stamped
+/// by the gateway from the authenticated session (unforgeable); `replica_id`
+/// and the anchor are the sender's low-trust hints (color + position only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PresenceUpdate {
+    pub connection_id: String,
+    pub user_id: String,
+    pub replica_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_item: Option<String>,
+    pub anchor_side: PresenceSide,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_item: Option<String>,
+    pub head_side: PresenceSide,
+}
+
+/// s→c: a peer left the room; drop its caret immediately (peers also expire on
+/// a client-side TTL when a sender goes silent without a clean leave).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PresenceLeave {
+    pub connection_id: String,
+}
+
 // ---------------------------------------------------------------------------
 // Codec
 // ---------------------------------------------------------------------------
@@ -332,6 +390,9 @@ impl ControlFrame {
             "pong" => Frame::Pong(strict_payload::<Pong>(payload)?),
             "error" => Frame::Error(strict_payload::<ErrorFrame>(payload)?),
             "server_draining" => Frame::ServerDraining(strict_payload::<ServerDraining>(payload)?),
+            "presence" => Frame::Presence(strict_payload::<PresenceState>(payload)?),
+            "presence_update" => Frame::PresenceUpdate(strict_payload::<PresenceUpdate>(payload)?),
+            "presence_leave" => Frame::PresenceLeave(strict_payload::<PresenceLeave>(payload)?),
             other => {
                 return Err(DecodeError::UnknownFrameType {
                     frame_type: other.to_owned(),
@@ -372,6 +433,9 @@ impl ControlFrame {
             Frame::Pong(p) => ("pong", serde_json::to_value(p)),
             Frame::Error(p) => ("error", serde_json::to_value(p)),
             Frame::ServerDraining(p) => ("server_draining", serde_json::to_value(p)),
+            Frame::Presence(p) => ("presence", serde_json::to_value(p)),
+            Frame::PresenceUpdate(p) => ("presence_update", serde_json::to_value(p)),
+            Frame::PresenceLeave(p) => ("presence_leave", serde_json::to_value(p)),
         };
         let payload = payload.expect("serializing a gateway-constructed payload cannot fail");
         let mut envelope = serde_json::Map::new();
@@ -397,4 +461,62 @@ fn strict_payload<T: DeserializeOwned>(payload: &serde_json::Value) -> Result<T,
     serde_json::from_value(payload.clone()).map_err(|e| DecodeError::BadPayload {
         reason: e.to_string(),
     })
+}
+
+#[cfg(test)]
+mod presence_tests {
+    use super::*;
+
+    fn roundtrip(frame: Frame) -> Frame {
+        let wire = ControlFrame { id: None, frame }.encode();
+        ControlFrame::decode(&wire).expect("decode").frame
+    }
+
+    #[test]
+    fn presence_state_roundtrips_with_optional_items() {
+        let full = Frame::Presence(PresenceState {
+            replica_id: "42".into(),
+            anchor_item: Some("7:3".into()),
+            anchor_side: PresenceSide::Before,
+            head_item: Some("7:9".into()),
+            head_side: PresenceSide::After,
+        });
+        assert_eq!(roundtrip(full.clone()), full);
+
+        // Unanchored caret (empty doc): items omitted on the wire.
+        let bare = Frame::Presence(PresenceState {
+            replica_id: "42".into(),
+            anchor_item: None,
+            anchor_side: PresenceSide::Before,
+            head_item: None,
+            head_side: PresenceSide::Before,
+        });
+        assert_eq!(roundtrip(bare.clone()), bare);
+    }
+
+    #[test]
+    fn presence_relay_frames_roundtrip() {
+        let update = Frame::PresenceUpdate(PresenceUpdate {
+            connection_id: "conn-1".into(),
+            user_id: "5f0e9a4b-0000-4000-8000-000000000001".into(),
+            replica_id: "42".into(),
+            anchor_item: Some("7:3".into()),
+            anchor_side: PresenceSide::After,
+            head_item: None,
+            head_side: PresenceSide::Before,
+        });
+        assert_eq!(roundtrip(update.clone()), update);
+        let leave = Frame::PresenceLeave(PresenceLeave {
+            connection_id: "conn-1".into(),
+        });
+        assert_eq!(roundtrip(leave.clone()), leave);
+    }
+
+    #[test]
+    fn presence_rejects_unknown_fields_and_bad_side() {
+        let extra = r#"{"v":1,"type":"presence","payload":{"replicaId":"1","anchorSide":"before","headSide":"before","bogus":1}}"#;
+        assert!(ControlFrame::decode(extra).is_err());
+        let bad_side = r#"{"v":1,"type":"presence","payload":{"replicaId":"1","anchorSide":"sideways","headSide":"before"}}"#;
+        assert!(ControlFrame::decode(bad_side).is_err());
+    }
 }

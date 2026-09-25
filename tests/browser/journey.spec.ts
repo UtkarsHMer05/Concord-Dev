@@ -124,6 +124,30 @@ test.describe.serial("Chromium primary journey", () => {
     expect(documentId).toBeTruthy();
   });
 
+  test("template seed converges across fresh browser replicas", async ({ browser }) => {
+    const ctxA = await browser.newContext();
+    const ctxB = await browser.newContext();
+    const pageA = await ctxA.newPage();
+    const pageB = await ctxB.newPage();
+    try {
+      await signIn(pageA, user("collab-a"));
+      await pageA.getByRole("button", { name: "Create a new document from the Software plan template" }).click();
+      await pageA.waitForURL(/\/documents\/[a-zA-Z0-9-]+/, { timeout: 30_000 });
+      const documentId = new URL(pageA.url()).pathname.split("/").pop() as string;
+      await waitForEditor(pageA);
+      await expect.poll(async () => editorText(pageA), { timeout: 30_000 }).toContain("Software plan");
+
+      await signIn(pageB, user("collab-a"));
+      await pageB.goto(`/documents/${documentId}`);
+      await waitForEditor(pageB);
+      await expect.poll(async () => editorText(pageB), { timeout: 30_000 }).toContain("Software plan");
+      expect(await editorText(pageB)).toBe(await editorText(pageA));
+    } finally {
+      await ctxA.close();
+      await ctxB.close();
+    }
+  });
+
   test("E+F+G+H: worker initializes, typing works, persists across reload", async ({ page }) => {
     await signIn(page, user("persist"));
     const documentId = await createDocument(page, "E2E Persistence");
@@ -214,6 +238,53 @@ test.describe.serial("Chromium primary journey", () => {
 
       // Connection state is valid: page A still shows editor + no fatal
       // console errors (checked in the final gate below).
+      expect(monA.fatalErrors()).toEqual([]);
+      expect(monB.fatalErrors()).toEqual([]);
+    } finally {
+      await ctxA.close();
+      await ctxB.close();
+    }
+  });
+
+  test("I2: CRDT-anchored live cursors relay between two sessions", async ({ browser }) => {
+    const ctxA = await browser.newContext();
+    const ctxB = await browser.newContext();
+    const pageA = await ctxA.newPage();
+    const pageB = await ctxB.newPage();
+    const monA = new ConsoleMonitor(); monA.attach(pageA);
+    const monB = new ConsoleMonitor(); monB.attach(pageB);
+    try {
+      await signIn(pageA, user("collab-a"));
+      const documentId = await createDocument(pageA, "E2E Presence Cursors");
+      await waitForEditor(pageA);
+      await typeInEditor(pageA, "presence anchor text");
+      await expect.poll(async () => editorText(pageA), { timeout: 20_000 }).toContain("presence anchor text");
+
+      // Second session (same user, "another device"): converge on the text.
+      await signIn(pageB, user("collab-a"));
+      await pageB.goto(`/documents/${documentId}`);
+      await waitForEditor(pageB);
+      await expect.poll(async () => editorText(pageB), { timeout: 30_000 }).toContain("presence anchor text");
+
+      // Both place a COLLAPSED caret adjacent to a text character (not a
+      // document boundary, which has no CRDT item to anchor to) so a fresh
+      // presence frame carries an anchor the peer can resolve. Presence
+      // relays only to members present at send time, so this happens after
+      // both sessions have joined.
+      const editorA = pageA.locator(".ProseMirror[contenteditable='true']").first();
+      const editorB = pageB.locator(".ProseMirror[contenteditable='true']").first();
+      await editorA.click();
+      await pageA.keyboard.press("Home");
+      await pageA.keyboard.press("ArrowRight");
+      await pageA.waitForTimeout(400);
+      await editorB.click();
+      await pageB.keyboard.press("End");
+      await pageB.waitForTimeout(400);
+
+      // Each session renders the OTHER session's CRDT-anchored caret.
+      await expect(pageB.locator('[data-testid="presence-caret"]').first()).toBeVisible({ timeout: 30_000 });
+      await expect(pageA.locator('[data-testid="presence-caret"]').first()).toBeVisible({ timeout: 30_000 });
+
       expect(monA.fatalErrors()).toEqual([]);
       expect(monB.fatalErrors()).toEqual([]);
     } finally {

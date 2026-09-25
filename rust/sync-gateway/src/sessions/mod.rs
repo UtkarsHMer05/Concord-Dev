@@ -165,6 +165,24 @@ impl SessionRegistry {
         }
     }
 
+    /// Best-effort EPHEMERAL relay (presence / live cursors): deliver a frame
+    /// to every OTHER room member, DROPPING silently when a peer's queue is
+    /// full. Unlike [`Self::fanout`], a slow consumer is never marked or
+    /// closed — presence is disposable and must never exert backpressure on
+    /// durable delivery nor tear down a connection over a dropped caret.
+    pub async fn relay_ephemeral(&self, document: Uuid, sender: Uuid, frame: OutboundFrame) {
+        let rooms = self.rooms.lock().await;
+        let Some(room) = rooms.get(&document) else {
+            return;
+        };
+        for (id, handle) in room.connections.iter() {
+            if *id == sender {
+                continue;
+            }
+            let _ = handle.outbound.try_send(frame.clone());
+        }
+    }
+
     /// Collects outbound senders of ALL live connections (graceful drain).
     pub async fn senders_all(&self, senders: &mut Vec<mpsc::Sender<OutboundFrame>>) {
         let rooms = self.rooms.lock().await;
@@ -309,6 +327,39 @@ mod tests {
             )
             .await;
         assert!(slow.is_empty());
+    }
+
+    #[tokio::test]
+    async fn relay_ephemeral_skips_sender_and_never_closes_slow_peers() {
+        let registry = SessionRegistry::new();
+        let doc = Uuid::new_v4();
+        let sender = Uuid::new_v4();
+        let fast = Uuid::new_v4();
+        let slow = Uuid::new_v4();
+        let (hs, mut rs) = handle(sender, 8);
+        let (hf, mut rf) = handle(fast, 8);
+        let (hslow, _rslow) = handle(slow, 1); // capacity 1, no receiver drain
+        let mut slow_close = hslow.close.subscribe();
+        registry.join(doc, hs).await;
+        registry.join(doc, hf).await;
+        registry.join(doc, hslow).await;
+
+        // Many relays: the slow peer's queue overflows and frames are dropped,
+        // but it is NEVER closed and the fast peer keeps receiving.
+        for i in 0..8u8 {
+            registry
+                .relay_ephemeral(doc, sender, OutboundFrame::Text(format!("p{i}")))
+                .await;
+        }
+        assert!(matches!(rf.try_recv(), Ok(OutboundFrame::Text(_))));
+        assert!(
+            rs.try_recv().is_err(),
+            "sender is never echoed its own presence"
+        );
+        assert!(
+            !*slow_close.borrow_and_update(),
+            "presence must not close a slow peer"
+        );
     }
 
     #[test]

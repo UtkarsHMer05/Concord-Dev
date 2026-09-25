@@ -43,6 +43,8 @@ import {
 import { RenameDialog } from "@/components/rename-dialog";
 import { RemoveDialog } from "@/components/remove-dialog";
 import { CollaborativeModeIndicator } from "@/components/collaborative-mode-indicator";
+import { DocumentTools } from "@/components/document-tools";
+import type { CrdtClient } from "@/lib/crdt/worker/client";
 import {
   MenubarShortcut,
   MenubarSeparator,
@@ -63,6 +65,8 @@ import { DocumentInput } from "./document-input";
 
 interface NavbarProps {
   data: DocumentDetailDto;
+  crdtClient: CrdtClient | null;
+  syncNow: () => void;
 };
 
 /** Save/print export formats the File menu offers, with their serializers. */
@@ -140,7 +144,7 @@ const HOME_REDIRECTS = {
   afterSelectPersonalUrl: "/",
 };
 
-export const Navbar = ({ data }: NavbarProps) => {
+export const Navbar = ({ data, crdtClient, syncNow }: NavbarProps) => {
   const router = useRouter();
   const { editor } = useEditorStore();
 
@@ -325,7 +329,10 @@ export const Navbar = ({ data }: NavbarProps) => {
           </div>
         </div>
       </div>
-      <AccountControls />
+      <div className="flex shrink-0 items-center gap-2">
+        <DocumentTools document={data} crdtClient={crdtClient} syncNow={syncNow} />
+        <AccountControls />
+      </div>
     </nav>
   );
 };

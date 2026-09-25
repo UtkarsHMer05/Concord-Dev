@@ -1,8 +1,8 @@
 # Concord — History and Restore
 
 Status: Authoritative
-Version: 1.0 (Phase 5)
-Last updated: 2026-09-07
+Version: 1.1 (history UI prototype)
+Last updated: 2026-09-25
 
 The version-history model: what a revision is, how historical state is
 reconstructed, and how restore works without rewriting history.
@@ -32,6 +32,22 @@ derives state from the snapshot + operation log.
   revision, and the boundary restored from.
 
 ## 3. Listing and viewing
+
+The editor exposes these operations in its **Review & history** panel. Browser
+requests use the same-origin `/api/gateway/documents/{documentId}/revisions`
+proxy; the proxy forwards an allow-listed request and the gateway remains
+responsible for Clerk token verification and document authorization.
+
+- `GET /api/v1/documents/{documentId}/revisions?limit=100` lists revisions.
+- `POST /api/v1/documents/{documentId}/revisions` creates a named checkpoint.
+- `GET /api/v1/documents/{documentId}/revisions/{revisionId}` returns a
+  read-only `visibleContent` preview and digest.
+- `POST /api/v1/documents/{documentId}/revisions/{revisionId}/restore`
+  restores through the durable write path.
+
+The UI reports checkpoint or restore success only after the gateway confirms
+the operation. If the history worker or gateway is unavailable, the UI reports
+the failure and allows retry.
 
 - Listing a document's revisions requires document READ access
   (OWNER/EDITOR/COMMENTER/VIEWER); ACL denial is indistinguishable

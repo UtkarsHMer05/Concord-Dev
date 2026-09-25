@@ -2,7 +2,7 @@
 
 Status: Authoritative architecture; current release state is in the canonical candidate report
 Version: 2.0
-Last updated: 2026-09-14
+Last updated: 2026-09-25
 
 This document distinguishes architecture states at all times:
 
@@ -213,8 +213,8 @@ flowchart TD
   log (RESOLVED in Phase 7 — the product UI wires the real sync session,
   D16; the mirror remains only as the honest fallback for content outside
   the collaborative subset).
-- Presence/comments/threads remain `unavailable` (DEC-016) — unchanged
-  in v1 (§25a.B of the PRD).
+- Presence remains unavailable (DEC-016). Comment threads are a post-v1
+  local prototype; see [REVIEW_TOOLS.md](REVIEW_TOOLS.md) for its limits.
 
 ## 2. PRIOR STATE (Phase 2 — superseded by §1, kept for context)
 

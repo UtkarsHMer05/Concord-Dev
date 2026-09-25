@@ -36,6 +36,8 @@ pub mod cmd {
     pub const VERIFY_SNAPSHOT: u32 = 5;
     pub const GENERATE_OPS: u32 = 6;
     pub const RESTORE_DIFF: u32 = 7;
+    pub const VISIBLE_AFTER: u32 = 8;
+    pub const FOLD_AFTER: u32 = 9;
 }
 
 /// Worker status codes (mirrors cpp/worker/main.cpp).
@@ -98,8 +100,15 @@ impl WorkerError {
 pub struct WorkerOk {
     /// Canonical CRDT digest ("sha256:<hex>") — always present.
     pub digest: String,
-    /// Inner v1 snapshot bytes — present for RECONSTRUCT/EXPORT.
+    /// Inner v1 snapshot bytes — present for RECONSTRUCT/EXPORT/FOLD_AFTER.
     pub snapshot: Option<Vec<u8>>,
+}
+
+/// Canonical visible CRDT state at a historical boundary.
+#[derive(Debug, Clone)]
+pub struct WorkerVisible {
+    pub digest: String,
+    pub json: String,
 }
 
 /// Orchestrates one process-per-request worker invocations.
@@ -277,6 +286,36 @@ impl WorkerPool {
         let mut body = encode_snapshot_only(snapshot);
         body.extend_from_slice(&encode_op_batches(tail_op_payloads));
         self.request(cmd::DIGEST_AFTER, body).await
+    }
+
+    /// Imports a covering snapshot, replays its retained tail, and exports
+    /// the folded state's snapshot bytes (CMD 1 response shape). Snapshot
+    /// builds and restores anchored on a covering snapshot need the folded
+    /// snapshot itself, which the digest-only CMD 4 response omits.
+    pub async fn fold_after(
+        &self,
+        snapshot: &[u8],
+        tail_op_payloads: &[Vec<u8>],
+    ) -> Result<WorkerOk, WorkerError> {
+        let mut body = encode_snapshot_only(snapshot);
+        body.extend_from_slice(&encode_op_batches(tail_op_payloads));
+        self.request(cmd::FOLD_AFTER, body).await
+    }
+
+    /// Reconstructs a snapshot+tail (or empty-state+tail) and returns the
+    /// canonical visible JSON alongside its digest for history previews.
+    pub async fn visible_after(
+        &self,
+        snapshot: Option<&[u8]>,
+        tail_op_payloads: &[Vec<u8>],
+    ) -> Result<WorkerVisible, WorkerError> {
+        let mut body = Vec::new();
+        let snapshot = snapshot.unwrap_or_default();
+        put_u32le(&mut body, snapshot.len() as u32);
+        body.extend_from_slice(snapshot);
+        body.extend_from_slice(&encode_op_batches(tail_op_payloads));
+        let frame = self.request_frame(cmd::VISIBLE_AFTER, body).await?;
+        decode_visible_response(&frame)
     }
 
     /// CMD_GENERATE_OPS (6): deterministic seeded rich-op stream.
@@ -583,6 +622,85 @@ fn decode_response(frame: &[u8]) -> Result<WorkerOk, WorkerError> {
     Ok(WorkerOk { digest, snapshot })
 }
 
+/// Decodes CMD_VISIBLE_AFTER:
+/// `[status][digest_len][digest][json_len][canonical visible JSON]`.
+fn decode_visible_response(frame: &[u8]) -> Result<WorkerVisible, WorkerError> {
+    let mut offset = 0usize;
+    let read_u32 = |offset: usize| -> Option<u32> {
+        frame
+            .get(offset..offset.checked_add(4)?)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().expect("4 bytes")))
+    };
+    let Some(status_code) = read_u32(offset) else {
+        return Err(WorkerError::MalformedResponse(
+            "visible response missing status".into(),
+        ));
+    };
+    offset += 4;
+    if status_code != status::OK {
+        let Some(length) = read_u32(offset) else {
+            return Err(WorkerError::MalformedResponse(
+                "visible error missing length".into(),
+            ));
+        };
+        offset += 4;
+        let end = offset.checked_add(length as usize).ok_or_else(|| {
+            WorkerError::MalformedResponse("visible error length overflow".into())
+        })?;
+        let bytes = frame
+            .get(offset..end)
+            .ok_or_else(|| WorkerError::MalformedResponse("visible error truncated".into()))?;
+        if end != frame.len() {
+            return Err(WorkerError::MalformedResponse(
+                "trailing visible error bytes".into(),
+            ));
+        }
+        return Err(WorkerError::Status {
+            status: status_code,
+            message: String::from_utf8_lossy(bytes).trim().to_string(),
+        });
+    }
+    let Some(digest_len) = read_u32(offset) else {
+        return Err(WorkerError::MalformedResponse(
+            "visible response missing digest length".into(),
+        ));
+    };
+    offset += 4;
+    let digest_end = offset
+        .checked_add(digest_len as usize)
+        .ok_or_else(|| WorkerError::MalformedResponse("visible digest length overflow".into()))?;
+    let digest = String::from_utf8(
+        frame
+            .get(offset..digest_end)
+            .ok_or_else(|| WorkerError::MalformedResponse("visible digest truncated".into()))?
+            .to_vec(),
+    )
+    .map_err(|_| WorkerError::MalformedResponse("visible digest is not UTF-8".into()))?;
+    offset = digest_end;
+    let Some(json_len) = read_u32(offset) else {
+        return Err(WorkerError::MalformedResponse(
+            "visible JSON missing length".into(),
+        ));
+    };
+    offset += 4;
+    let json_end = offset
+        .checked_add(json_len as usize)
+        .ok_or_else(|| WorkerError::MalformedResponse("visible JSON length overflow".into()))?;
+    let json = String::from_utf8(
+        frame
+            .get(offset..json_end)
+            .ok_or_else(|| WorkerError::MalformedResponse("visible JSON truncated".into()))?
+            .to_vec(),
+    )
+    .map_err(|_| WorkerError::MalformedResponse("visible JSON is not UTF-8".into()))?;
+    if json_end != frame.len() {
+        return Err(WorkerError::MalformedResponse(
+            "trailing visible response bytes".into(),
+        ));
+    }
+    Ok(WorkerVisible { digest, json })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,6 +744,56 @@ mod tests {
             .await
             .expect("import verifies");
         assert_eq!(ok.digest, verify.digest, "import must reproduce the digest");
+    }
+
+    #[tokio::test]
+    async fn empty_visible_state_returns_json_and_matching_digest() {
+        let Some(pool) = live_worker() else { return };
+        let visible = pool.visible_after(None, &[]).await.expect("empty preview");
+        assert!(visible.digest.starts_with("sha256:"));
+        let value: serde_json::Value = serde_json::from_str(&visible.json).expect("visible JSON");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "blocks": [{ "type": "paragraph", "attrs": {}, "runs": [] }]
+            })
+        );
+        let reconstructed = pool.reconstruct(&[]).await.expect("same empty state");
+        assert_eq!(visible.digest, reconstructed.digest);
+    }
+
+    #[tokio::test]
+    async fn fold_after_returns_snapshot_for_empty_tail() {
+        let Some(pool) = live_worker() else { return };
+        let base = pool.reconstruct(&[]).await.expect("empty reconstruct");
+        let base_snapshot = base.snapshot.expect("base snapshot");
+        let folded = pool
+            .fold_after(&base_snapshot, &[])
+            .await
+            .expect("fold after");
+        assert_eq!(folded.digest, base.digest);
+        let folded_snapshot = folded.snapshot.expect("folded snapshot");
+        let verified = pool
+            .import_digest(&folded_snapshot)
+            .await
+            .expect("folded snapshot verifies");
+        assert_eq!(verified.digest, base.digest);
+    }
+
+    #[test]
+    fn visible_response_decoder_rejects_truncation_and_trailing_bytes() {
+        let mut frame = Vec::new();
+        put_u32le(&mut frame, status::OK);
+        put_u32le(&mut frame, 10);
+        frame.extend_from_slice(b"sha256:abc");
+        put_u32le(&mut frame, 13);
+        frame.extend_from_slice(b"{\"blocks\":[]}");
+        let decoded = decode_visible_response(&frame).expect("valid visible response");
+        assert_eq!(decoded.digest, "sha256:abc");
+        assert_eq!(decoded.json, "{\"blocks\":[]}");
+        frame.push(0);
+        assert!(decode_visible_response(&frame).is_err());
+        assert!(decode_visible_response(&frame[..frame.len() - 2]).is_err());
     }
 
     #[tokio::test]

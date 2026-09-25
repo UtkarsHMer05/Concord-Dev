@@ -94,6 +94,7 @@ export class CrdtEditorBridge {
      */
     private reconcileRequested = false;
     private pendingReconcileEditor: Editor | null = null;
+    private reconcilePromise: Promise<void> | null = null;
     /** Transactions that arrived while start() was still in flight. */
     private startPromise: Promise<void> | null = null;
     /** Render coalescing (P7-M024): one render in flight, one trailing. */
@@ -193,7 +194,7 @@ export class CrdtEditorBridge {
                 // Local replica exists: it is the editing truth (offline-first).
                 seedBlocks = crdtBlocks;
             } else if (seedPmDoc === null) {
-                seedBlocks = [{ type: "paragraph", attrs: { type: "paragraph" }, chars: [] }];
+                seedBlocks = [{ type: "paragraph", attrs: {}, chars: [] }];
                 seedIsNew = true;
             } else {
                 const parsed = pmDocToBlocks(seedPmDoc ?? editor.getJSON() as PmNode);
@@ -205,7 +206,13 @@ export class CrdtEditorBridge {
                     this.init.onStatusChange?.(this.state);
                     return;
                 }
-                seedBlocks = parsed.blocks;
+                // TipTap can expose an empty document with no block before
+                // the first keystroke. Keep block 0 implicit so two fresh
+                // replicas do not each emit a competing delimiter for the
+                // same blank document.
+                seedBlocks = parsed.blocks.length > 0
+                    ? parsed.blocks
+                    : [{ type: "paragraph", attrs: {}, chars: [] }];
                 seedIsNew = true;
             }
 
@@ -227,11 +234,13 @@ export class CrdtEditorBridge {
                 // never reached the engine.
                 const stream = (await this.init.client.exportStream()) as StreamEntryJson[];
                 const ops = reconcile(
-                    [{ type: "paragraph", attrs: { type: "paragraph" }, chars: [] }],
+                    [{ type: "paragraph", attrs: {}, chars: [] }],
                     seedBlocks,
                     stream,
                 );
-                await this.applyOps(ops);
+                if (ops.length > 0) {
+                    await this.init.client.seed(ops);
+                }
                 this.state = { mode: "crdt", lastBlocks: seedBlocks };
             }
             this.init.onStatusChange?.(this.state);
@@ -272,6 +281,14 @@ export class CrdtEditorBridge {
         await this.reconcileTransaction(editor);
     }
 
+    /** Wait until the latest editor document has been durably reconciled. */
+    async flushLocalChanges(): Promise<void> {
+        await this.onLocalTransaction(this.init.editor);
+        if (this.state.mode !== "crdt") {
+            throw new Error("The editor bridge is not available for Concordpack export.");
+        }
+    }
+
     /** Shared reconciliation core — no start() coordination (re-entrant). */
     private async reconcileTransaction(editor: Editor): Promise<void> {
         if (this.reconciling) {
@@ -281,6 +298,7 @@ export class CrdtEditorBridge {
             // trailing reconciliation against the editor's latest document.
             this.reconcileRequested = true;
             this.pendingReconcileEditor = editor;
+            await this.reconcilePromise;
             return;
         }
         if (this.state.mode !== "crdt") {
@@ -288,6 +306,24 @@ export class CrdtEditorBridge {
         }
 
         this.reconciling = true;
+        // Defer one microtask so the promise is published before another
+        // transaction can join this reconciliation and await its trailing pass.
+        const pass = Promise.resolve().then(() => this.runReconciliation(editor));
+        this.reconcilePromise = pass;
+        try {
+            await pass;
+        } finally {
+            this.reconciling = false;
+            this.reconcileRequested = false;
+            this.pendingReconcileEditor = null;
+            this.reconcilePromise = null;
+        }
+    }
+
+    private async runReconciliation(editor: Editor): Promise<void> {
+        const bridgeState = this.state;
+        if (bridgeState.mode !== "crdt") return;
+        let lastBlocks = bridgeState.lastBlocks;
         let currentEditor = editor;
         try {
             do {
@@ -311,21 +347,18 @@ export class CrdtEditorBridge {
                 }
 
                 const stream = (await this.streamEntries()) as StreamEntryJson[];
-                const ops = reconcile(this.state.lastBlocks, parsed.blocks, stream);
+                const ops = reconcile(lastBlocks, parsed.blocks, stream);
                 if (ops.length > 0) {
                     await this.applyOps(ops);
                 }
                 this.state = { mode: "crdt", lastBlocks: parsed.blocks };
+                lastBlocks = parsed.blocks;
                 currentEditor = this.pendingReconcileEditor ?? currentEditor;
             } while (this.reconcileRequested && this.state.mode === "crdt");
         } catch (error) {
             this.state = { mode: "fallback", reason: "worker persistence failed" };
             this.init.onStatusChange?.(this.state);
             throw error;
-        } finally {
-            this.reconciling = false;
-            this.reconcileRequested = false;
-            this.pendingReconcileEditor = null;
         }
     }
 

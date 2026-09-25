@@ -23,13 +23,44 @@ function user(label: string): E2eUser {
   return u;
 }
 
+/**
+ * Best-effort settle for pages whose collaborative status is still
+ * transitioning when the editor becomes interactive. A page captured
+ * mid-transition scans a DOM that is about to change; a settled page is
+ * the honest scan target. Non-fatal: the a11y gate is about the settled
+ * UI, not about sync health.
+ */
+async function settleEditorStatus(page: Page): Promise<void> {
+  const connected = page
+    .getByRole("status")
+    .filter({ hasText: "Collaborative · Connected" })
+    .first();
+  await connected
+    .waitFor({ state: "visible", timeout: 20_000 })
+    .catch(() => {
+      // Slow/absent sync must not fail the a11y gate; scan what renders.
+    });
+}
+
 /** Run axe and assert zero serious/critical violations. */
 async function expectAccessible(page: Page, label: string): Promise<void> {
-  const results = await new AxeBuilder({ page })
-    // Serious + critical: the gate level. Moderate/minor findings are
-    // tracked as improvement work, not release blockers (documented).
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
+  // axe walks the live DOM; a page mid-hydration can make a scan throw.
+  // Retry thrown scans only — violations are asserted on the final pass
+  // and are never retried away.
+  let results;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      results = await new AxeBuilder({ page })
+        // Serious + critical: the gate level. Moderate/minor findings are
+        // tracked as improvement work, not release blockers (documented).
+        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+        .analyze();
+      break;
+    } catch (error) {
+      if (attempt >= 3) throw error;
+      await page.waitForTimeout(500);
+    }
+  }
 
   const serious = results.violations.filter((v) =>
     ["serious", "critical"].includes(v.impact ?? ""),
@@ -57,6 +88,7 @@ test.describe.serial("accessibility smoke (axe-core)", () => {
     await signIn(page, user("a11y-editor"));
     await createDocument(page, "A11y Editor");
     await waitForEditor(page);
+    await settleEditorStatus(page);
     await expectAccessible(page, "editor");
   });
 

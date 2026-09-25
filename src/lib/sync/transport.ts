@@ -22,6 +22,8 @@ import {
   type ControlFrameType,
   type DecodedControlFrame,
   type ErrorCode,
+  type PresenceState,
+  type PresenceUpdate,
   type SnapshotPayload,
   type SnapshotResyncRequired,
   FATAL_ERROR_CODES,
@@ -67,6 +69,10 @@ export interface TransportEvents {
   onDraining: (graceMs: number) => void;
   /** The transport gave up (fatal error or explicit close). */
   onFatal: (reason: string) => void;
+  /** A peer's live presence (cursor/selection) arrived (Feature 2). */
+  onPresenceUpdate?: (peer: PresenceUpdate) => void;
+  /** A peer left; drop its caret (Feature 2). */
+  onPresenceLeave?: (connectionId: string) => void;
 }
 
 export interface TransportOptions {
@@ -209,6 +215,20 @@ export class SyncTransport {
     this.ws.send(encodeClientOpsFrame({ batchId, ops }));
   }
 
+  /** Publishes ephemeral presence (Feature 2). Best-effort: only sent when
+   * READY, and a closed/opening socket silently drops it (a caret is
+   * disposable — the next selectionchange re-sends). Never throws. */
+  sendPresence(state: PresenceState): void {
+    if (this.status !== "ready" || this.ws?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    try {
+      this.ws.send(encodeControlFrame({ type: "presence", payload: state }));
+    } catch {
+      // A racing close: presence is disposable, drop it.
+    }
+  }
+
   /** Clean close: no reconnect (navigation/logout). */
   close(): void {
     this.closedByUser = true;
@@ -337,6 +357,14 @@ export class SyncTransport {
         this.send("pong", { nonce }, undefined);
         break;
       }
+      case "presence_update":
+        this.options.events.onPresenceUpdate?.(frame.payload as PresenceUpdate);
+        break;
+      case "presence_leave":
+        this.options.events.onPresenceLeave?.(
+          (frame.payload as { connectionId: string }).connectionId,
+        );
+        break;
       default:
         // Server-origin frames with no client action — ignore safely.
         break;

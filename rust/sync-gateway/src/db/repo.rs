@@ -137,6 +137,35 @@ impl GatewayRepo {
 
         let mut client = self.db.get().await?;
         let tx = client.transaction().await?;
+        let result = Self::ingest_batch_in_tx(&tx, user, document, envelopes, false).await?;
+        tx.commit().await?;
+        Ok(result)
+    }
+
+    /// Ingests a batch using a caller-owned transaction. `owner_only` is
+    /// used by destructive history operations, whose authorization must be
+    /// rechecked in the same transaction as their durable writes. The caller
+    /// must commit before treating the returned rows as durable.
+    pub(crate) async fn ingest_batch_in_tx(
+        tx: &tokio_postgres::Transaction<'_>,
+        user: UserId,
+        document: Uuid,
+        envelopes: &[OpEnvelope],
+        owner_only: bool,
+    ) -> Result<IngestResult, RepoError> {
+        // 0. Serialize per document (cluster-wide, released at COMMIT).
+        // `id` is a bigserial assigned at INSERT time; without ordering,
+        // two gateways can commit seq 10 before seq 9, and any acked
+        // cursor or catch-up page that observes that gap jumps past the
+        // still-invisible seq — permanently hiding the late-committing op
+        // from delta catch-up (id < cursor). Holding this lock across the
+        // whole ingest transaction makes id order == commit order, so the
+        // MAX(id) cursor and catch-up pages always see a gapless prefix.
+        tx.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+            &[&document.to_string()],
+        )
+        .await?;
 
         // 1. Write-authz recheck INSIDE the transaction (fresh snapshot).
         let row = tx.query_opt(AUTHZ_QUERY, &[&user.0, &document]).await?;
@@ -147,7 +176,11 @@ impl GatewayRepo {
         let Some(role) = EffectiveRole::resolve(is_owner, direct.as_deref(), org_member) else {
             return Err(RepoError::WriteDenied);
         };
-        if !role.can_edit() {
+        if !(if owner_only {
+            role.is_owner()
+        } else {
+            role.can_edit()
+        }) {
             return Err(RepoError::WriteDenied);
         }
 
@@ -284,8 +317,6 @@ impl GatewayRepo {
             )
             .await?;
         let durable_cursor: i64 = cursor_row.get("cursor");
-
-        tx.commit().await?;
 
         Ok(IngestResult {
             newly_inserted: newly,

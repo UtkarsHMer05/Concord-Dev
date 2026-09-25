@@ -57,6 +57,7 @@ import { blocksToPmDoc, pmDocToBlocks, type PmNode } from "@/lib/crdt/pm-model";
 import type { CrdtClient } from "@/lib/crdt/worker/client";
 import { CrdtWorkerCore } from "@/lib/crdt/worker/core";
 import type { PersistenceAdapter, LocalState } from "@/lib/crdt/worker/idb";
+import type { SeedOperation } from "@/lib/crdt/worker/protocol";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const wasmDist = path.join(repoRoot, "wasm/dist");
@@ -136,6 +137,11 @@ class CoreBackedClient {
         return (r as { ops: Uint8Array[] }).ops;
     }
 
+    async seed(ops: SeedOperation[]): Promise<Uint8Array[]> {
+        const r = await this.core.handle({ id: this.nextId++, kind: "seed", ops });
+        return (r as { ops: Uint8Array[] }).ops;
+    }
+
     async visibleJson(): Promise<string> {
         const r = await this.core.handle({ id: this.nextId++, kind: "visibleJson" });
         return (r as { json: string }).json;
@@ -191,11 +197,45 @@ function pmDocWithText(text: string): PmNode {
     };
 }
 
+function emptyPmDoc(): PmNode {
+    return { type: "doc", content: [] };
+}
+
 interface VisibleDoc {
     blocks: { runs: { t: string }[] }[];
 }
 
 describe("editor bridge seed path (final gate)", () => {
+    it("keeps fresh blank replicas on one implicit block", async () => {
+        const documentId = "bridge-blank-replica-doc";
+        const persistenceA = new MemoryPersistence();
+        const persistenceB = new MemoryPersistence();
+        const coreA = new CrdtWorkerCore({ documentId, replicaId: 41n, loadFactory, persistence: persistenceA });
+        const coreB = new CrdtWorkerCore({ documentId, replicaId: 42n, loadFactory, persistence: persistenceB });
+        const clientA = new CoreBackedClient(coreA, documentId);
+        const clientB = new CoreBackedClient(coreB, documentId);
+        const editorA = fakeEditor();
+        const editorB = fakeEditor();
+        editorA.current = emptyPmDoc();
+        editorB.current = emptyPmDoc();
+        const bridgeA = new CrdtEditorBridge({ editor: editorA, client: clientA as unknown as CrdtClient, documentId });
+        const bridgeB = new CrdtEditorBridge({ editor: editorB, client: clientB as unknown as CrdtClient, documentId });
+
+        await bridgeA.start();
+        await bridgeB.start();
+        expect(await clientA.exportOps()).toHaveLength(0);
+        expect(await clientB.exportOps()).toHaveLength(0);
+
+        editorA.current = pmDocWithText("a");
+        await bridgeA.onLocalTransaction(editorA);
+        const localOps = await clientA.exportOps();
+        expect(localOps).toHaveLength(1);
+        expect(localOps[0]?.[1]).toBe(1); // insert text, no competing delimiter
+
+        await coreB.handle({ id: 100, kind: "applyRemote", ops: localOps });
+        expect(JSON.parse(await clientB.visibleJson()).blocks[0].runs[0].t).toBe("a");
+    });
+
     it("seeds from the editor's parsed template content when no JSON seed is supplied", async () => {
         const persistence = new MemoryPersistence();
         const core = new CrdtWorkerCore({ documentId: DOC, replicaId: 7n, loadFactory, persistence });
@@ -269,6 +309,33 @@ describe("editor bridge seed path (final gate)", () => {
         expect(restored.blocks[0].runs[0].t).toBe("hello world!!");
         expect(restored.blocks[1].runs[0].t).toBe("second");
     });
+
+    it("uses identical deterministic seed items across fresh template replicas", async () => {
+        const documentId = "bridge-template-replica-doc";
+        const coreA = new CrdtWorkerCore({ documentId, replicaId: 51n, loadFactory, persistence: new MemoryPersistence() });
+        const coreB = new CrdtWorkerCore({ documentId, replicaId: 52n, loadFactory, persistence: new MemoryPersistence() });
+        const clientA = new CoreBackedClient(coreA, documentId);
+        const clientB = new CoreBackedClient(coreB, documentId);
+        const editorA = fakeEditor();
+        const editorB = fakeEditor();
+        const bridgeA = new CrdtEditorBridge({ editor: editorA, client: clientA as unknown as CrdtClient, documentId, seedPmDoc: seedPmDoc() });
+        const bridgeB = new CrdtEditorBridge({ editor: editorB, client: clientB as unknown as CrdtClient, documentId, seedPmDoc: seedPmDoc() });
+
+        await bridgeA.start();
+        await bridgeB.start();
+        const seedA = await clientA.exportOps();
+        const seedB = await clientB.exportOps();
+        expect(seedA).toEqual(seedB);
+        expect(seedA.length).toBeGreaterThan(0);
+
+        const edited = pmDocToBlocks(seedPmDoc());
+        edited.blocks[0].chars.push({ scalar: "!", marks: {} });
+        editorA.current = blocksToPmDoc(edited.blocks);
+        await bridgeA.onLocalTransaction(editorA);
+        const userOps = (await clientA.exportOps()).slice(seedA.length);
+        await coreB.handle({ id: 200, kind: "applyRemote", ops: userOps });
+        expect(await clientB.visibleJson()).toBe(await clientA.visibleJson());
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -334,9 +401,14 @@ describe("local transaction coalescing", () => {
         // TipTap invokes this handler without awaiting the first promise. The
         // old early-return guard silently lost this final " A" suffix.
         editor.current = pmDocWithText("wave one from browser A");
-        await bridge.onLocalTransaction(editor);
+        let flushFinished = false;
+        const flush = bridge.flushLocalChanges().then(() => { flushFinished = true; });
+        await Promise.resolve();
+        expect(flushFinished).toBe(false);
         releaseFirstExport?.();
         await firstTransaction;
+        await flush;
+        expect(flushFinished).toBe(true);
 
         const visible = JSON.parse(await delegate.visibleJson()) as VisibleDoc;
         expect(visible.blocks[0].runs[0].t).toBe("wave one from browser A");

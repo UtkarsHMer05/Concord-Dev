@@ -746,3 +746,155 @@ async fn sec5_clean_cross_document_fetch_refused_uniformly() {
     cleanup(&db, owner, doc_a).await;
     cleanup(&db, owner, doc_b).await;
 }
+
+/// The history REST surface shares Clerk auth and the same document ACLs
+/// as sync. List is readable by VIEWER, named checkpoints require EDITOR,
+/// restore requires OWNER, and reconstruction fails closed when no worker
+/// is configured.
+#[tokio::test]
+async fn history_http_authz_and_missing_worker_are_explicit() {
+    let Some(db) = test_db().await else { return };
+    let client = db.get().await.expect("pool");
+    let owner = Uuid::new_v4();
+    let editor = Uuid::new_v4();
+    let viewer = Uuid::new_v4();
+    let stranger = Uuid::new_v4();
+    let doc = Uuid::new_v4();
+    let owner_sub = format!("hist_api_owner_{owner}");
+    let editor_sub = format!("hist_api_editor_{editor}");
+    let viewer_sub = format!("hist_api_viewer_{viewer}");
+    let stranger_sub = format!("hist_api_stranger_{stranger}");
+    client
+        .batch_execute(&format!(
+            "INSERT INTO users (id, clerk_user_id)
+               VALUES ('{owner}', '{owner_sub}'),
+                      ('{editor}', '{editor_sub}'),
+                      ('{viewer}', '{viewer_sub}'),
+                      ('{stranger}', '{stranger_sub}');
+             INSERT INTO documents (id, owner_user_id, title)
+               VALUES ('{doc}', '{owner}', 'history-api-test');
+             INSERT INTO document_user_permissions (document_id, user_id, role)
+               VALUES ('{doc}', '{editor}', 'EDITOR'), ('{doc}', '{viewer}', 'VIEWER');"
+        ))
+        .await
+        .expect("history API fixture");
+
+    let repo = GatewayRepo::new(db.clone());
+    let op = validate_op(&golden::golden_insert_op()).expect("valid op");
+    repo.ingest_batch(sync_gateway::db::repo::UserId(owner), doc, &[op])
+        .await
+        .expect("seed operation");
+
+    let addr = boot_gateway(Arc::new(repo)).await;
+    let base = format!("http://{addr}/api/v1/documents/{doc}/revisions");
+    let http = reqwest::Client::new();
+
+    assert_eq!(
+        http.get(&base)
+            .send()
+            .await
+            .expect("unauthenticated list")
+            .status(),
+        401
+    );
+    let viewer_auth = format!("Bearer {}", sign_token(&viewer_sub));
+    let visible = http
+        .get(&base)
+        .header(reqwest::header::AUTHORIZATION, &viewer_auth)
+        .send()
+        .await
+        .expect("viewer list");
+    assert_eq!(visible.status(), 200, "VIEWER can inspect history");
+    assert_eq!(
+        visible.json::<serde_json::Value>().await.unwrap()["revisions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+
+    let stranger_auth = format!("Bearer {}", sign_token(&stranger_sub));
+    assert_eq!(
+        http.get(&base)
+            .header(reqwest::header::AUTHORIZATION, &stranger_auth)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+
+    let denied = http
+        .post(&base)
+        .header(reqwest::header::AUTHORIZATION, &viewer_auth)
+        .json(&serde_json::json!({ "label": "Not allowed" }))
+        .send()
+        .await
+        .expect("viewer checkpoint");
+    assert_eq!(denied.status(), 404, "VIEWER cannot create a checkpoint");
+
+    let editor_auth = format!("Bearer {}", sign_token(&editor_sub));
+    let created = http
+        .post(&base)
+        .header(reqwest::header::AUTHORIZATION, &editor_auth)
+        .json(&serde_json::json!({ "label": "Before edit" }))
+        .send()
+        .await
+        .expect("editor checkpoint");
+    assert_eq!(
+        created.status(),
+        201,
+        "EDITOR can create a named checkpoint"
+    );
+    let revision_id = created.json::<serde_json::Value>().await.unwrap()["revisionId"]
+        .as_str()
+        .expect("revision id")
+        .to_owned();
+    let revision_url = format!("{base}/{revision_id}");
+
+    let unavailable = http
+        .get(&revision_url)
+        .header(reqwest::header::AUTHORIZATION, &viewer_auth)
+        .send()
+        .await
+        .expect("historical reconstruction");
+    assert_eq!(
+        unavailable.status(),
+        503,
+        "historical reconstruction requires the native worker"
+    );
+
+    let viewer_restore = http
+        .post(format!("{revision_url}/restore"))
+        .header(reqwest::header::AUTHORIZATION, &viewer_auth)
+        .send()
+        .await
+        .expect("viewer restore");
+    assert_eq!(
+        viewer_restore.status(),
+        404,
+        "role denial stays indistinguishable from not-found"
+    );
+
+    let owner_auth = format!("Bearer {}", sign_token(&owner_sub));
+    let owner_restore = http
+        .post(format!("{revision_url}/restore"))
+        .header(reqwest::header::AUTHORIZATION, &owner_auth)
+        .send()
+        .await
+        .expect("owner restore without worker");
+    assert_eq!(
+        owner_restore.status(),
+        503,
+        "OWNER is authorized but restore does not claim success without the worker"
+    );
+
+    let client = db.get().await.expect("pool");
+    client
+        .batch_execute(&format!(
+            "DELETE FROM documents WHERE id = '{doc}';
+             DELETE FROM users WHERE id IN ('{owner}', '{editor}', '{viewer}', '{stranger}');"
+        ))
+        .await
+        .expect("history API cleanup");
+}

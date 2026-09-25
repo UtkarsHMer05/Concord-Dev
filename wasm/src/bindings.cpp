@@ -260,7 +260,7 @@ void* concord_create_from_snapshot(std::uint64_t replica_id, const std::uint8_t*
 }
 
 // Writes the full tombstone-inclusive stream as JSON:
-// [{"r":<replica>,"c":<counter>,"k":"text"|"delim","t":false,"s":"...","a":{...}}]
+// [{"r":"<replica>","c":"<counter>","k":"text"|"delim","t":false,"s":"...","a":{...}}]
 // (t = tombstoned, s = scalar for text items, a = winning attributes). This is
 // the mapping surface the TipTap adapter uses to translate editor positions
 // into CRDT anchors.
@@ -274,8 +274,8 @@ std::int32_t concord_stream_json(void* handle, std::uint8_t* out, std::int32_t c
             if (i > 0) {
                 json += ",";
             }
-            json += "{\"r\":" + std::to_string(entry.id.replica.value());
-            json += ",\"c\":" + std::to_string(entry.id.counter.value());
+            json += "{\"r\":\"" + std::to_string(entry.id.replica.value()) + "\"";
+            json += ",\"c\":\"" + std::to_string(entry.id.counter.value()) + "\"";
             json += ",\"k\":\"" +
                     std::string(entry.kind == concord::crdt::ItemKind::Text ? "text" : "delim") + "\"";
             json += ",\"t\":" + std::string(entry.tombstoned ? "true" : "false");

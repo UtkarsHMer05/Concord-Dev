@@ -1,10 +1,11 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Inter } from "next/font/google";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 
 import { Toaster } from "@/components/ui/sonner";
 import { ClerkAuthGate } from "@/components/clerk-client-provider";
+import { PwaRegistration } from "@/components/pwa-registration";
 
 import "./globals.css";
 
@@ -34,6 +35,10 @@ export const metadata: Metadata = {
   description:
     "Concord — a local-first collaborative document workspace: rich-text editing with durable offline editing.",
   applicationName: "Concord",
+  // Feature 8 (PWA): the manifest + icons make Concord installable; the
+  // service worker itself is registered PRODUCTION-ONLY by PwaRegistration
+  // (dev caching would break HMR).
+  manifest: "/manifest.webmanifest",
   openGraph: {
     title: "Concord",
     description:
@@ -41,6 +46,10 @@ export const metadata: Metadata = {
     siteName: "Concord",
     type: "website",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#174b65",
 };
 
 export default function RootLayout(props: Readonly<{ children: React.ReactNode }>) {
@@ -61,6 +70,7 @@ export default function RootLayout(props: Readonly<{ children: React.ReactNode }
     <html lang="en">
       <body className={inter.className}>
         <NuqsAdapter>{appTree}</NuqsAdapter>
+        <PwaRegistration />
       </body>
     </html>
   );

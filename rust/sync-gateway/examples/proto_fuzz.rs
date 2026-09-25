@@ -382,6 +382,8 @@ fn fuzz_session_property(input: &[u8]) {
             | Frame::SnapshotPayload(_)
             | Frame::DurableAck(_)
             | Frame::Error(_)
+            | Frame::PresenceUpdate(_)
+            | Frame::PresenceLeave(_)
             | Frame::ServerDraining(_) => {} // server-only: rejected inbound
             Frame::Hello(_)
             | Frame::Authenticate(_)
@@ -389,6 +391,7 @@ fn fuzz_session_property(input: &[u8]) {
             | Frame::SyncRequest(_)
             | Frame::FetchSnapshot(_)
             | Frame::Ping(_)
+            | Frame::Presence(_)
             | Frame::Pong(_) => {} // client-legal: state-checked by ws
         }
     }

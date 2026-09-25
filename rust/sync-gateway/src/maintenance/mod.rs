@@ -6,6 +6,7 @@ pub mod compaction;
 pub mod history;
 pub mod jobs;
 pub mod pipeline;
+pub mod proofs;
 pub mod recovery;
 pub mod retention;
 pub mod scheduler;
@@ -22,6 +23,9 @@ pub use jobs::{
     SnapshotTriggerPolicy, TriggerInputs,
 };
 pub use pipeline::{PipelineError, SnapshotPipeline};
+pub use proofs::{
+    leaf_hash, merkle_proof, merkle_root, receipt_message, replay_path, ProofSigner, ROOT_OF_EMPTY,
+};
 pub use recovery::{RecoverySelector, RecoverySource, SelectedRecovery, VerificationError};
 pub use retention::{
     mark_superseded_unreferenced, purge_unreferenced, storage_accounting, RetentionError,

@@ -151,6 +151,37 @@ export interface SnapshotPayload {
   payloadSize: string;
 }
 
+/** Which side of a CRDT item a presence caret/selection endpoint sits on. */
+export type PresenceSide = "before" | "after";
+
+/** c→s (Feature 2, ephemeral): the sender's live caret/selection anchored to
+ * CRDT item ids ("r:c"). `*Item` is absent when the caret cannot be anchored
+ * to a live item (empty document). Relayed to peers; never persisted. */
+export interface PresenceState {
+  replicaId: string;
+  anchorItem?: string;
+  anchorSide: PresenceSide;
+  headItem?: string;
+  headSide: PresenceSide;
+}
+
+/** s→c: one peer's relayed presence; `connectionId`/`userId` are stamped by
+ * the gateway from the authenticated session (unforgeable). */
+export interface PresenceUpdate {
+  connectionId: string;
+  userId: string;
+  replicaId: string;
+  anchorItem?: string;
+  anchorSide: PresenceSide;
+  headItem?: string;
+  headSide: PresenceSide;
+}
+
+/** s→c: a peer left the room; drop its caret. */
+export interface PresenceLeave {
+  connectionId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Frame union
 // ---------------------------------------------------------------------------
@@ -171,7 +202,10 @@ export type ControlPayload =
   | { type: "snapshot_resync_required"; payload: SnapshotResyncRequired }
   | { type: "snapshot_payload"; payload: SnapshotPayload }
   | { type: "error"; payload: ErrorFrame }
-  | { type: "server_draining"; payload: ServerDraining };
+  | { type: "server_draining"; payload: ServerDraining }
+  | { type: "presence"; payload: PresenceState }
+  | { type: "presence_update"; payload: PresenceUpdate }
+  | { type: "presence_leave"; payload: PresenceLeave };
 
 export const CONTROL_FRAME_TYPES = [
   "hello",
@@ -190,6 +224,9 @@ export const CONTROL_FRAME_TYPES = [
   "snapshot_payload",
   "error",
   "server_draining",
+  "presence",
+  "presence_update",
+  "presence_leave",
 ] as const;
 
 export type ControlFrameType = (typeof CONTROL_FRAME_TYPES)[number];
@@ -258,6 +295,23 @@ const PAYLOAD_VALIDATORS: Record<ControlFrameType, (p: unknown) => string | null
   }),
   error: isStrict({ code: isEnum(...ERROR_CODES), message: isString, requestId: optional(isString) }),
   server_draining: isStrict({ reason: isString, graceMs: isUint }),
+  presence: isStrict({
+    replicaId: isString,
+    anchorItem: optional(isString),
+    anchorSide: isEnum("before", "after"),
+    headItem: optional(isString),
+    headSide: isEnum("before", "after"),
+  }),
+  presence_update: isStrict({
+    connectionId: isString,
+    userId: isString,
+    replicaId: isString,
+    anchorItem: optional(isString),
+    anchorSide: isEnum("before", "after"),
+    headItem: optional(isString),
+    headSide: isEnum("before", "after"),
+  }),
+  presence_leave: isStrict({ connectionId: isString }),
 };
 
 /** A decoded control frame with its optional correlation id. */

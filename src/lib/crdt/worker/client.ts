@@ -5,7 +5,7 @@
 // error instead of growing without bound; worker termination rejects every
 // pending request.
 import type { StreamEntryJson } from "../adapter";
-import type { WorkerRequest, WorkerResponse, WorkerResultPayload, CrdtWorkerError, WorkerNotification } from "./protocol";
+import type { SeedOperation, WorkerRequest, WorkerResponse, WorkerResultPayload, CrdtWorkerError, WorkerNotification } from "./protocol";
 
 const MAX_PENDING = 256;
 
@@ -129,6 +129,12 @@ export class CrdtClient {
             applied: number;
             duplicates: number;
         }>;
+    }
+
+    seed(ops: SeedOperation[]): Promise<Uint8Array[]> {
+        return this.call({ kind: "seed", ops }).then(
+            (result) => (result as { kind: "seed"; ops: Uint8Array[] }).ops,
+        );
     }
 
     async syncCursor(): Promise<string> {

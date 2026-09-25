@@ -26,8 +26,8 @@ import type { CanonicalBlock } from "./pm-model";
 import type { ConcordEngine } from "./runtime";
 
 export interface StreamEntryJson {
-    r: string; // replica id (decimal string)
-    c: number; // counter
+    r: string; // replica id (decimal string; never round a u64 through JS Number)
+    c: string; // counter (decimal string)
     k: "text" | "delim";
     t: boolean; // tombstoned
     s: string; // scalar (text items)

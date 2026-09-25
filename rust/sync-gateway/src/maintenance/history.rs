@@ -34,6 +34,8 @@
 //! All SQL in this module is a static string with parameterized
 //! values; no untrusted input is ever concatenated into a statement.
 
+use tokio_postgres::Transaction;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::db::authz::EffectiveRole;
@@ -137,6 +139,8 @@ pub enum HistoryError {
     /// snapshot at the target boundary.
     #[error("restore anchor build failed: {0}")]
     RestoreAnchor(String),
+    #[error("worker returned malformed visible state")]
+    VisibleStateMalformed,
 }
 
 /// One `crdt_revisions` row as created (M034 write model).
@@ -176,6 +180,8 @@ pub struct HistoricalState {
     /// Canonical CRDT digest at the boundary ("sha256:<hex>").
     /// Same revision ⇒ same digest, always (H2/R8).
     pub state_digest: String,
+    /// Canonical visible blocks for an authenticated, read-only preview.
+    pub visible_content: serde_json::Value,
     /// The FINALIZED snapshot the reconstruction started from, when
     /// one covers the boundary; None = replay from the empty state.
     pub covered_by_snapshot: Option<Uuid>,
@@ -205,6 +211,13 @@ pub struct RestoreOutcome {
     /// Duplicate identities in the restore batch (idempotent re-restore
     /// or racing retries resolve to no-ops).
     pub duplicate_ops: usize,
+    /// Newly committed operation bytes, for after-commit realtime fanout.
+    /// Duplicate retries are excluded so downstream replicas only receive
+    /// work that this call durably inserted.
+    pub(crate) committed_ops: Vec<Vec<u8>>,
+    /// The durable high-water returned by the transaction that inserted
+    /// `committed_ops`.
+    pub(crate) durable_cursor: i64,
 }
 
 /// Metadata for the applied restore-op batch (internal bookkeeping).
@@ -289,7 +302,7 @@ impl RevisionService {
     /// the v2 schema accepts. The DB CHECKs (kind values, named→label,
     /// target_seq >= 0) are the final authority.
     async fn insert_revision(
-        &self,
+        tx: &Transaction<'_>,
         NewRevision {
             document,
             kind,
@@ -301,28 +314,26 @@ impl RevisionService {
         }: NewRevision<'_>,
     ) -> Result<RevisionInfo, HistoryError> {
         let revision_id = Uuid::new_v4();
-        let client = self.repo.db.get().await?;
         let created_by_uuid = created_by.map(|u| u.0);
-        client
-            .query_one(
-                "INSERT INTO crdt_revisions
+        tx.query_one(
+            "INSERT INTO crdt_revisions
                     (revision_id, document_id, target_seq, kind, label,
                      created_by, snapshot_id, restore_source_revision)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                  RETURNING revision_id, document_id, target_seq, kind, label,
                            created_by, snapshot_id, restore_source_revision",
-                &[
-                    &revision_id,
-                    &document,
-                    &target_seq,
-                    &kind,
-                    &label,
-                    &created_by_uuid,
-                    &snapshot_id,
-                    &restore_source_revision,
-                ],
-            )
-            .await?;
+            &[
+                &revision_id,
+                &document,
+                &target_seq,
+                &kind,
+                &label,
+                &created_by_uuid,
+                &snapshot_id,
+                &restore_source_revision,
+            ],
+        )
+        .await?;
         Ok(RevisionInfo {
             revision_id,
             document_id: document,
@@ -376,12 +387,11 @@ impl RevisionService {
     /// callers have already authorized the document, so this is an
     /// internal-consistency error surfaced as Pg.
     async fn resolve_boundary(
-        &self,
+        tx: &Transaction<'_>,
         document: Uuid,
         candidate: Option<i64>,
     ) -> Result<i64, HistoryError> {
-        let client = self.repo.db.get().await?;
-        let row = client
+        let row = tx
             .query_one(
                 "SELECT d.id,
                         COALESCE((SELECT MAX(o.id) FROM crdt_operations o
@@ -396,7 +406,7 @@ impl RevisionService {
         let high_water: i64 = row.get("high_water");
         let floor: Option<i64> = row.get("compaction_floor_seq");
         let boundary = candidate.unwrap_or(high_water);
-        if boundary > high_water || floor.is_some_and(|f| boundary <= f) {
+        if boundary < 0 || boundary > high_water || floor.is_some_and(|f| boundary <= f) {
             return Err(HistoryError::InvalidBoundary { boundary });
         }
         Ok(boundary)
@@ -442,9 +452,12 @@ impl RevisionService {
                 .ok_or(HistoryError::LabelRequired)?;
             // Boundary guard AFTER authz, before the insert (the
             // authorization order is unchanged and non-negotiable).
-            let boundary = self.resolve_boundary(document, target_seq).await?;
-            let info = self
-                .insert_revision(NewRevision {
+            let mut client = self.repo.db.get().await?;
+            let tx = client.transaction().await?;
+            let boundary = Self::resolve_boundary(&tx, document, target_seq).await?;
+            let info = Self::insert_revision(
+                &tx,
+                NewRevision {
                     document,
                     kind,
                     label: Some(label),
@@ -452,8 +465,10 @@ impl RevisionService {
                     created_by: Some(actor),
                     snapshot_id: None,
                     restore_source_revision: None,
-                })
-                .await?;
+                },
+            )
+            .await?;
+            tx.commit().await?;
             // Fire-and-forget snapshot hint at the boundary. Failure
             // must NOT fail the revision (the revision references the
             // boundary, not a snapshot); log-and-continue.
@@ -503,17 +518,24 @@ impl RevisionService {
         label: Option<&str>,
         triggered_by: Option<UserId>,
     ) -> Result<RevisionInfo, HistoryError> {
-        let boundary = self.resolve_boundary(document, target_seq).await?;
-        self.insert_revision(NewRevision {
-            document,
-            kind: revision_kind::AUTO_CHECKPOINT,
-            label,
-            target_seq: boundary,
-            created_by: triggered_by,
-            snapshot_id: None,
-            restore_source_revision: None,
-        })
-        .await
+        let mut client = self.repo.db.get().await?;
+        let tx = client.transaction().await?;
+        let boundary = Self::resolve_boundary(&tx, document, target_seq).await?;
+        let info = Self::insert_revision(
+            &tx,
+            NewRevision {
+                document,
+                kind: revision_kind::AUTO_CHECKPOINT,
+                label,
+                target_seq: boundary,
+                created_by: triggered_by,
+                snapshot_id: None,
+                restore_source_revision: None,
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(info)
     }
 
     // ----- M034: listing ----------------------------------------------
@@ -611,6 +633,47 @@ impl RevisionService {
         document: Uuid,
         boundary: i64,
     ) -> Result<(String, Option<Uuid>), HistoryError> {
+        let (covering, tail) = self
+            .reconstruction_inputs_at_boundary(document, boundary)
+            .await?;
+        match covering {
+            Some(v) => {
+                let folded = self.workers.digest_after(&v.inner, &tail).await?;
+                Ok((folded.digest, Some(v.snapshot_id)))
+            }
+            None => {
+                let folded = self.workers.reconstruct(&tail).await?;
+                Ok((folded.digest, None))
+            }
+        }
+    }
+
+    /// Uses the same validated snapshot and fixed durable boundary as digest
+    /// reconstruction, then asks the native CRDT worker for the visible
+    /// blocks used by the editor's read-only history preview.
+    async fn visible_at_boundary(
+        &self,
+        document: Uuid,
+        boundary: i64,
+    ) -> Result<(String, Option<Uuid>, serde_json::Value), HistoryError> {
+        let (covering, tail) = self
+            .reconstruction_inputs_at_boundary(document, boundary)
+            .await?;
+        let snapshot = covering.as_ref().map(|value| value.inner.as_slice());
+        let snapshot_id = covering.as_ref().map(|value| value.snapshot_id);
+        let visible = self.workers.visible_after(snapshot, &tail).await?;
+        let visible_content =
+            serde_json::from_str(&visible.json).map_err(|_| HistoryError::VisibleStateMalformed)?;
+        Ok((visible.digest, snapshot_id, visible_content))
+    }
+
+    /// Finds the newest validated snapshot at or before the fixed boundary,
+    /// then loads every durable operation in its uncovered tail.
+    async fn reconstruction_inputs_at_boundary(
+        &self,
+        document: Uuid,
+        boundary: i64,
+    ) -> Result<(Option<ValidatedSnapshot>, Vec<Vec<u8>>), HistoryError> {
         // Step 1: nearest covering FINALIZED snapshot (validated).
         let covering: Option<ValidatedSnapshot> = match self
             .snapshots
@@ -640,51 +703,26 @@ impl RevisionService {
             None => None,
         };
 
-        // Step 2 + 3: replay (snapshot.coverage_seq, boundary].
+        // Replay only through the captured boundary, so concurrent writes
+        // after it cannot leak into the historical preview or digest.
         let page = crate::protocol::MAX_SYNC_PAGE_OPS as i64;
-        match covering {
-            Some(v) => {
-                let mut tail = Vec::new();
-                let mut cursor = v.coverage_seq;
-                loop {
-                    let page_ops = self
-                        .repo
-                        .ops_between(document, cursor, boundary, page)
-                        .await?;
-                    if page_ops.ops.is_empty() {
-                        break;
-                    }
-                    tail.extend(page_ops.ops.into_iter().map(|(_, _, p)| p));
-                    cursor = page_ops.next_cursor;
-                    if !page_ops.has_more {
-                        break;
-                    }
-                }
-                let folded = self.workers.digest_after(&v.inner, &tail).await?;
-                Ok((folded.digest, Some(v.snapshot_id)))
+        let mut tail = Vec::new();
+        let mut cursor = covering.as_ref().map_or(0, |v| v.coverage_seq);
+        loop {
+            let page_ops = self
+                .repo
+                .ops_between(document, cursor, boundary, page)
+                .await?;
+            if page_ops.ops.is_empty() {
+                break;
             }
-            None => {
-                // Empty start: full replay of ops <= boundary.
-                let mut ops = Vec::new();
-                let mut cursor = 0i64;
-                loop {
-                    let page_ops = self
-                        .repo
-                        .ops_between(document, cursor, boundary, page)
-                        .await?;
-                    if page_ops.ops.is_empty() {
-                        break;
-                    }
-                    ops.extend(page_ops.ops.into_iter().map(|(_, _, p)| p));
-                    cursor = page_ops.next_cursor;
-                    if !page_ops.has_more {
-                        break;
-                    }
-                }
-                let folded = self.workers.reconstruct(&ops).await?;
-                Ok((folded.digest, None))
+            tail.extend(page_ops.ops.into_iter().map(|(_, _, payload)| payload));
+            cursor = page_ops.next_cursor;
+            if !page_ops.has_more {
+                break;
             }
         }
+        Ok((covering, tail))
     }
 
     /// Historical state of one revision (M035). READ access required
@@ -699,14 +737,18 @@ impl RevisionService {
         self.require_access(actor, document, |r| r.can_view())
             .await?;
         let revision = self.get_revision(document, revision_id).await?;
-        let (state_digest, covered_by_snapshot) = self
-            .reconstruct_at_boundary(document, revision.target_seq)
+        let (state_digest, covered_by_snapshot, visible_content) = self
+            .visible_at_boundary(document, revision.target_seq)
             .await?;
+        if !state_digest.starts_with("sha256:") {
+            return Err(HistoryError::VisibleStateMalformed);
+        }
         Ok(HistoricalState {
             revision_id,
             document_id: document,
             boundary: revision.target_seq,
             state_digest,
+            visible_content,
             covered_by_snapshot,
         })
     }
@@ -827,9 +869,9 @@ impl RevisionService {
     ) -> Result<RestoreOutcome, HistoryError> {
         // P6-M009: restore-op span (bounded attributes: outcome only).
         let started = std::time::Instant::now();
-        let _restore_span = tracing::info_span!("maintenance.restore_op").entered();
         let result = self
             .restore_revision_inner(document, actor, source_revision_id)
+            .instrument(tracing::info_span!("maintenance.restore_op"))
             .await;
         if let Ok(outcome) = &result {
             tracing::info!(
@@ -913,23 +955,34 @@ impl RevisionService {
         // identities (retries harmless), and — importantly — the
         // existing durable-ACK machinery treats it exactly like a
         // client batch. (The actor is the OWNER — checked above.)
-        let mut ingest_meta = RestoreAppliedOps::default();
-        if !diff_ops.is_empty() {
-            let mut envelopes = Vec::with_capacity(diff_ops.len());
-            for p in &diff_ops {
-                let env = crate::protocol::envelope::validate_op(p)
-                    .map_err(|e| HistoryError::OpValidation(format!("{e:?}")))?;
-                envelopes.push(env);
-            }
-            let ingested = self.repo.ingest_batch(actor, document, &envelopes).await?;
-            ingest_meta = RestoreAppliedOps {
-                applied: ingested.newly_inserted.len(),
-                duplicates: ingested.duplicates.len(),
-            };
+        let mut envelopes = Vec::with_capacity(diff_ops.len());
+        for p in &diff_ops {
+            let env = crate::protocol::envelope::validate_op(p)
+                .map_err(|e| HistoryError::OpValidation(format!("{e:?}")))?;
+            envelopes.push(env);
         }
 
-        let restore_event = self
-            .insert_revision(NewRevision {
+        // Keep the durable edit batch and its audit revision atomic. The
+        // repository repeats OWNER authorization in this same transaction.
+        let mut client = self.repo.db.get().await?;
+        let tx = client.transaction().await?;
+        let ingested =
+            GatewayRepo::ingest_batch_in_tx(&tx, actor, document, &envelopes, true).await?;
+        let inserted: std::collections::HashSet<&str> =
+            ingested.newly_inserted.iter().map(String::as_str).collect();
+        let committed_ops = envelopes
+            .into_iter()
+            .filter(|env| inserted.contains(env.identity.to_wire().as_str()))
+            .map(|env| env.bytes)
+            .collect();
+        let durable_cursor = ingested.durable_cursor;
+        let ingest_meta = RestoreAppliedOps {
+            applied: ingested.newly_inserted.len(),
+            duplicates: ingested.duplicates.len(),
+        };
+        let restore_event = Self::insert_revision(
+            &tx,
+            NewRevision {
                 document,
                 kind: revision_kind::RESTORE_EVENT,
                 label: None,
@@ -937,8 +990,10 @@ impl RevisionService {
                 created_by: Some(actor),
                 snapshot_id: Some(anchor_snapshot_id),
                 restore_source_revision: Some(source.revision_id),
-            })
-            .await?;
+            },
+        )
+        .await?;
+        tx.commit().await?;
 
         tracing::info!(
             document_id = %document,
@@ -963,6 +1018,8 @@ impl RevisionService {
             reused_existing_snapshot: mechanism == RestoreMechanism::ReusedSnapshot,
             applied_ops: ingest_meta.applied,
             duplicate_ops: ingest_meta.duplicates,
+            committed_ops,
+            durable_cursor,
         })
     }
 
@@ -975,35 +1032,20 @@ impl RevisionService {
         document: Uuid,
         boundary: i64,
     ) -> Result<Vec<u8>, HistoryError> {
-        // Fold ops ≤ boundary from the covering snapshot (validated) or
-        // from empty; then export via the worker's reconstruct (which
-        // returns the inner snapshot). Using ops_between keeps this
-        // exact: (0, boundary].
-        let page = crate::protocol::MAX_SYNC_PAGE_OPS as i64;
-        let mut ops = Vec::new();
-        let mut cursor = 0i64;
-        loop {
-            let page_ops = self
-                .repo
-                .ops_between(document, cursor, boundary, page)
-                .await?;
-            if page_ops.ops.is_empty() {
-                break;
-            }
-            ops.extend(page_ops.ops.into_iter().map(|(_, _, p)| p));
-            cursor = page_ops.next_cursor;
-            if !page_ops.has_more {
-                break;
-            }
-        }
-        let folded = self
-            .workers
-            .reconstruct(&ops)
-            .await
-            .map_err(HistoryError::Worker)?;
-        Ok(folded
+        // Fold the validated covering snapshot plus its retained tail. A
+        // pruned prefix must never be replayed from an empty replica: that
+        // would produce a plausible but incorrect restore target.
+        let (covering, tail) = self
+            .reconstruction_inputs_at_boundary(document, boundary)
+            .await?;
+        let folded = match covering {
+            Some(snapshot) => self.workers.fold_after(&snapshot.inner, &tail).await?,
+            None => self.workers.reconstruct(&tail).await?,
+        };
+        folded
             .snapshot
-            .expect("reconstruct always returns a snapshot"))
+            .ok_or_else(|| WorkerError::MalformedResponse("fold response omitted snapshot".into()))
+            .map_err(HistoryError::from)
     }
 }
 

@@ -996,6 +996,126 @@ async fn catchup_pages_are_bounded_and_deterministic() {
 }
 
 // ---------------------------------------------------------------------------
+// Durable-log commit-ordering invariant — catch-up can never skip an op
+// ---------------------------------------------------------------------------
+// `crdt_operations.id` is a bigserial assigned at INSERT time. Two ingest
+// transactions that interleave (one inserts first, commits second) leave a
+// momentary gap: a batch whose rows are still invisible while a LATER id is
+// already committed. Any acked cursor or catch-up page that observes the gap
+// advances past the uncommitted seq, and once the slow transaction commits,
+// that operation is permanently invisible to delta catch-up (id < cursor).
+// The ingest transaction therefore serializes per document (advisory lock)
+// so id order == commit order. This test holds one ingest's transaction
+// open across another ingest's full commit cycle and asserts the acked
+// cursor never passes the held operation's seq.
+
+#[tokio::test]
+async fn acked_cursor_never_skips_a_later_committing_operation() {
+    let Some(db) = test_db().await else {
+        eprintln!("SKIP: concord_test DB unreachable");
+        return;
+    };
+    run_migrations(&db).await.expect("apply");
+    let repo = GatewayRepo::new(db.clone());
+    let owner = seed_user(&db, &format!("it-cursor-order-{}", Uuid::new_v4()), None).await;
+    let doc = seed_document(&db, owner, None).await;
+
+    // Holder transaction: takes the SAME per-document ingest lock the repo
+    // takes, then inserts an op WITHOUT committing. Its bigserial id (S9)
+    // is assigned now, before the concurrent ingest below can insert.
+    let mut holder = db.get().await.expect("holder connection");
+    let hold_tx = holder.transaction().await.expect("hold tx");
+    hold_tx
+        .execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+            &[&doc.to_string()],
+        )
+        .await
+        .expect("holder takes the per-document ingest lock");
+    let held_op = make_op(907, 1);
+    let held_id = held_op.identity.to_wire();
+    let held_replica = held_op.identity.replica as i64;
+    let held_counter = held_op.identity.counter as i64;
+    let held_checksum = {
+        let mut hasher = Sha256::new();
+        hasher.update(&held_op.bytes);
+        hex::encode(hasher.finalize())
+    };
+    hold_tx
+        .execute(
+            "INSERT INTO crdt_operations
+                 (document_id, operation_id, replica_id, replica_sequence,
+                  payload, payload_version, payload_checksum)
+             VALUES ($1::uuid, $2, $3, $4, $5, 1, $6)",
+            &[
+                &doc,
+                &held_id,
+                &held_replica,
+                &held_counter,
+                &held_op.bytes,
+                &held_checksum,
+            ],
+        )
+        .await
+        .expect("holder inserts its operation (uncommitted)");
+
+    // Concurrent ingest through the normal durable path. With per-document
+    // ingest serialization this BLOCKS until the holder commits below;
+    // without it, it commits THROUGH the holder's invisible row.
+    let ingest_repo = repo.clone();
+    let ingest_doc = doc;
+    let ingest_uid = sync_gateway::db::repo::UserId(owner);
+    let ingest_op = make_op(908, 1);
+    let ingest_task = tokio::spawn(async move {
+        ingest_repo
+            .ingest_batch(ingest_uid, ingest_doc, &[ingest_op])
+            .await
+            .expect("concurrent ingest")
+    });
+
+    // Give the ingest task a moment to run into the inversion window.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    // Per-document serialization: the concurrent ingest must STILL be
+    // blocked on the holder's advisory lock. Without the lock it has
+    // already committed (through the holder's invisible row) right here.
+    assert!(
+        !ingest_task.is_finished(),
+        "concurrent ingest committed while another ingest transaction \
+         was still open on the same document — seq order can invert"
+    );
+
+    // Commit the held operation: its seq is LOWER than the concurrent
+    // batch's rows and it becomes durable only NOW (the inversion window).
+    hold_tx.commit().await.expect("commit held op");
+    drop(holder);
+
+    let ingested = ingest_task.await.expect("ingest task");
+    let acked_cursor = ingested.durable_cursor;
+
+    // THE INVARIANT: with commit order == id order, the acked cursor only
+    // passes seqs that are already durable, so delta catch-up from any
+    // acked/persisted cursor delivers every later commit. A fresh client
+    // converges, receiving both ops in durable order.
+    let page = repo.catchup_page(doc, 0, 100).await.expect("catchup");
+    assert_eq!(page.ops.len(), 2, "both operations are delivered");
+    let seqs: Vec<i64> = page.ops.iter().map(|(_, seq, _)| *seq).collect();
+    assert!(
+        seqs[0] < seqs[1] && acked_cursor >= seqs[1],
+        "durable order and cursor must cover both operations"
+    );
+
+    cleanup(
+        &db,
+        &Fixture {
+            user: owner,
+            document: doc,
+        },
+    )
+    .await;
+}
+
+// ---------------------------------------------------------------------------
 // users resolution (M013→M015 wiring)
 // ---------------------------------------------------------------------------
 

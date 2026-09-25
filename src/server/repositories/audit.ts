@@ -15,6 +15,11 @@ export const AUDIT_ACTIONS = {
   documentPermissionGranted: "document.permission.granted",
   documentPermissionUpdated: "document.permission.updated",
   documentPermissionRevoked: "document.permission.revoked",
+  documentCommentCreated: "document.comment.created",
+  documentCommentReplied: "document.comment.replied",
+  documentCommentResolved: "document.comment.resolved",
+  documentSuggestionCreated: "document.suggestion.created",
+  documentSuggestionResolved: "document.suggestion.resolved",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
@@ -22,7 +27,7 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
 export interface AuditEventInput {
   actorUserId: string | null;
   action: AuditAction;
-  resourceType: "document" | "document_permission";
+  resourceType: "document" | "document_permission" | "document_comment" | "document_suggestion";
   resourceId: string;
   organizationId: string | null;
   metadata?: Record<string, unknown>;

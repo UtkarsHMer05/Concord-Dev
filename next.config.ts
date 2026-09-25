@@ -12,6 +12,10 @@ const secureProduction =
 const HSTS_VALUE = "max-age=31536000; includeSubDomains";
 
 const nextConfig: NextConfig = {
+  // Browsers often use 127.0.0.1 for the local URL while Next dev binds
+  // itself as localhost. Allow the loopback hostname for HMR and dev-only
+  // assets so the rendered page does not lose its client runtime.
+  allowedDevOrigins: ["127.0.0.1"],
   // Standalone output: the P6-M027 release image runs `node server.js`
   // from the minimal standalone tree (no node_modules copy of build
   // toolchains). Dev/test flows (`next dev`, `next build && next start`)

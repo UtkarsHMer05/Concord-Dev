@@ -36,6 +36,8 @@ pub const SCOPE_CONNECT: &str = "connect";
 pub const SCOPE_WRITE_OPS: &str = "write";
 pub const SCOPE_MALFORMED: &str = "malformed";
 pub const SCOPE_SNAPSHOT_FETCH: &str = "fetch";
+pub const SCOPE_HISTORY_API: &str = "history";
+pub const SCOPE_PRESENCE: &str = "presence";
 
 pub fn default_policies() -> Policies {
     [
@@ -74,6 +76,25 @@ pub fn default_policies() -> Policies {
             SCOPE_SNAPSHOT_FETCH,
             RateLimitPolicy {
                 max_events: 30,
+                window: Duration::from_secs(60),
+            },
+        ),
+        (
+            // Historical reconstruction runs the native worker over a
+            // snapshot and operation tail, so bound it per authenticated user.
+            SCOPE_HISTORY_API,
+            RateLimitPolicy {
+                max_events: 30,
+                window: Duration::from_secs(60),
+            },
+        ),
+        (
+            // Presence (live cursors): the client throttles to ~10 Hz, but a
+            // misbehaving/hostile peer must not flood the room relay. 1200/min
+            // (~20/s) is well above the client cadence and still bounds fanout.
+            SCOPE_PRESENCE,
+            RateLimitPolicy {
+                max_events: 1_200,
                 window: Duration::from_secs(60),
             },
         ),
@@ -208,6 +229,8 @@ fn record_rate_limit_hit(scope: &str) {
         (SCOPE_WRITE_OPS, &["write"]),
         (SCOPE_MALFORMED, &["malformed"]),
         (SCOPE_SNAPSHOT_FETCH, &["fetch"]),
+        (SCOPE_HISTORY_API, &["history"]),
+        (SCOPE_PRESENCE, &["presence"]),
     ];
     const OTHER: &[&str] = &["other"];
     let labels = TABLE
@@ -225,11 +248,13 @@ mod tests {
     #[tokio::test]
     async fn default_write_and_malformed_scopes_are_enforced() {
         let policies = default_policies();
-        assert_eq!(policies.len(), 4, "all configured scopes are active");
+        assert_eq!(policies.len(), 6, "all configured scopes are active");
         assert!(policies.contains_key(SCOPE_CONNECT));
         assert!(policies.contains_key(SCOPE_WRITE_OPS));
         assert!(policies.contains_key(SCOPE_MALFORMED));
         assert!(policies.contains_key(SCOPE_SNAPSHOT_FETCH));
+        assert!(policies.contains_key(SCOPE_HISTORY_API));
+        assert!(policies.contains_key(SCOPE_PRESENCE));
 
         let limiter = RateLimiter::new(None, policies);
         for _ in 0..2_000 {

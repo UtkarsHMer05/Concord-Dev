@@ -48,6 +48,22 @@ export class CrdtWorkerCore {
 
     constructor(private readonly config: WorkerCoreConfig) {}
 
+    /**
+     * First-open content is local bootstrap state, not a user edit. Generate
+     * it from one deterministic, document-scoped origin so every fresh
+     * replica gets the same item identities. The seed origin never enters the
+     * client outbox (localOpsSince filters it out), and therefore never
+     * crosses the gateway's authenticated user-ownership boundary.
+     */
+    private seedReplicaId(): bigint {
+        let hash = 0xcbf29ce484222325n;
+        for (const byte of new TextEncoder().encode(this.config.documentId)) {
+            hash ^= BigInt(byte);
+            hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+        }
+        return (hash & ((1n << 62n) - 1n)) || 1n;
+    }
+
     private get storageId(): string {
         return this.config.storageId ?? this.config.documentId;
     }
@@ -193,6 +209,46 @@ export class CrdtWorkerCore {
                         : { cursor: request.cursor, coveredOpIds });
                 }
                 return { kind: "applyRemote", applied, duplicates, ops: durable };
+            }
+
+            case "seed": {
+                const engine = await this.ensureEngine();
+                if (request.ops.length === 0) {
+                    return { kind: "seed", ops: [] };
+                }
+                const seedEngine = await ConcordEngine.create(
+                    this.seedReplicaId(),
+                    this.config.loadFactory,
+                );
+                const generated: Uint8Array[] = [];
+                try {
+                    for (const operation of request.ops) {
+                        switch (operation.kind) {
+                            case "insertText":
+                                generated.push(seedEngine.localInsertText(operation.streamIndex, operation.codepoint ?? 0x20));
+                                break;
+                            case "insertDelimiter":
+                                generated.push(seedEngine.localInsertDelimiter(operation.streamIndex, operation.blockType ?? "paragraph"));
+                                break;
+                            case "delete": {
+                                const op = seedEngine.localDelete(operation.streamIndex);
+                                if (op !== null) generated.push(op);
+                                break;
+                            }
+                            case "setAttr":
+                                generated.push(seedEngine.localSetAttr(operation.streamIndex, operation.name ?? "", operation.value ?? null));
+                                break;
+                        }
+                    }
+                    const durable: Uint8Array[] = [];
+                    for (const op of generated) {
+                        if (engine.applyRemote(op) === "applied") durable.push(op);
+                    }
+                    await this.appendOrReset(durable);
+                    return { kind: "seed", ops: generated };
+                } finally {
+                    seedEngine.free();
+                }
             }
 
             case "localInsertText": {

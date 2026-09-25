@@ -111,6 +111,25 @@ where
     }
 }
 
+/// Parses `GATEWAY_SIGNING_KEY`: a 32-byte Ed25519 seed as 64 hex chars.
+/// Empty/absent input means "no pinned key" (the proof signer then generates
+/// an ephemeral key). Anything else that does not decode to exactly 32 bytes
+/// is None too — startup never fails on a bad signing key (proofs degrade to
+/// ephemeral with a loud warning rather than refusing to boot).
+pub fn parse_signing_seed(raw: &str) -> Option<[u8; 32]> {
+    let trimmed = raw.trim();
+    if trimmed.len() != 64 {
+        return None;
+    }
+    let bytes = hex::decode(trimmed).ok()?;
+    if bytes.len() != 32 {
+        return None;
+    }
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&bytes);
+    Some(seed)
+}
+
 const DEFAULT_BIND_HOST: &str = "127.0.0.1";
 const DEFAULT_BIND_PORT: u16 = 8787;
 const DEFAULT_ORIGINS: &str = "http://localhost:3000";

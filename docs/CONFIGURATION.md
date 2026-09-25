@@ -135,7 +135,7 @@ The worker is not env-configured — it is a **binary path contract**:
   process user** (uid 10001 in the image). Inside the gateway container the
   binary must exist in the image or on a mounted volume — the path is
   validated at gateway startup (exit 2 if not a file).
-- The worker protocol is deterministic frame-based (commands 1–7); see
+- The worker protocol is deterministic frame-based (commands 1–9); see
   docs/OPERATIONS.md § "Native recovery worker".
 
 ## Infrastructure

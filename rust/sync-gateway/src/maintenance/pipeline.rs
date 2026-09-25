@@ -90,15 +90,27 @@ impl SnapshotPipeline {
         }
     }
 
-    /// Collects every op payload for `(0, boundary]` — bounded pages,
-    /// fixed upper edge, so later edits cannot leak in (M016).
-    async fn collect_ops_to_boundary(
+    /// Selects the newest validated finalized snapshot at or before the
+    /// boundary and loads only its retained tail. A finalized covering
+    /// snapshot is required after compaction; replaying the tail from an
+    /// empty replica would silently build the wrong state.
+    async fn reconstruction_inputs(
         &self,
         document: Uuid,
         boundary: i64,
-    ) -> Result<Vec<Vec<u8>>, PipelineError> {
+    ) -> Result<(Option<ValidatedSnapshot>, Vec<Vec<u8>>), PipelineError> {
+        let covering = match self
+            .snapshots
+            .latest_finalized_before(document, boundary)
+            .await?
+        {
+            Some(row) => Some(self.snapshots.validate_integrity(&row, document)?),
+            None => None,
+        };
         let mut payloads = Vec::new();
-        let mut cursor = 0i64;
+        let mut cursor = covering
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.coverage_seq);
         loop {
             let page = self
                 .repo
@@ -113,7 +125,7 @@ impl SnapshotPipeline {
                 break;
             }
         }
-        Ok(payloads)
+        Ok((covering, payloads))
     }
 
     /// BUILD: reconstruct state at `boundary` via the native worker and
@@ -126,11 +138,21 @@ impl SnapshotPipeline {
         job_id: Uuid,
         attempt: i32,
     ) -> Result<(Uuid, String, ValidatedSnapshot), PipelineError> {
-        let ops = self.collect_ops_to_boundary(document, boundary).await?;
-        let WorkerOk { digest, snapshot } = self.workers.reconstruct(&ops).await?;
-        let inner = snapshot.expect("reconstruct always returns a snapshot");
+        let (covering, tail) = self.reconstruction_inputs(document, boundary).await?;
+        let WorkerOk { digest, snapshot } = match covering.as_ref() {
+            Some(covering) => self.workers.fold_after(&covering.inner, &tail).await?,
+            None => self.workers.reconstruct(&tail).await?,
+        };
+        let inner = snapshot.ok_or_else(|| {
+            PipelineError::Worker(WorkerError::MalformedResponse(
+                "reconstruct/fold response omitted the snapshot bytes".into(),
+            ))
+        })?;
 
-        let covered = ops.len() as i64;
+        let covered = covering
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.covered_op_count)
+            .saturating_add(tail.len() as i64);
         let wrapper = crate::db::snapshots::wrapper::encode_wrapper(
             document,
             boundary as u64,
@@ -216,10 +238,13 @@ impl SnapshotPipeline {
 
         // (b) differential re-fold oracle: independent second
         // reconstruction of the same boundary from the durable log.
-        let ops = self
-            .collect_ops_to_boundary(document, validated.coverage_seq)
+        let (covering, tail) = self
+            .reconstruction_inputs(document, validated.coverage_seq)
             .await?;
-        let refold = self.workers.reconstruct(&ops).await?;
+        let refold = match covering.as_ref() {
+            Some(snapshot) => self.workers.digest_after(&snapshot.inner, &tail).await?,
+            None => self.workers.reconstruct(&tail).await?,
+        };
         if refold.digest != validated.state_digest {
             return Err(PipelineError::DifferentialMismatch {
                 boundary: validated.coverage_seq,

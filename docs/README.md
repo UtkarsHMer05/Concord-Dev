@@ -45,6 +45,7 @@ The secret-free v1.0.0 evidence index remains preserved at
 | [MIGRATION_CONVEX_TO_POSTGRES.md](MIGRATION_CONVEX_TO_POSTGRES.md) | How the temporary Convex persistence was replaced by PostgreSQL (historical record) |
 | [RECOVERY.md](RECOVERY.md) | How a stale client or gateway recovers: snapshot+tail, fallback chain, resync |
 | [HISTORY.md](HISTORY.md) | Version history: what a revision is, how historical state is reconstructed, and how restore works without rewriting history |
+| [REVIEW_TOOLS.md](REVIEW_TOOLS.md) | Editor history, anchored comments, reconnect summaries, local drafts, and verifiable `.concordpack` limits |
 
 ## Security
 

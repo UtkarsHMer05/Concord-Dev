@@ -2,7 +2,7 @@
 
 Status: Authoritative procedure · not a current evidence report
 Version: 1.5 (V1 hardening / 1.0.1 candidate)
-Last updated: 2026-09-14
+Last updated: 2026-09-25
 
 This document records how every layer of Concord is tested, with exact
 commands. All commands run from the repository root. The candidate-bound
@@ -239,6 +239,12 @@ npm run test:browser                 # Chromium journey + axe accessibility
 npm run test:browser:smoke:firefox   # Firefox load/auth/editor smoke
 npm run test:browser:smoke:webkit    # WebKit load/auth/editor smoke
 ```
+
+As of 2026-09-25, the local authenticated Chromium gate passed 14/14 tests,
+including the Review & history browser flow. The production-shaped standalone
+server passed the review-tools flow 1/1, and Firefox and WebKit smoke passed
+1/1 each. These are local disposable-identity results; hosted deployment and
+remote authenticated CI remain outside this evidence.
 
 The setup infers a `full` or `smoke` provisioning profile from the explicit
 `CONCORD_E2E_PROFILE` value (`full` or `smoke`); when it is unset, the

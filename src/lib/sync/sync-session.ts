@@ -14,13 +14,19 @@
  */
 
 import { identityFromOpBytes, type OpIdentityString } from "./identities";
+import {
+  countCatchupOps,
+  createCatchupBriefing,
+  type CatchupBriefing,
+  type CatchupOpCounts,
+} from "./catchup-briefing";
 import { PendingOpStore } from "./pending-store";
 import {
   performSnapshotResync,
   type SnapshotEnvelope,
   SnapshotResyncError,
 } from "./snapshot-resync";
-import type { SnapshotPayload, SnapshotResyncRequired } from "./protocol";
+import type { PresenceState, PresenceUpdate, SnapshotPayload, SnapshotResyncRequired } from "./protocol";
 import type { ErrorCode } from "./protocol";
 import { SyncTransport, type ConnectionStatus } from "./transport";
 
@@ -74,6 +80,12 @@ export interface SyncSessionOptions {
     durablyAcked: number;
     serverConfirmed: boolean;
   }) => void;
+  /** Durable catch-up summary; replica IDs identify CRDT origins, not people. */
+  onCatchupBriefing?: (briefing: CatchupBriefing) => void;
+  /** A peer's live presence (cursor/selection) arrived (Feature 2). */
+  onPresenceUpdate?: (peer: PresenceUpdate) => void;
+  /** A peer left; drop its caret (Feature 2). */
+  onPresenceLeave?: (connectionId: string) => void;
 }
 
 /** Batching window for outgoing local ops (ms). */
@@ -96,6 +108,17 @@ export class SyncSession {
   private catchupFailed = false;
   private catchupComplete = false;
   private serverConfirmed = false;
+  private catchupStartCursor = "0";
+  private catchupCounts: CatchupOpCounts = this.emptyCatchupCounts();
+  /** Individual operation counts are incomplete after a snapshot resync. */
+  private snapshotResyncApplied = false;
+  /**
+   * The first catch-up of a replica that started from cursor 0 is an initial
+   * load of pre-existing history, not a return-after-absence. Suppress the
+   * "while you were away" briefing for it; genuine reconnects and explicit
+   * `syncNow()` pulls still summarise the delta.
+   */
+  private initialCatchupPending = true;
   /**
    * Snapshot resync (P5-M031): the signal the server last sent while the
    * fetch was in flight. A payload that does not match the outstanding
@@ -106,6 +129,7 @@ export class SyncSession {
 
   constructor(private readonly options: SyncSessionOptions) {
     this.lastCursor = options.getCursor();
+    this.catchupStartCursor = this.lastCursor;
     this.storeReady = options.store
       ? Promise.resolve(options.store)
       : PendingOpStore.open(options.documentId);
@@ -137,6 +161,7 @@ export class SyncSession {
         },
         onPeerOps: (ops) => this.queueRemote(ops),
         onSyncBatch: (ops, nextCursor, hasMore) => {
+          countCatchupOps(this.catchupCounts, ops);
           this.queueRemote(ops, nextCursor.toString());
           void hasMore;
         },
@@ -176,8 +201,19 @@ export class SyncSession {
           // Fatal (unauthorized/version): the session stops retrying —
           // UI surfaces the status; user action decides.
         },
+        onPresenceUpdate: (peer) => this.options.onPresenceUpdate?.(peer),
+        onPresenceLeave: (connectionId) => this.options.onPresenceLeave?.(connectionId),
       },
     });
+  }
+
+  private emptyCatchupCounts(): CatchupOpCounts {
+    return {
+      operationCount: 0,
+      unattributedOperationCount: 0,
+      replicas: new Map(),
+      replicaListTruncated: false,
+    };
   }
 
   /** Join with the local state summary (own replica coverage). */
@@ -203,12 +239,32 @@ export class SyncSession {
     return this.transport.currentStatus;
   }
 
+  /** Publishes ephemeral presence (Feature 2). Best-effort and non-durable:
+   * the transport drops it unless the session is READY, so a caret update
+   * never blocks or competes with durable op delivery. */
+  sendPresence(state: PresenceState): void {
+    if (this.disposed) return;
+    this.transport.sendPresence(state);
+  }
+
+  /** Pull durable operations written outside this browser session through the
+   * normal catch-up path (for example an owner restore). */
+  syncNow(): void {
+    if (this.disposed || this.transport.currentStatus !== "ready") return;
+    this.catchupFailed = false;
+    this.catchupComplete = false;
+    this.catchupStartCursor = this.lastCursor;
+    this.catchupCounts = this.emptyCatchupCounts();
+    this.transport.requestSync(this.lastCursor);
+  }
+
   /** Starts the session (connect + handshake + join + catch-up). */
   async start(): Promise<void> {
     this.store = await this.storeReady;
     this.serverConfirmed = false;
     if (this.options.engine.syncCursor) {
       this.lastCursor = await this.options.engine.syncCursor();
+      this.catchupStartCursor = this.lastCursor;
     }
     // Subscribe before scanning: edits made during recovery are queued behind
     // it, while duplicate notifications retain the existing outbox state.
@@ -406,6 +462,7 @@ export class SyncSession {
       }
       throw error;
     }
+    this.snapshotResyncApplied = true;
     // Base replaced: resume delta catch-up from the snapshot boundary.
     this.requestCatchup();
   }
@@ -475,6 +532,33 @@ export class SyncSession {
       await store.clearAcked(acked);
     }
     await this.enqueueTail;
+    let localUnackedOperationCount: number | null = null;
+    try {
+      const outboxCounts = await store.stateCounts();
+      localUnackedOperationCount = outboxCounts.pending + outboxCounts.sent;
+    } catch (error) {
+      this.reportLocalError(error);
+    }
+    const briefing = createCatchupBriefing({
+      fromCursor: this.catchupStartCursor,
+      toCursor: this.lastCursor,
+      counts: this.catchupCounts,
+      localUnackedOperationCount,
+      operationCountsComplete: !this.snapshotResyncApplied,
+    });
+    // A fresh replica's first catch-up is an initial load, not an absence.
+    const isInitialFreshLoad = this.initialCatchupPending && this.catchupStartCursor === "0";
+    this.initialCatchupPending = false;
+    if (briefing !== null && !isInitialFreshLoad) {
+      try {
+        this.options.onCatchupBriefing?.(briefing);
+      } catch (error) {
+        this.reportLocalError(error);
+      }
+    }
+    this.catchupStartCursor = this.lastCursor;
+    this.catchupCounts = this.emptyCatchupCounts();
+    this.snapshotResyncApplied = false;
     await this.reportOutboxState(true);
     await this.flushOutbox();
   }

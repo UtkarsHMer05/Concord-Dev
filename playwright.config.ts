@@ -49,19 +49,19 @@ try {
 
 const setupFile = "./scripts/browser-e2e-setup.mjs";
 const invocation = [process.env.npm_lifecycle_event || "", ...process.argv].join(" ");
-const fullTestFile = /(?:^|[\\/])(?:journey|a11y)\.spec\.ts$/;
+const fullTestFile = /(?:^|[\\/])(?:journey|a11y|review-tools)\.spec\.ts$/;
 const smokeTestFile = /(?:^|[\\/])smoke\.spec\.ts$/;
 const smokeRequested =
   /test:browser:smoke/i.test(invocation) ||
   /(?:^|[\s/])smoke\.spec\.ts(?:$|[\s])/i.test(invocation);
-const fullRequested = /(?:^|[\s/])(?:journey|a11y)\.spec\.ts(?:$|[\s])/i.test(invocation);
+const fullRequested = /(?:^|[\s/])(?:journey|a11y|review-tools)\.spec\.ts(?:$|[\s])/i.test(invocation);
 const chromiumTestMatch =
   smokeRequested && !fullRequested
     ? smokeTestFile
     : fullRequested && !smokeRequested
       ? fullTestFile
       : smokeRequested && fullRequested
-        ? /(?:^|[\\/])(?:journey|a11y|smoke)\.spec\.ts$/
+        ? /(?:^|[\\/])(?:journey|a11y|review-tools|smoke)\.spec\.ts$/
         : fullTestFile;
 
 export default defineConfig({

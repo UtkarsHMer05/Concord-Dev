@@ -18,13 +18,20 @@
   <img src="https://img.shields.io/badge/License-MIT-black" alt="License: MIT" />
 </p>
 
-> Verification boundary — 2026-09-24: this page documents the current local
-> implementation and a fresh reliability-fix pass. TypeScript, lint, web,
-> database, realtime, Rust gateway, native, WASM, production-build, and
-> dependency-audit checks passed locally. This is not a release verdict: no
-> hosted deployment, authenticated Clerk browser journey, or fresh container
-> image scan is claimed. The release and image-scan evidence dated
-> 2026-09-14 below remains historical and is linked to its original record.
+> Verification boundary — 2026-09-26: TypeScript typecheck and ESLint clean;
+> 288 web unit tests (31 files, one env-gated perf gate skipped by default);
+> 79 PostgreSQL tests (9 files); the production build; WASM smoke; native
+> Release CTest; and the Rust gateway library suite (99 passed) with
+> `cargo fmt --check` and zero-warning Clippy. The authenticated browser gate
+> passed 15/15 Chromium tests — two-browser realtime convergence, reconnect,
+> authorization isolation, offline durability, and the full review-tools
+> journey (history/restore, anchored comments, drafts, Concordpack verify,
+> time-travel replay, and the server-receipt check). Firefox and WebKit smoke
+> each passed 1/1. These runs used the local Docker services, the real Rust
+> gateway, and disposable Clerk test users; every screenshot below is captured
+> live from that harness (scripts/readme/capture-screenshots.mjs). No hosted
+> deployment or remote CI result is claimed; release and container-scan
+> evidence dated 2026-09-14 remains historical.
 
 ## The short version
 
@@ -49,40 +56,158 @@ replication, durability, recovery, and verification work underneath it.
 
 ![Concord editor with the canonical logo in the application header](docs/assets/readme/hero-editor.png)
 
-## See it in the browser
+## The ten feature systems (captured live)
 
-These are screenshots captured from the real application with the repository's
-authenticated browser harness. The harness used a clean disposable database,
-the real Rust gateway, the real Next.js app, and temporary Clerk test users;
-the editor text is synthetic and contains no personal or production data.
+Every screenshot below was captured from the real application by
+[`scripts/readme/capture-screenshots.mjs`](scripts/readme/capture-screenshots.mjs):
+clean disposable database, real Rust gateway, real Next.js app, real Clerk
+test users, and the real WASM CRDT worker. The tour also fails the run on any
+fatal browser-console error, so the gallery doubles as a live correctness
+gate.
+
+### 1 · Time-travel replay — fold any prefix of the durable op log
+
+The **Replay** tab reconstructs any past state by folding a prefix of this
+replica's durable operation log back through a temporary WASM engine — the
+same fold the gateway's snapshot builder performs. Checkpoint snapshots every
+√n operations make arbitrary jumps O(√n); the CRDT digest is shown at every
+step. Fully client-side, works offline.
+
+![Replay tab scrubbed to 89 of 149 operations, showing the partial document and its digest](docs/assets/readme/feature-replay.png)
+
+### 2 · CRDT-anchored live cursors — presence that survives concurrent edits
+
+Live collaborator carets are anchored to CRDT item IDs (`replica:counter`),
+not fragile offsets — the same identity model as comments — so they stay glued
+to the right character while everyone types. Ephemeral gateway-relayed frames
+(never persisted, never authorization truth), TTL expiry, ~8 Hz throttled
+publishing with an idle heartbeat.
+
+![Peer caret with a color label anchored at the end of the shared text](docs/assets/readme/feature-presence.png)
+
+### 3 · Concordpack — portable bundles + client-verifiable server receipts
+
+Export a `.concordpack` bundle (checksum + CRDT-digest verified), re-verify it
+back, and — the deeper step — **verify a server receipt**: the gateway signs
+an Ed25519 receipt over a Merkle root of the retained op log plus the state
+digest; the browser replays the Merkle audit path, checks the signature, and
+compares the signed state digest against its OWN replica's digest. The panel
+states the trust model honestly (the same-response key detects gateway-side
+tampering; third-party verifiability needs the key out of band).
+
+![Concordpack tab showing Server receipt verified: Merkle path ✓, Signature ✓, state matches replica](docs/assets/readme/feature-concordpack.png)
+
+### 4 · Suggestion mode — tracked changes as an anchored sidecar
+
+Propose a replacement for any selection; the suggestion is anchored to CRDT
+item IDs like a comment. Accepting applies the text through the editor bridge
+as **normal durable CRDT edits** (no side channel, no op-format change), and
+an orphaned anchor discharges honestly instead of mis-applying. Authors can
+withdraw; only editors can accept.
+
+![Suggestions tab with an accepted suggestion: strikethrough original replaced by proposed text](docs/assets/readme/feature-suggestions.png)
+
+### 5 · Anchored comments — threads welded to content
+
+Comments anchor to CRDT item IDs, so threads follow the text they annotate
+through concurrent edits, reloads, and re-syncs; queued offline comments
+survive per-tab (per-item outbox keys) and report honest delivery state.
+
+![Comments tab with a CRDT-anchored thread and honest sync status](docs/assets/readme/feature-comments.png)
+
+### 6 · Version history with durable checkpoints
+
+Named checkpoints and automatic ones anchor to durable server sequences;
+previews are reconstructed by the native worker (snapshot + tail fold) and
+restore appends forward operations through the durable path — history is
+never rewritten.
+
+![History tab with a saved checkpoint, digest, and read-only preview](docs/assets/readme/feature-history.png)
+
+### 7 · Markdown export/import — lossless for the collaborative subset
+
+Export the live document to Concord-flavored markdown (headings, bold,
+italic, strikethrough, underline, backslash escapes; CommonMark flanking
+rules) and import it back as normal CRDT edits. The round trip is a stable
+fixed point, and anything outside the collaborative model is reported, never
+silently dropped.
+
+![Markdown tab with exported content and the lossless round-trip status](docs/assets/readme/feature-markdown.png)
+
+### 8 · Local-first durability under network failure
+
+The original promise, still enforced: edits become durable locally first, the
+network can vanish, and the UI tells the truth about what is saved where.
+
+![Editor showing converged edits from two replicas with the connected status](docs/assets/readme/collaborative-a.png)
+
+![Offline edit saved locally with the honest disconnected state](docs/assets/readme/offline-state.png)
+
+### 9 · Installable PWA — the offline story ships as an app
+
+A web manifest with generated icons and a service worker whose cache policy
+preserves the engine-staleness contract: `/crdt-worker.js` and `/wasm/*` are
+network-first (a cache-first SW would re-pin stale engine code across
+deploys), API responses are never cached, and visited documents open offline
+from a bounded shell cache. Registration is hard-gated to production builds.
+
+### 10 · The correctness lab — Jepsen-lite, simulation, proof, benchmark
+
+Not visible in a screenshot, but the deepest part: a seeded adversarial
+checker drives concurrent ingests, duplicate re-sends, and a rolling-cursor
+reader against the real PostgreSQL gateway asserting no-lost-op / gapless-
+prefix / convergence invariants (`tests/convergence_invariants.rs`); a
+deterministic session simulator replays seeded drop/reorder/reconnect
+schedules against the real engine and model gateway with mutation-verified
+invariants (`tests/sync/deterministic-sim.test.ts`); history receipts above;
+and a 100k-op performance gate. A design for CRDT-native lists is documented
+in [docs/DESIGN_CRDT_NATIVE_LISTS.md](docs/DESIGN_CRDT_NATIVE_LISTS.md).
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/readme/dashboard.png" alt="Concord dashboard showing the template gallery and a project brief document" /></td>
-    <td width="50%"><img src="docs/assets/readme/hero-editor.png" alt="Concord editor showing a local-first project brief and the top-left Concord mark" /></td>
+    <td width="50%"><img src="docs/assets/readme/dashboard.png" alt="Concord dashboard showing the template gallery" /></td>
+    <td width="50%"><img src="docs/assets/readme/hero-editor.png" alt="Concord editor showing a local-first project brief" /></td>
   </tr>
   <tr>
     <td align="center"><sub>Dashboard and document templates</sub></td>
     <td align="center"><sub>Editor surface and toolbar</sub></td>
   </tr>
-  <tr>
-    <td width="50%"><img src="docs/assets/readme/collaborative-a.png" alt="Concord editor showing converged edits from replicas A and B with the collaboration status connected" /></td>
-    <td width="50%"><img src="docs/assets/readme/offline-state.png" alt="Concord editor showing a disconnected edit and the message that edits are saved locally" /></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Two browser contexts converged</sub></td>
-    <td align="center"><sub>Offline edit saved locally</sub></td>
-  </tr>
 </table>
 
 The second collaboration context is captured separately in
-[`collaborative-b.png`](docs/assets/readme/collaborative-b.png). The browser
-journey that produced these states is reproducible with the command in
-[Browser verification](#browser-verification).
+[`collaborative-b.png`](docs/assets/readme/collaborative-b.png). A matching
+[social-preview.png](docs/assets/readme/social-preview.png) is included for
+the repository owner to upload in GitHub's Social preview settings.
 
-A matching [social-preview.png](docs/assets/readme/social-preview.png) is
-included for the repository owner to upload in GitHub’s Social preview
-settings; no account-side metadata was changed here.
+## Benchmarks (100k-op document, browser-served WASM binary)
+
+Measured by [`scripts/bench/big-doc-bench.mjs`](scripts/bench/big-doc-bench.mjs)
+(Node-instrumented runs of the exact WASM binary the browser serves; the app
+executes engine ops in a Web Worker). Every run asserts digest parity: all
+folds agree and snapshot import reproduces the folded digest exactly.
+`--write-baseline` records the JSON under `.agent/bench/baselines/`, and an
+env-gated vitest gate (`CONCORD_PERF_GATE=1`) fails CI on asymptotic
+regressions — the current bounds carry ~750× fold headroom.
+
+| Operation (100,000-op document) | p50 | p95 | Notes |
+|---|---|---|---|
+| Fold from scratch (`applyRemote` × 100k) | **38.5 ms** | 42.3 ms | ≈ 2.6 M ops/s |
+| Export snapshot | 140.0 ms | 155.0 ms | 7.36 MB snapshot |
+| Import snapshot (restore/resync path) | **36.7 ms** | 42.5 ms | O(snapshot), not O(ops) |
+| Canonical digest read | 298.9 ms | 306.2 ms | SHA-256 over canonical state |
+
+## Verification matrix (2026-09-26)
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` + ESLint | clean |
+| Web unit tests (`vitest --project unit`) | 288 passed, 1 perf gate skipped by default |
+| PostgreSQL tests (`--project db`) | 79 passed (9 files) |
+| Production build (`next build`) | clean (PWA artifacts smoke-verified on `next start`) |
+| Rust library + fmt + Clippy | 99 passed · fmt clean · 0 warnings |
+| Rust integration suites (serial, live DB + native worker) | ws_integration 17/17 · proofs_api 2/2 · convergence_invariants 2/2 |
+| Browser E2E (`npm run test:browser`, Chromium, real Clerk auth) | **15/15** incl. two-browser convergence, reconnect, presence relay, full review-tools journey |
+| Perf gate (`CONCORD_PERF_GATE=1`) | fold 100k = 35.9 ms · snapshot import = 35.5 ms |
 
 ## What is interesting here
 
@@ -94,6 +219,22 @@ settings; no account-side metadata was changed here.
 | Distributed fanout | NATS JetStream delivers post-commit batches to other gateways | Gateways can fan out without becoming the ordering authority. |
 | Recovery | Snapshot verification, operation replay, compaction, and resync floors | Slow or stale replicas have a bounded way back to a trusted state. |
 | Authorization | Clerk supplies identity; Concord re-checks document roles server-side | Authentication and authorization stay separate, with deny-by-default access. |
+| Review and recovery tools | Time-travel replay, CRDT-anchored comments, live cursors, suggestion mode, durable history/restore, reconnect briefing, local drafts, and verifiable `.concordpack` files with signed server receipts | Brings the durability and replica work into the editor, with explicit local/server status. |
+| Verified collaboration correctness | Seeded adversarial checker (concurrent ingests, duplicates, rolling cursors) + deterministic session simulation with mutation-verified invariants | Convergence and no-ack-loss are tested properties, not anecdotes. |
+
+The Review & history panel is fully wired to the durable stack: history and
+restore use the Rust gateway's revision path; comments, suggestions, and live
+cursors anchor to CRDT item IDs; comments queue locally while offline with
+per-tab outbox keys; suggestions apply as normal durable edits and discharge
+honestly when their anchor orphans; replay and server-receipt verification run
+entirely in the browser. Reconnect briefings report operation and replica
+counts without guessing authorship or intent. Drafts are device-local. The
+full authenticated Chromium journey covers every interaction against
+PostgreSQL, the Rust gateway, the native worker, and the browser CRDT worker.
+See [Review tools](docs/REVIEW_TOOLS.md) for roles, protocol details, tests,
+and the operation-preserving import boundary, and
+[docs/HANDOFF_FEATURES_2026-09-25.md](docs/HANDOFF_FEATURES_2026-09-25.md)
+for the per-feature design notes and verification evidence.
 
 ## Architecture
 
@@ -197,12 +338,11 @@ flowchart TD
     Tail --> Converged
 ```
 
-## Current local verification — 2026-09-24
+## Prior local verification snapshot — 2026-09-24
 
-These checks were run against the current local change set. They establish
-that the affected code paths build and pass their local test suites; they do
-not replace the release orchestrator, authenticated browser journey, image
-scan, or deployment checks.
+This snapshot predates the review tools. The current verification boundary is
+summarized near the top of this README; this older snapshot is retained as
+historical project evidence and does not validate the current feature set.
 
 | Surface | Result |
 |---|---|
@@ -363,6 +503,12 @@ gateway/broker stack, see [DEPLOYMENT](docs/DEPLOYMENT.md) and
 [OPERATIONS](docs/OPERATIONS.md); those procedures are local runbooks, not
 evidence of a hosted runtime.
 
+To use another local port, pass only the port (for example,
+`npm run dev -- --port 3140`) and open `http://localhost:3140`. The development
+Clerk middleware uses a localhost handshake; forcing Next to bind only to
+`127.0.0.1` can make that internal rewrite target an unbound address. The
+default command serves both `localhost` and `127.0.0.1` safely.
+
 ## Verification commands
 
 ### Browser verification
@@ -373,17 +519,22 @@ cleans up the temporary resources when it exits. This Clerk-backed flow is
 separate from the locally signed Vitest realtime suite:
 
 ```bash
-CONCORD_E2E_VERBOSE=1 \
-  npx playwright test \
-  --config=playwright.config.ts \
-  --project=chromium \
-  tests/browser/journey.spec.ts
+CONCORD_E2E_NO_RETRY=1 npm run test:browser
 ```
 
-The last recorded run completed **7 tests on 2026-09-14**; it was not rerun in
-the 2026-09-24 reliability pass. The local capture script is retained at
+The current local run completed **14 Chromium tests on 2026-09-25**, including
+the review-tools browser gate. Firefox and WebKit each have a passing
+load/sign-in/editor smoke. The local capture script is retained at
 [`scripts/readme/capture-screenshots.mjs`](scripts/readme/capture-screenshots.mjs)
 so the gallery can be refreshed from the same real application path.
+
+To verify the production-shaped standalone server for the review surface:
+
+```bash
+CONCORD_E2E_MODE=production CONCORD_E2E_NO_RETRY=1 \
+  npx playwright test --config=playwright.config.ts \
+  --project=chromium tests/browser/review-tools.spec.ts
+```
 
 ### Focused local gates
 
@@ -433,6 +584,9 @@ Start with the [documentation index](docs/README.md), then choose the layer
 you want to inspect:
 
 - [Architecture](docs/ARCHITECTURE.md) · [Engineering brief](docs/ENGINEERING_BRIEF.md)
+- [Feature handoff & designs](docs/HANDOFF_FEATURES_2026-09-25.md) ·
+  [CRDT-native lists design](docs/DESIGN_CRDT_NATIVE_LISTS.md) ·
+  [Review tools](docs/REVIEW_TOOLS.md)
 - [Consistency model](docs/CONSISTENCY_MODEL.md) · [Protocol](docs/PROTOCOL.md)
 - [Database and storage](docs/DATABASE.md) · [Recovery](docs/RECOVERY.md)
 - [Failure model](docs/FAILURE_MODEL.md) · [Operations](docs/OPERATIONS.md)
@@ -458,8 +612,9 @@ The current state is deliberately bounded:
 - The data tier is single-node per environment in this candidate. Gateways
   can scale horizontally, but PostgreSQL/NATS/Redis topology and operating
   contracts remain explicit work rather than an implicit scale claim.
-- History/restore UI is outside the v1 product boundary even though protocol
-  and recovery machinery are exercised.
+- These review tools are a local prototype beyond the frozen v1 product scope;
+  the authenticated browser path is verified locally, while hosted deployment
+  and authenticated browser CI remain unverified for this feature set.
 - Embedded WebViews and hosted production behavior need separate verification.
 
 Before publishing a release or portfolio link, rerun the complete release

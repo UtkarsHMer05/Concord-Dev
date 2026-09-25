@@ -48,6 +48,7 @@
 #include "concord/crdt/doc.hpp"
 #include "concord/crdt/errors.hpp"
 #include "concord/crdt/ids.hpp"
+#include "concord/crdt/json.hpp"
 #include "concord/crdt/serialize.hpp"
 #include "concord/crdt/validation.hpp"
 
@@ -107,6 +108,8 @@ constexpr std::uint32_t kCmdDigestAfter = 4;       // snapshot + tail ops -> dig
 constexpr std::uint32_t kCmdVerifySnapshot = 5;    // snapshot -> digest (alias)
 constexpr std::uint32_t kCmdGenerateOps = 6;       // seed + shape -> ops + digest
 constexpr std::uint32_t kCmdRestoreDiff = 7;       // two snapshots -> forward-restore ops (P5-M036)
+constexpr std::uint32_t kCmdVisibleAfter = 8;      // optional snapshot + tail ops -> visible JSON
+constexpr std::uint32_t kCmdFoldAfter = 9;         // snapshot + tail ops -> digest + folded snapshot
 
 // Status codes.
 constexpr std::uint32_t kStatusOk = 0;
@@ -179,7 +182,7 @@ bool write_all(const char* data, std::size_t count) {
 struct RequestBody {
     std::uint32_t command = 0;
     std::vector<std::string> op_batches;  // each entry: one serialize_batch-encoded payload (ops appended for CMD 1/2/4)
-    std::string snapshot;                // CMD 3/4/5
+    std::string snapshot;                // CMD 3/4/5/8/9
 
     // CMD 7 (restore_diff): the current state's snapshot (A) and the target
     // (restore-boundary) state's snapshot (B).
@@ -360,10 +363,25 @@ enum class ParseResult { Ok, Malformed, VersionUnsupported, OpApplyError, SizeEx
             }
             break;  // falls through to trailing check
         }
-        case kCmdDigestAfter: {
+        case kCmdDigestAfter:
+        case kCmdFoldAfter: {
             const ParseResult snap_result = read_snapshot_into(frame, offset, body.snapshot, error);
             if (snap_result != ParseResult::Ok) {
                 return snap_result;
+            }
+            const ParseResult ops_result = read_op_batches(frame, offset, body, error);
+            if (ops_result != ParseResult::Ok) {
+                return ops_result;
+            }
+            break;
+        }
+        case kCmdVisibleAfter: {
+            // [u32 snapshot_len][snapshot bytes, or zero for empty state]
+            // [u32 batch_count] + batches. The same path supports both
+            // uncompacted history and snapshot-anchored history.
+            const ParseResult snapshot_result = read_snapshot_into(frame, offset, body.snapshot, error);
+            if (snapshot_result != ParseResult::Ok) {
+                return snapshot_result;
             }
             const ParseResult ops_result = read_op_batches(frame, offset, body, error);
             if (ops_result != ParseResult::Ok) {
@@ -460,6 +478,18 @@ void emit_ok_response(const std::string& digest, const std::string* snapshot) {
         put_u32le(out, static_cast<std::uint32_t>(snapshot->size()));
         out.append(*snapshot);
     }
+    (void)write_all(out.data(), out.size());
+}
+
+// CMD 8 OK response: [status][digest_len][digest][json_len][visible JSON].
+void emit_ok_visible(const std::string& digest, const std::string& visible_json) {
+    std::string out;
+    out.reserve(12 + digest.size() + visible_json.size());
+    put_u32le(out, kStatusOk);
+    put_u32le(out, static_cast<std::uint32_t>(digest.size()));
+    out.append(digest);
+    put_u32le(out, static_cast<std::uint32_t>(visible_json.size()));
+    out.append(visible_json);
     (void)write_all(out.data(), out.size());
 }
 
@@ -1581,6 +1611,8 @@ struct CommandResult {
     std::vector<std::string> batches;  // CMD 6: serialize_batch frames, ≤512 ops each
     bool restore_diff = false;  // CMD 7: emit [digest_len][target digest][batch_len][batch]
     std::string diff_batch;     // CMD 7: ONE serialize_batch frame with all ops
+    bool visible_state = false; // CMD 8: emit canonical visible JSON
+    std::string visible_json;
 };
 
 [[nodiscard]] CommandResult execute(const RequestBody& body) {
@@ -1614,6 +1646,37 @@ struct CommandResult {
                     result.digest = "operation uses reserved replica id";
                     return result;
                 }
+                result.digest = doc.canonical_digest();
+                return result;
+            }
+            case kCmdVisibleAfter: {
+                crdt::Doc doc = body.snapshot.empty()
+                    ? crdt::Doc(kMaintenanceReplica)
+                    : crdt::Doc::import_snapshot(kMaintenanceReplica, body.snapshot);
+                if (!apply_batches(doc, body)) {
+                    result.status = kStatusOpApplyError;
+                    result.digest = "operation uses reserved replica id";
+                    return result;
+                }
+                result.digest = doc.canonical_digest();
+                result.visible_json = crdt::doc_to_json(doc);
+                result.visible_state = true;
+                return result;
+            }
+            case kCmdFoldAfter: {
+                // CMD 9: fold a covering snapshot forward through its
+                // retained tail and export the resulting state's snapshot
+                // bytes (same response shape as CMD 1). Snapshot builds and
+                // restores anchored on a covering snapshot need the folded
+                // SNAPSHOT, which the digest-only CMD 4 response lacks.
+                crdt::Doc doc = crdt::Doc::import_snapshot(kMaintenanceReplica, body.snapshot);
+                if (!apply_batches(doc, body)) {
+                    result.status = kStatusOpApplyError;
+                    result.digest = "operation uses reserved replica id";
+                    return result;
+                }
+                result.snapshot = doc.export_snapshot();
+                result.has_snapshot = true;
                 result.digest = doc.canonical_digest();
                 return result;
             }
@@ -1726,7 +1789,9 @@ int run_worker() {
 
     const CommandResult result = execute(body);
     if (result.status == kStatusOk) {
-        if (result.restore_diff) {
+        if (result.visible_state) {
+            emit_ok_visible(result.digest, result.visible_json);
+        } else if (result.restore_diff) {
             emit_ok_restore_diff(result.digest, result.diff_batch);
         } else if (result.gen_batches) {
             emit_ok_generated(result.digest, result.batches);

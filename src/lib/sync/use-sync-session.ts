@@ -20,16 +20,19 @@
  * bridge's `concord.replica.{documentId}` key.
  */
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import { useSyncStatusStore } from "@/store/use-sync-status-store";
 import { useBridgeStatusStore } from "@/store/use-bridge-status-store";
+import { usePresenceStore } from "@/lib/presence/use-presence-store";
 import type { CrdtClient } from "@/lib/crdt/worker/client";
 import type { CrdtEditorBridge } from "@/lib/crdt/editor-bridge";
 import { hasReplicaData } from "@/lib/crdt/worker/idb";
 import { SyncSession } from "@/lib/sync/sync-session";
+import type { PresenceState } from "@/lib/sync/protocol";
 import { WorkerEnginePort } from "@/lib/sync/worker-engine-port";
+import type { CatchupBriefing } from "@/lib/sync/catchup-briefing";
 
 /** Browser-side gateway WS endpoint (unset ⇒ local-only mode). */
 export function syncGatewayUrl(): string | null {
@@ -74,6 +77,8 @@ export interface UseSyncSessionParams {
     crdtClient: CrdtClient | null;
     /** The editor bridge (remote re-render hook). */
     bridge: CrdtEditorBridge | null;
+    /** Count-only durable catch-up summary for a reconnect briefing UI. */
+    onCatchupBriefing?: (briefing: CatchupBriefing) => void;
 }
 
 /**
@@ -82,8 +87,15 @@ export interface UseSyncSessionParams {
  * fallback sessions (unsupported content is NOT collaboratively editable —
  * the Phase 1 mirror owns it instead).
  */
-export function useSyncSession({ documentId, crdtClient, bridge }: UseSyncSessionParams): void {
+export function useSyncSession({ documentId, crdtClient, bridge, onCatchupBriefing }: UseSyncSessionParams): {
+    syncNow: () => void;
+    sendPresence: (state: PresenceState) => void;
+} {
     const { getToken, isLoaded, isSignedIn, userId } = useAuth();
+    const catchupBriefingCallback = useRef(onCatchupBriefing);
+    useEffect(() => {
+        catchupBriefingCallback.current = onCatchupBriefing;
+    }, [onCatchupBriefing]);
     const setSyncStatus = useSyncStatusStore((s) => s.setStatus);
     const setSyncError = useSyncStatusStore((s) => s.setError);
     const setCompatibilityWarning = useSyncStatusStore((s) => s.setCompatibilityWarning);
@@ -91,6 +103,16 @@ export function useSyncSession({ documentId, crdtClient, bridge }: UseSyncSessio
     const setOutbox = useSyncStatusStore((s) => s.setOutbox);
     const clearSyncStatus = useSyncStatusStore((s) => s.clear);
     const bridgeMode = useBridgeStatusStore((s) => s.state.mode);
+    const applyPresence = usePresenceStore((s) => s.applyUpdate);
+    const removePresence = usePresenceStore((s) => s.removePeer);
+    const clearPresence = usePresenceStore((s) => s.clear);
+    const sessionRef = useRef<SyncSession | null>(null);
+    const syncNow = useCallback(() => {
+        sessionRef.current?.syncNow();
+    }, []);
+    const sendPresence = useCallback((state: PresenceState) => {
+        sessionRef.current?.sendPresence(state);
+    }, []);
 
     useEffect(() => {
         const gatewayUrl = syncGatewayUrl();
@@ -160,11 +182,16 @@ export function useSyncSession({ documentId, crdtClient, bridge }: UseSyncSessio
                 onError: (code, message) => setSyncError(`${code}: ${message}`),
                 onLocalError: (message) => setSyncError(`Local sync storage failed: ${message}`),
                 onOutboxState: (state) => setOutbox(state),
+                onCatchupBriefing: (briefing) => catchupBriefingCallback.current?.(briefing),
+                onPresenceUpdate: (peer) => applyPresence(peer),
+                onPresenceLeave: (connectionId) => removePresence(connectionId),
             });
+            sessionRef.current = session;
             // Unmount raced the async store open: stop immediately — a
             // session must never outlive its page.
             if (cancelled) {
                 await session.stop();
+                if (sessionRef.current === session) sessionRef.current = null;
                 store?.close();
                 return;
             }
@@ -177,11 +204,14 @@ export function useSyncSession({ documentId, crdtClient, bridge }: UseSyncSessio
         return () => {
             cancelled = true;
             void session?.stop();
+            if (sessionRef.current === session) sessionRef.current = null;
             store?.close();
             clearSyncStatus();
+            clearPresence();
         };
         // getToken identity is stable from Clerk; the rest are per-mount.
         // bridgeMode re-runs the effect on bridge mode transitions.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [documentId, crdtClient, bridge, bridgeMode, isLoaded, isSignedIn, userId, setSyncStatus, setSyncError, setCompatibilityWarning, setLocalOnly, setOutbox, clearSyncStatus]);
+    }, [documentId, crdtClient, bridge, bridgeMode, isLoaded, isSignedIn, userId, setSyncStatus, setSyncError, setCompatibilityWarning, setLocalOnly, setOutbox, clearSyncStatus, applyPresence, removePresence, clearPresence]);
+    return { syncNow, sendPresence };
 }

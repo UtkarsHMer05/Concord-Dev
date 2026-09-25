@@ -19,7 +19,7 @@ export const CAPABILITIES = {
   rename: ["OWNER", "EDITOR"],
   delete: ["OWNER"],
   managePermissions: ["OWNER"],
-  /** Future capability (Phases 2+): commenting on content. */
+  /** Create and reply to document comments. */
   comment: ["OWNER", "EDITOR", "COMMENTER"],
 } as const satisfies Record<string, readonly EffectiveRole[]>;
 

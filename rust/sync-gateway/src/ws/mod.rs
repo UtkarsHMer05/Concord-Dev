@@ -69,8 +69,8 @@ use crate::config::Config;
 use crate::db::repo::{GatewayRepo, RepoError, UserId};
 use crate::protocol::control::{
     Authenticated, ControlFrame, DurableAck, ErrorFrame, FetchSnapshot, Frame, HelloAck,
-    JoinAccepted, JoinDocument, Ping, Pong, ServerDraining, SnapshotPayload,
-    SnapshotResyncRequired, SyncDone,
+    JoinAccepted, JoinDocument, Ping, Pong, PresenceLeave, PresenceState, PresenceUpdate,
+    ServerDraining, SnapshotPayload, SnapshotResyncRequired, SyncDone,
 };
 
 use crate::protocol::data::{DataFrame, SyncBatch};
@@ -339,6 +339,19 @@ async fn handle_socket(
     // BEFORE awaiting the writer — the writer exits only when every sender
     // is gone.
     if let Some(doc) = conn.document {
+        // Tell the room this caret is gone (best-effort; peers also expire it
+        // on a client-side TTL if a sender simply goes silent). Sent BEFORE
+        // leaving so the still-registered peers receive it.
+        let leave = ControlFrame {
+            id: None,
+            frame: Frame::PresenceLeave(PresenceLeave {
+                connection_id: connection_id.to_string(),
+            }),
+        }
+        .encode();
+        registry
+            .relay_ephemeral(doc, connection_id, OutboundFrame::Text(leave))
+            .await;
         registry.leave(doc, connection_id).await;
         if let Some(store) = &presence {
             if let Some(user) = conn.user {
@@ -771,6 +784,10 @@ async fn handle_text(
             }
             handle_fetch_snapshot(conn, fetch, repo).await;
         }
+        // Ephemeral live-cursor presence (Feature 2): relay-only, non-durable.
+        Frame::Presence(state) => {
+            handle_presence(conn, state, registry, rate_limiter).await?;
+        }
         // Server->client frames are illegal inbound.
         Frame::HelloAck(_)
         | Frame::Authenticated(_)
@@ -780,6 +797,8 @@ async fn handle_text(
         | Frame::SnapshotPayload(_)
         | Frame::DurableAck(_)
         | Frame::Error(_)
+        | Frame::PresenceUpdate(_)
+        | Frame::PresenceLeave(_)
         | Frame::ServerDraining(_) => {
             send_error(
                 conn,
@@ -1042,6 +1061,71 @@ async fn conn_allows_scope(
 
 const MALFORMED_RATE_LABEL: &[&str] = &["malformed"];
 const WRITE_RATE_LABEL: &[&str] = &["write"];
+const PRESENCE_RATE_LABEL: &[&str] = &["presence"];
+
+/// Upper bound on a client-supplied presence hint string (replica id / item
+/// id). Real values are short ("r:c" identities, small decimals); anything
+/// longer is a misbehaving or hostile peer and the update is dropped.
+const PRESENCE_MAX_HINT_LEN: usize = 64;
+
+/// Relay one EPHEMERAL presence update to the room's OTHER members (Feature
+/// 2, live cursors). Never persisted, never authorization truth. Legal only
+/// in READY on a joined+authenticated connection; anything else is dropped
+/// silently (a racing client simply re-sends at its ~10 Hz cadence — an error
+/// frame would be wrong for best-effort presence). Identity (connection_id,
+/// user_id) is stamped from the verified session; the client's replica id and
+/// anchor are low-trust color/position hints, size-bounded before relay.
+async fn handle_presence(
+    conn: &Conn,
+    state: PresenceState,
+    registry: &Arc<SessionRegistry>,
+    rate_limiter: &Arc<crate::ephemeral::ratelimit::RateLimiter>,
+) -> Result<(), FlowError> {
+    let (Some(document), Some(user)) = (conn.document, conn.user) else {
+        return Ok(());
+    };
+    if conn.state != SessionState::Ready {
+        return Ok(());
+    }
+    if !conn_allows_scope(
+        conn,
+        rate_limiter,
+        crate::ephemeral::ratelimit::SCOPE_PRESENCE,
+        PRESENCE_RATE_LABEL,
+    )
+    .await
+    {
+        return Ok(());
+    }
+    let within = |item: &Option<String>| {
+        item.as_ref()
+            .is_none_or(|s| s.len() <= PRESENCE_MAX_HINT_LEN)
+    };
+    if state.replica_id.len() > PRESENCE_MAX_HINT_LEN
+        || !within(&state.anchor_item)
+        || !within(&state.head_item)
+    {
+        return Ok(());
+    }
+    let update = Frame::PresenceUpdate(PresenceUpdate {
+        connection_id: conn.id.to_string(),
+        user_id: user.0.to_string(),
+        replica_id: state.replica_id,
+        anchor_item: state.anchor_item,
+        anchor_side: state.anchor_side,
+        head_item: state.head_item,
+        head_side: state.head_side,
+    });
+    let text = ControlFrame {
+        id: None,
+        frame: update,
+    }
+    .encode();
+    registry
+        .relay_ephemeral(document, conn.id, OutboundFrame::Text(text))
+        .await;
+    Ok(())
+}
 
 /// Standard base64 (RFC 4648, with padding) — dependency-free: the
 /// payload rides a JSON text frame, so raw bytes must be encoded.

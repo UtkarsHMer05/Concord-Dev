@@ -26,6 +26,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1.26", features = ["v4", "serde"] }
 sha2 = "0.10"
 hex = "0.4"
+# Feature 5 (history proofs): Ed25519-signed state receipts. ed25519-dalek
+# is small, pure-Rust, and widely audited; rand_core(+getrandom) is only
+# used for dev/ephemeral key generation at startup.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 thiserror = "2"
 futures-util = "0.3"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake"] }

@@ -443,6 +443,63 @@ async fn full_flow_join_ingest_ack_fanout_two_clients() {
     assert_eq!(n, 2);
 }
 
+/// Feature 2: ephemeral presence relays to room peers (never echoed to the
+/// sender), stamps the authenticated identity, and a disconnect broadcasts a
+/// leave so peers drop the caret immediately.
+#[tokio::test]
+async fn presence_relays_to_peers_and_broadcasts_leave_on_disconnect() {
+    let Some(server) = boot().await else {
+        eprintln!("SKIP: db down");
+        return;
+    };
+    let (owner_clerk, doc) =
+        seed_owner_with_document(&server, &format!("ws-presence-{}", Uuid::new_v4().simple()))
+            .await;
+
+    let mut a = connect(&server).await;
+    let mut b = connect(&server).await;
+
+    // A: capture the server-assigned connection id from hello_ack.
+    send_text(&mut a, &hello()).await;
+    let ack_a = next_control(&mut a).await;
+    assert_eq!(ack_a["type"], "hello_ack");
+    let a_conn = ack_a["payload"]["connectionId"]
+        .as_str()
+        .expect("connection id")
+        .to_owned();
+    send_text(&mut a, &authenticate(&sign_token(&owner_clerk))).await;
+    assert_eq!(next_control(&mut a).await["type"], "authenticated");
+
+    handshake(&mut b, &owner_clerk).await;
+
+    for ws in [&mut a, &mut b] {
+        send_text(ws, &join(&doc.to_string())).await;
+        assert_eq!(next_control(ws).await["type"], "join_accepted");
+        assert_eq!(next_control(ws).await["type"], "sync_done");
+    }
+
+    // A publishes presence; B receives a server-stamped relay (A is not echoed
+    // to itself — the relay skips the sender).
+    let presence = r#"{"v":1,"type":"presence","payload":{"replicaId":"77","anchorItem":"77:1","anchorSide":"before","headItem":"77:1","headSide":"after"}}"#;
+    send_text(&mut a, presence).await;
+    let update = next_control(&mut b).await;
+    assert_eq!(update["type"], "presence_update");
+    assert_eq!(update["payload"]["connectionId"], a_conn);
+    assert_eq!(update["payload"]["replicaId"], "77");
+    assert_eq!(update["payload"]["anchorItem"], "77:1");
+    assert_eq!(update["payload"]["headSide"], "after");
+    assert!(
+        update["payload"]["userId"].as_str().is_some(),
+        "gateway stamps the authenticated user id"
+    );
+
+    // A disconnects; B receives a leave naming A's connection.
+    drop(a);
+    let leave = next_control(&mut b).await;
+    assert_eq!(leave["type"], "presence_leave");
+    assert_eq!(leave["payload"]["connectionId"], a_conn);
+}
+
 #[tokio::test]
 async fn unauthorized_and_forged_tokens_rejected() {
     let Some(server) = boot().await else {
