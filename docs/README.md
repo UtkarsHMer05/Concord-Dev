@@ -46,6 +46,7 @@ The secret-free v1.0.0 evidence index remains preserved at
 | [RECOVERY.md](RECOVERY.md) | How a stale client or gateway recovers: snapshot+tail, fallback chain, resync |
 | [HISTORY.md](HISTORY.md) | Version history: what a revision is, how historical state is reconstructed, and how restore works without rewriting history |
 | [REVIEW_TOOLS.md](REVIEW_TOOLS.md) | Editor history, anchored comments, reconnect summaries, local drafts, and verifiable `.concordpack` limits |
+| [CONCORDPACK.md](CONCORDPACK.md) | Independently trusted signed history, standalone offline verification, atomic restoration, and retained-history limits |
 
 ## Security
 
@@ -97,6 +98,7 @@ The secret-free v1.0.0 evidence index remains preserved at
 | [audits/V1_HARDENING_FINAL_REPORT.md](audits/V1_HARDENING_FINAL_REPORT.md) | The final 22-section remediation, reproducibility, browser, provenance, CI, release, and residual-risk report |
 | [audits/CANONICAL_RELEASE_REPORT.md](audits/CANONICAL_RELEASE_REPORT.md) | Current `1.0.1` candidate verdict, exact local evidence, unresolved blockers, and owner actions |
 | [audits/CANONICAL_FRESH_EVIDENCE.md](audits/CANONICAL_FRESH_EVIDENCE.md) | Candidate-bound local gate results and limitations |
+| [audits/CONCORDPACK_REPORT.md](audits/CONCORDPACK_REPORT.md) | Signed-history implementation and browser/native/database acceptance evidence |
 | [audits/CANONICAL_RELEASE_LEDGER.json](audits/CANONICAL_RELEASE_LEDGER.json) | Machine-readable current findings/evidence/owner-action ledger |
 | [../evidence/v1.0.1/README.md](../evidence/v1.0.1/README.md) | Secret-free evidence bundle for implementation candidate `42dcb17…` |
 | [../evidence/v1.0.0/README.md](../evidence/v1.0.0/README.md) | Secret-free machine-readable CI, security, reproducibility, and performance evidence for v1.0.0 |

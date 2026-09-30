@@ -44,6 +44,11 @@ pub struct GatewayRepo {
     pub db: super::Db,
 }
 
+// A fully compacted document still has a durable snapshot boundary.
+pub(crate) const DURABLE_CURSOR_QUERY: &str = "SELECT GREATEST(
+    COALESCE((SELECT MAX(id) FROM crdt_operations WHERE document_id=$1),0),
+    COALESCE((SELECT compaction_floor_seq FROM documents WHERE id=$1),0)) AS cursor";
+
 /// Result of an idempotent operation-batch insert (M018/M019).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IngestResult {
@@ -106,12 +111,7 @@ impl GatewayRepo {
     /// Current durable high-water mark for a document (server sequence).
     pub async fn durable_cursor(&self, document: Uuid) -> Result<i64, RepoError> {
         let client = self.db.get().await?;
-        let row = client
-            .query_one(
-                "SELECT COALESCE(MAX(id), 0) AS cursor FROM crdt_operations WHERE document_id = $1",
-                &[&document],
-            )
-            .await?;
+        let row = client.query_one(DURABLE_CURSOR_QUERY, &[&document]).await?;
         Ok(row.get("cursor"))
     }
 
@@ -310,12 +310,7 @@ impl GatewayRepo {
         }
 
         // 4. Durable cursor after the batch: max server seq in the document.
-        let cursor_row = tx
-            .query_one(
-                "SELECT COALESCE(MAX(id), 0) AS cursor FROM crdt_operations WHERE document_id = $1",
-                &[&document],
-            )
-            .await?;
+        let cursor_row = tx.query_one(DURABLE_CURSOR_QUERY, &[&document]).await?;
         let durable_cursor: i64 = cursor_row.get("cursor");
 
         Ok(IngestResult {

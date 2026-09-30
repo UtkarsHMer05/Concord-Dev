@@ -9,8 +9,8 @@
  *     `version || document || seq || root || stateDigest || opCount ||
  *     issuedAtMs || keyId` — length-prefixed framing, not JSON;
  *  3. state: the caller compares `receipt.stateDigest` with its OWN replica
- *     digest — equality means "the gateway durably committed exactly the
- *     content this replica converged to, at exactly this sequence".
+ *     digest — equality binds the server's statement to this replica's
+ *     content. The signature does not prove physical persistence.
  *
  * Trust note: the verifying public key rides the same response. Verifying
  * against it detects gateway-side tampering/replay, but third-party
@@ -132,6 +132,23 @@ function uuidToBytes(uuid: string): Uint8Array {
 async function nodeHash(left: Uint8Array, right: Uint8Array): Promise<Uint8Array> {
   return sha256(concat(Uint8Array.of(NODE_PREFIX), left, right));
 }
+
+/** Same identity-bound leaves and duplicate-last root used by signed archives. */
+export async function operationLeaf(seq: string, operationId: string, checksum: string): Promise<Uint8Array> {
+  const id = new TextEncoder().encode(operationId);
+  return sha256(concat(Uint8Array.of(0), u64be(seq), u16be(id.length), id, new TextEncoder().encode(checksum)));
+}
+export async function operationRoot(leaves: Uint8Array[]): Promise<string> {
+  if (!leaves.length) return "0".repeat(64);
+  let level = leaves;
+  while (level.length > 1) {
+    const next: Uint8Array[] = [];
+    for (let i = 0; i < level.length; i += 2) next.push(await nodeHash(level[i], level[i + 1] ?? level[i]));
+    level = next;
+  }
+  return bytesToHex(level[0]);
+}
+export { sha256 as sha256Bytes, concat as concatBytes, hexToBytes, bytesToHex };
 
 /** Replays an audit path from a leaf to the root (mirror of `replay_path`). */
 export async function replayMerklePath(

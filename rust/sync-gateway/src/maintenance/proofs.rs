@@ -5,8 +5,8 @@
 //! receipt binding `(document, seq, root, state_digest, op_count)` to a
 //! gateway signing key. A client that independently folds its own replica to
 //! the same canonical digest, verifies the audit path, and verifies the
-//! signature has end-to-end evidence that the gateway durably committed
-//! exactly this content at exactly this sequence.
+//! signature authenticates the gateway's statement about that content and
+//! sequence. It does not independently prove physical persistence.
 //!
 //! Trust model (documented honestly):
 //! - The signature is over deterministic bytes (not JSON), so any client
@@ -15,7 +15,7 @@
 //!   key obtained OUT OF BAND (or pinning `key_id`) is what makes the proof
 //!   third-party verifiable. Verifying against the key in the same response
 //!   still detects gateway-internal tampering/replay, not a full MITM.
-//! - `GATEWAY_SIGNING_KEY` (hex or base64, 32-byte Ed25519 seed) pins the
+//! - `GATEWAY_SIGNING_KEY` (hex, 32-byte Ed25519 seed) pins the
 //!   key across restarts and multi-gateway deployments. Without it, an
 //!   EPHEMERAL key is generated per process (dev convenience; receipts do
 //!   not survive restarts — surfaced via the key id and a startup warning).
@@ -167,7 +167,7 @@ pub struct ProofSigner {
 }
 
 impl ProofSigner {
-    /// From a 32-byte seed (env `GATEWAY_SIGNING_KEY`, hex or base64).
+    /// From a 32-byte seed (env `GATEWAY_SIGNING_KEY`, hex).
     pub fn from_seed(seed: [u8; 32]) -> Self {
         let signing = SigningKey::from_bytes(&seed);
         Self::build(signing, false)
@@ -204,7 +204,7 @@ impl ProofSigner {
                     tracing::warn!(
                         "GATEWAY_SIGNING_KEY unset: history-proof receipts use an EPHEMERAL \
                          Ed25519 key (receipts are unverifiable across restarts). Set a 32-byte \
-                         hex/base64 seed in production."
+                         hex seed in production."
                     );
                     Self::generate()
                 }

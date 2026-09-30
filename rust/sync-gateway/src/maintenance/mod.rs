@@ -5,6 +5,7 @@
 pub mod branch_merge;
 pub mod branches;
 pub mod compaction;
+pub mod concordpack;
 pub mod history;
 pub mod jobs;
 pub mod pipeline;

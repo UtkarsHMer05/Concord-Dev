@@ -39,6 +39,7 @@ pub mod cmd {
     pub const VISIBLE_AFTER: u32 = 8;
     pub const FOLD_AFTER: u32 = 9;
     pub const MERGE_DIFF: u32 = 10;
+    pub const SNAPSHOT_REPLICAS: u32 = 11;
 }
 
 /// Worker status codes (mirrors cpp/worker/main.cpp).
@@ -275,6 +276,15 @@ impl WorkerPool {
     pub async fn import_digest(&self, snapshot: &[u8]) -> Result<WorkerOk, WorkerError> {
         let body = encode_snapshot_only(snapshot);
         self.request(cmd::IMPORT_VERIFY, body).await
+    }
+
+    /// The core reads its own snapshot and reports historical replica identities.
+    /// Imported identities are quarantined, never attributed to the importing user.
+    pub async fn snapshot_replicas(&self, snapshot: &[u8]) -> Result<WorkerVisible, WorkerError> {
+        let frame = self
+            .request_frame(cmd::SNAPSHOT_REPLICAS, encode_snapshot_only(snapshot))
+            .await?;
+        decode_visible_response(&frame)
     }
 
     /// Digest after importing a snapshot and replaying tail ops —

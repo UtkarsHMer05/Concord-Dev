@@ -29,6 +29,7 @@ use crate::telemetry::Metrics;
 use crate::worker::WorkerPool;
 use crate::ws;
 mod branches;
+mod concordpack;
 
 /// Shared application state (all clones are cheap Arc handles).
 #[derive(Clone)]
@@ -70,6 +71,15 @@ pub fn router(state: AppState) -> Router {
             post(restore_revision),
         )
         .route("/api/v1/documents/{document_id}/proof", get(document_proof))
+        .route(
+            "/api/v1/documents/{document_id}/concordpack",
+            get(concordpack::export),
+        )
+        .route(
+            "/api/v1/documents/{document_id}/concordpack/provenance",
+            get(concordpack::provenance),
+        )
+        .route("/api/v1/concordpack/import", post(concordpack::import))
         .route(
             "/api/v1/documents/{document_id}/branches",
             get(branches::list).post(branches::create),
@@ -238,7 +248,6 @@ struct ProofLeafRow {
     seq: i64,
     operation_id: String,
     checksum: String,
-    payload: Vec<u8>,
 }
 
 async fn document_proof(
@@ -321,7 +330,6 @@ async fn document_proof(
                 seq: op_seq,
                 operation_id,
                 checksum,
-                payload,
             });
             after = op_seq;
         }
@@ -333,16 +341,10 @@ async fn document_proof(
 
     // State receipt content: the canonical digest of the state at `seq`,
     // computed by the native worker (same reconstruction the gateway trusts).
-    let worker = app
-        .config
-        .worker_binary
-        .as_deref()
-        .unwrap_or("<worker-not-configured>");
-    let payloads: Vec<Vec<u8>> = rows.iter().map(|r| r.payload.clone()).collect();
-    let state_digest = WorkerPool::new(worker, Duration::from_secs(600))
-        .reconstruct(&payloads)
+    let state_digest = history_service(&app)
+        .reconstruct_at_boundary(document, seq)
         .await
-        .map(|ok| ok.digest)
+        .map(|(digest, _)| digest)
         .map_err(|_| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "history_unavailable"))?;
 
     // Merkle root + audit path for the LAST retained leaf (index count-1).

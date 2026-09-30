@@ -100,6 +100,9 @@ jobs:
       - name: Revisions + historical reconstruction + restore (M034-36)
         run: cargo test --test phase5_history -- --test-threads=1
         working-directory: rust
+      - name: Signed archive verification + atomic retained-history restoration
+        run: cargo test --test concordpack -- --test-threads=1
+        working-directory: rust
       - name: Restore authorization + concurrency (M037)
         run: cargo test --test phase5_restore_concurrency -- --test-threads=1
         working-directory: rust

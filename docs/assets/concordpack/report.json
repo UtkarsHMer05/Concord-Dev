@@ -1,0 +1,37 @@
+{
+  "result": "passed",
+  "startedAt": "2026-09-30T19:07:21.236Z",
+  "finishedAt": "2026-09-30T19:09:08.642Z",
+  "baseRevision": "52c1e6b09efb30fac9539b40462a51d3a46fb8a7",
+  "workingTreeChanges": true,
+  "environment": {
+    "node": "v24.20.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "browser": "Chromium",
+    "mode": "production"
+  },
+  "archiveChecksum": "7d7743a5d2c9790de032040ec25fdb4a4a647b096bcfe5e297c21f33695efe81",
+  "sourceDocumentId": "83f64b80-091e-4cab-89bb-3c736035ad24",
+  "destinationDocumentId": "d6e5506b-098f-466f-a6cb-d4fed9691af1",
+  "stateDigest": "sha256:15e732888a8fcbed41cb47193d5f8ea00e8fb5d1b3ef15791a7a3c9f28f71b51",
+  "stages": [
+    "signed export from authenticated rich-text editor",
+    "source web/gateway shutdown and offline CLI verification",
+    "corrupt archive and untrusted signer rejected",
+    "fresh destination restores retained identities and matching revisions",
+    "lost response and reload retry produce one private document",
+    "continued editing, history restore, provenance, desktop/mobile and accessibility"
+  ],
+  "documentId": "d6e5506b-098f-466f-a6cb-d4fed9691af1",
+  "revisionsMatched": 2,
+  "retainedOperationBytesMatched": 210,
+  "privateOwnership": true,
+  "provenancePreserved": true,
+  "lostResponseRetryIdempotent": true,
+  "retainedSnapshotsMatched": 2,
+  "continuedEditingAndHistoryRestore": true,
+  "unauthorizedProvenanceReadRejected": true,
+  "accessibilityViolations": 0,
+  "mobileOverflow": false
+}

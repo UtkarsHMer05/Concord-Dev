@@ -2,6 +2,15 @@
 export async function readJsonRequest(request: Request, limit: number): Promise<unknown | Response> {
   const error = (status: number, code: string) => Response.json({ error: code }, { status, headers: { "Cache-Control": "no-store" } });
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return error(415, "content_type_required");
+  const bytes = await readRequestBytes(request, limit);
+  if (bytes instanceof Response) return bytes;
+  try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+  catch { return error(400, "invalid_json"); }
+}
+
+/** Shared size bound for binary and JSON bodies, including chunked uploads. */
+export async function readRequestBytes(request: Request, limit: number): Promise<Uint8Array<ArrayBuffer> | Response> {
+  const error = (status: number, code: string) => Response.json({ error: code }, { status, headers: { "Cache-Control": "no-store" } });
   if (Number(request.headers.get("content-length")) > limit) return error(413, "request_too_large");
   const reader = request.body?.getReader();
   if (!reader) return error(400, "invalid_request");
@@ -14,6 +23,5 @@ export async function readJsonRequest(request: Request, limit: number): Promise<
   }
   const bytes = new Uint8Array(size); let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
-  catch { return error(400, "invalid_json"); }
+  return bytes;
 }

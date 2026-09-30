@@ -12,6 +12,7 @@ import { SuggestionsPanel } from "@/components/suggestions-panel";
 import { DraftsPanel } from "@/components/drafts-panel";
 import { ReviewBranchesPanel } from "@/components/review-branches-panel";
 import { SharingPanel } from "@/components/sharing-panel";
+import { SignedPackPanel } from "@/components/signed-pack-panel";
 import { anchorSelection, resolveAnchors as resolveAnchorSet, type CrdtRangeAnchor } from "@/lib/comments/anchors";
 import { loadBrowserCrdtFactory } from "@/lib/crdt/browser-factory";
 import { blocksToPmDoc, validRichTextValue, type CanonicalBlock, type PmNode } from "@/lib/crdt/pm-model";
@@ -386,13 +387,15 @@ function BundlePanel({ client, editor, flushEditorBridge, canEdit, documentId, d
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto">
+      <SignedPackPanel documentId={documentId} documentTitle={documentTitle} client={client} flushEditorBridge={flushEditorBridge} renderPreview={documentPreview} />
+      <h3 className="mt-2 border-t pt-4 font-semibold">Local content bundles and server receipts</h3>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" onClick={() => void exportBundle()} disabled={busy || !client || !flushEditorBridge}>Export verified bundle</Button>
         <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>Verify bundle</Button>
         <input ref={fileRef} type="file" accept=".concordpack,application/octet-stream" className="sr-only" onChange={(event) => void verifyFile(event.target.files?.[0])} aria-label="Choose a Concord document bundle" />
         <Button type="button" variant="outline" onClick={() => void verifyReceipt()} disabled={busy || !client}>Verify server receipt</Button>
-        <span className="text-xs text-muted-foreground">Portable data + operation history · 64 MiB maximum</span>
+        <span className="text-xs text-muted-foreground">Local v1 content bundle · 64 MiB maximum</span>
       </div>
       {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

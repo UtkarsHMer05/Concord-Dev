@@ -86,11 +86,19 @@ reconstructed state. Neither proves who exported the file.
 The UI can apply supported visible content into the open document as new CRDT
 edits, keeping its existing history. This does not transplant the bundle's
 operation identities or history into a live shared document. Application is
-limited to the collaborative paragraph/heading subset and supported marks;
+limited to the supported collaborative rich-text subset and marks;
 other verified content can still be inspected but is not offered for lossy
-application. A true operation-preserving import into a newly created shared
-document needs a dedicated durable replica-import transaction and is not part
-of this prototype.
+application.
+
+Version 2 adds **signed retained-history archives**, a separate trust record,
+an offline native verifier, and a durable import into a new private document.
+It preserves retained operations, snapshots, named revisions, and original
+author provenance. The browser verifies the source and history locally before
+restoration; the destination repeats verification and commits content,
+identity quarantine, provenance, ownership, and audit in one transaction.
+Source permissions and discussions are not copied. See
+[CONCORDPACK.md](CONCORDPACK.md) for the workflow and exact boundaries, and
+[the acceptance report](audits/CONCORDPACK_REPORT.md) for browser evidence.
 
 ## Verification
 

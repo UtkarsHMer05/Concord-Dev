@@ -63,13 +63,23 @@ the failure and allows retry.
 Given revision boundary `B`:
 
 1. Select the newest FINALIZED snapshot with `coverage_seq ≤ B`
-   (validated: format, document, checksum); else start empty.
+   (validated: format, document, checksum). Start empty only when the needed
+   prefix is still retained, or when `B = 0` (the known empty initial state).
 2. Replay operations with `id > snapshot.coverage_seq AND id ≤ B`.
 3. Return the canonical read-only content and digest.
 
 Same boundary ⇒ same digest, always (R8). Targets before the first
 snapshot, exactly on a snapshot boundary, between snapshots, and at
 the current head are all valid reconstruction points (tested M035).
+
+After compaction, a boundary at or below the floor remains reconstructable
+when an exact finalized snapshot exists there. Without that snapshot, a
+missing operation prefix is reported as pruned; applying only a surviving
+tail to an empty replica would produce a false preview. A fully compacted
+document's durable head includes its compaction floor, even when no raw
+operation rows remain. This permits checkpoints and owner restores from
+retained snapshots, including snapshots restored through a
+[signed history archive](CONCORDPACK.md).
 
 ## 5. Restore semantics (forward-moving, auditable)
 

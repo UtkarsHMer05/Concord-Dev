@@ -264,6 +264,26 @@ const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS review_merges_branch_idx ON review_merges(branch_document_id, created_at);
         "#,
     },
+    Migration {
+        version: 7,
+        name: "signed Concordpack import provenance",
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS concordpack_imports (
+            request_id UUID PRIMARY KEY,
+            document_id UUID NOT NULL UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
+            actor_id UUID NOT NULL REFERENCES users(id),
+            archive_checksum CHAR(64) NOT NULL,
+            archive BYTEA NOT NULL,
+            archive_manifest JSONB NOT NULL,
+            trust_record JSONB NOT NULL,
+            destination_title TEXT NOT NULL,
+            sequence_map JSONB NOT NULL,
+            snapshot_map JSONB NOT NULL,
+            revision_map JSONB NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        "#,
+    },
 ];
 
 /// Applies all pending migrations idempotently, including concurrent starts

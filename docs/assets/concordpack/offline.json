@@ -1,0 +1,39 @@
+{
+  "result": "verified",
+  "documentId": "83f64b80-091e-4cab-89bb-3c736035ad24",
+  "seq": "362",
+  "baseSnapshotSeq": "0",
+  "stateDigest": "sha256:15e732888a8fcbed41cb47193d5f8ea00e8fb5d1b3ef15791a7a3c9f28f71b51",
+  "keyId": "a534548388c97ba3",
+  "operationCount": 210,
+  "snapshotCount": 2,
+  "revisions": [
+    {
+      "revisionId": "438394d4-b810-4667-a7fa-39fc685e7a88",
+      "seq": "301",
+      "kind": "named",
+      "label": "RFC baseline",
+      "createdBy": "cec05a10-7a1c-47ad-858b-180dd28df52b",
+      "createdAtMs": "1790795273792",
+      "snapshotId": null,
+      "restoreSourceRevision": null,
+      "stateDigest": "sha256:22f9ca3fa3f5ff55fa567854621522b54b3a6a6d861c1140e864881f68a82731"
+    },
+    {
+      "revisionId": "573276f1-bc83-4e2b-858f-8a8f1392f9c0",
+      "seq": "362",
+      "kind": "named",
+      "label": "RFC recovery plan",
+      "createdBy": "cec05a10-7a1c-47ad-858b-180dd28df52b",
+      "createdAtMs": "1790795274091",
+      "snapshotId": null,
+      "restoreSourceRevision": null,
+      "stateDigest": "sha256:15e732888a8fcbed41cb47193d5f8ea00e8fb5d1b3ef15791a7a3c9f28f71b51"
+    }
+  ],
+  "guarantee": "Signature authenticates the trusted server's statement; it does not prove physical persistence.",
+  "sourceServersStopped": true,
+  "serviceEnvironmentCleared": true,
+  "corruptionRejected": true,
+  "untrustedSignerRejected": true
+}

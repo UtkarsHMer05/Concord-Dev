@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { proxyRevisionRequest, proxyBranchRequest } from "@/server/gateway-history-proxy";
+import { proxyRevisionRequest, proxyBranchRequest, proxyConcordpackRequest } from "@/server/gateway-history-proxy";
 
 const documentId = "11111111-1111-4111-8111-111111111111";
 const revisionId = "22222222-2222-4222-8222-222222222222";
@@ -11,6 +11,25 @@ afterEach(() => {
 });
 
 describe("history gateway proxy", () => {
+  it("forwards binary archives only to fixed paths with bounded, authenticated import context", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SYNC_GATEWAY_URL", "wss://sync.example.test/api/v1/sync");
+    const upstream = vi.fn().mockImplementation(() => Promise.resolve(new Response("ok"))); vi.stubGlobal("fetch", upstream);
+    const headers = { authorization: "Bearer token", "content-type": "application/vnd.concord.concordpack" };
+    expect((await proxyConcordpackRequest(new Request("http://app.test", { headers }), documentId)).status).toBe(200);
+    expect(upstream.mock.calls[0][0].toString()).toBe(`https://sync.example.test/api/v1/documents/${documentId}/concordpack`);
+    const query = new URLSearchParams({ requestId: revisionId, title: "Restored RFC", documentId, seq: "12", baseSnapshotSeq: "3", publicKey: "a".repeat(64), workspace: "personal" });
+    const binary = Uint8Array.of(1, 2, 3);
+    const make = (params: URLSearchParams, extra = {}) => new Request(`http://app.test/import?${params}`, { method: "POST", headers: { ...headers, ...extra }, body: binary });
+    expect((await proxyConcordpackRequest(make(query))).status).toBe(200);
+    const [url, init] = upstream.mock.calls[1];
+    expect(url.pathname).toBe("/api/v1/concordpack/import"); expect(url.searchParams.get("publicKey")).toBe("a".repeat(64));
+    expect(init.body).toEqual(binary); expect(init).toMatchObject({ cache: "no-store", redirect: "error" });
+    const invalid = new URLSearchParams(query); invalid.set("targetUrl", "https://attacker.test");
+    expect((await proxyConcordpackRequest(make(invalid))).status).toBe(400);
+    expect((await proxyConcordpackRequest(make(query, { "content-length": String(65 * 1024 * 1024) }))).status).toBe(413);
+    expect((await proxyConcordpackRequest(new Request("http://app.test/import", { method: "POST", body: binary }))).status).toBe(401);
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
   it("forwards review requests only to the configured gateway and rejects path escapes", async () => {
     vi.stubEnv("NEXT_PUBLIC_SYNC_GATEWAY_URL", "wss://sync.example.test/api/v1/sync");
     const upstream = vi.fn().mockResolvedValue(new Response('{"duplicate":true}', { status: 200 })); vi.stubGlobal("fetch", upstream);

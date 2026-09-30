@@ -114,6 +114,10 @@ public:
     void restore_allocation_state(std::uint64_t next_counter_value, std::uint64_t lamport_value);
 
     [[nodiscard]] StateSummary state_summary() const;
+    // Every identity represented by retained state, including causally early
+    // operations and their missing references. Used to quarantine imported
+    // history; a contiguous-counter summary alone omits pending writers.
+    [[nodiscard]] std::vector<ReplicaId> historical_replicas() const;
     [[nodiscard]] DocDiagnostics diagnostics() const;
 
     // Canonical SHA-256 digest over the full CRDT state (M021). Equivalent

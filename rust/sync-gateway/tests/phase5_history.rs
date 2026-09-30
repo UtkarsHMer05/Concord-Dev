@@ -1065,21 +1065,18 @@ async fn restore_requires_owner_and_anchors_the_target() {
         Some(ev.revision_id)
     );
 
-    // Restore of a PRUNED target errors RestoreTargetPruned.
+    // Pruning the log does not destroy a retained exact restore anchor.
     let pruned_boundary = b_t;
     let deleted = prune_to_boundary(&db, &svc.snapshots, f.doc, pruned_boundary, 4)
         .await
         .expect("prune to the restore boundary (covered by the anchor)");
     assert!(deleted >= 1, "covered rows pruned");
-    let err = svc
+    let retained = svc
         .restore_revision(f.doc, f.owner, source.revision_id)
         .await
-        .expect_err("pruned target must refuse");
-    assert!(
-        matches!(err, HistoryError::RestoreTargetPruned { boundary, floor }
-            if boundary == b_t && floor == b_t),
-        "got {err:?}"
-    );
+        .expect("exact retained anchor remains restorable");
+    assert!(retained.reused_existing_snapshot);
+    assert_eq!(retained.target_state_digest, outcome.target_state_digest);
 
     // H5 negative IDOR: a revision id from ANOTHER document is not
     // found (never leaks cross-document state).
@@ -1110,10 +1107,10 @@ async fn restore_requires_owner_and_anchors_the_target() {
         .list_revisions(f.doc, f.owner, 50)
         .await
         .expect("listing still works after restore + new ops");
-    // Audit trail: 1 named source + 3 restore_events (initial, second,
-    // restore-of-restore) = 4 rows, all retained (H6: restore never
+    // Audit trail: 1 named source + 4 restore_events (initial, second,
+    // restore-of-restore, retained anchor after compaction) = 5 rows, all retained (H6: restore never
     // touches history).
-    assert_eq!(listed.len(), 4, "audit trail fully retained");
+    assert_eq!(listed.len(), 5, "audit trail fully retained");
 
     cleanup(&db, &f).await;
 }
@@ -1203,7 +1200,7 @@ async fn create_revision_rejects_boundary_above_high_water() {
 /// already refuses pruned targets (RestoreTargetPruned) — creation
 /// must too (InvalidBoundary).
 #[tokio::test]
-async fn create_revision_rejects_boundary_at_or_below_compaction_floor() {
+async fn compacted_checkpoints_require_a_retained_reconstruction_basis() {
     let Some(db) = test_db().await else { return };
     let Some(workers) = live_worker_pool() else {
         return;
@@ -1255,43 +1252,29 @@ async fn create_revision_rejects_boundary_at_or_below_compaction_floor() {
         matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == b6),
         "got {err:?}"
     );
-    // Some(head): the window is EXCLUSIVE at the floor (head <= floor)
-    // — the revision's ENTIRE op basis is pruned and the floor snapshot
-    // anchors coverage == head, which cannot serve a boundary-head
-    // tail replay. Refuse.
-    let err = svc
+    // A finalized snapshot at the floor fully represents the current state.
+    // No operation tail is needed. The durable head must survive compaction.
+    let at = svc
         .create_revision(f.doc, f.owner, revision_kind::NAMED, Some("at"), Some(head))
         .await
-        .expect_err("boundary at the floor must be refused");
-    assert!(
-        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == head),
-        "got {err:?}"
+        .expect("exact retained head");
+    assert_eq!(
+        svc.revision_content(f.doc, f.owner, at.revision_id)
+            .await
+            .unwrap()
+            .state_digest,
+        _d
     );
-
-    // None (current high-water): also refused — after pruning to the
-    // head the durable log is EMPTY, so the COALESCE high-water is 0
-    // and 0 <= floor(head) fails the window. This is CORRECT
-    // fail-closed behavior: a revision cannot exist at a boundary
-    // whose basis is fully pruned with no later ops. (The resolved
-    // boundary in the error is the post-prune high-water 0, not the
-    // floor — the guard reports the boundary it tried to pin.)
-    let err = svc
+    let now = svc
         .create_revision(f.doc, f.owner, revision_kind::NAMED, Some("now"), None)
         .await
-        .expect_err("None boundary on a fully-pruned log must fail closed");
-    assert!(
-        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == 0),
-        "got {err:?}"
-    );
-    // Internal entry point agrees (same guard, no actor needed).
-    let err = svc
+        .expect("None pins compacted head");
+    assert_eq!(now.target_seq, head);
+    let auto = svc
         .create_auto_checkpoint(f.doc, None, None, None)
         .await
-        .expect_err("auto checkpoint at the floor must fail closed too");
-    assert!(
-        matches!(err, HistoryError::InvalidBoundary { .. }),
-        "got {err:?}"
-    );
+        .expect("auto checkpoint uses the same retained basis");
+    assert_eq!(auto.target_seq, head);
 
     // Once two more ops land, the new high-water is strictly above
     // the floor — the None default is valid again and pins it.
@@ -1307,7 +1290,11 @@ async fn create_revision_rejects_boundary_at_or_below_compaction_floor() {
         .list_revisions(f.doc, f.owner, 50)
         .await
         .expect("listing works");
-    assert_eq!(listed.len(), 1, "only the post-floor revision exists");
+    assert_eq!(
+        listed.len(),
+        4,
+        "retained head and post-floor revisions exist"
+    );
 
     cleanup(&db, &f).await;
 }
@@ -1378,15 +1365,12 @@ async fn auto_checkpoint_rejects_invalid_boundaries() {
         matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == b3),
         "got {err:?}"
     );
-    // Some(b6): at the floor — refuse (window is floor-EXCLUSIVE).
-    let err = svc
+    // The exact floor snapshot makes b6 reconstructable without its log.
+    let at = svc
         .create_auto_checkpoint(f.doc, Some(b6), None, None)
         .await
-        .expect_err("at floor must be refused");
-    assert!(
-        matches!(err, HistoryError::InvalidBoundary { boundary } if boundary == b6),
-        "got {err:?}"
-    );
+        .expect("retained floor checkpoint");
+    assert_eq!(at.target_seq, b6);
     // Some(head): current high-water, above the floor — valid.
     let ok = svc
         .create_auto_checkpoint(f.doc, Some(head), None, Some(f.owner))
@@ -1405,7 +1389,7 @@ async fn auto_checkpoint_rejects_invalid_boundaries() {
         .list_revisions(f.doc, f.owner, 50)
         .await
         .expect("listing works");
-    assert_eq!(listed.len(), 3, "only the accepted checkpoints exist");
+    assert_eq!(listed.len(), 4, "only the accepted checkpoints exist");
 
     cleanup(&db, &f).await;
 }
@@ -1495,16 +1479,23 @@ async fn revision_created_above_floor_reconstructs_correctly_after_prune() {
     let remaining = svc.repo.catchup_page(f.doc, 0, 100).await.expect("page");
     assert_eq!(remaining.ops.len(), 6, "only the ops above b6 remain");
 
-    // The guard also holds for FUTURE creations at the now-pruned
-    // boundaries (floor b6): Some(b6) is refused; Some(head) and None
-    // stay valid (head > floor b6).
-    let err = svc
-        .create_revision(f.doc, f.owner, revision_kind::NAMED, Some("gone"), Some(b6))
+    // A new checkpoint can reuse the retained snapshot at the floor.
+    let at = svc
+        .create_revision(
+            f.doc,
+            f.owner,
+            revision_kind::NAMED,
+            Some("snapshot checkpoint"),
+            Some(b6),
+        )
         .await
-        .expect_err("boundary at the new floor must be refused");
-    assert!(
-        matches!(err, HistoryError::InvalidBoundary { .. }),
-        "got {err:?}"
+        .expect("exact retained snapshot");
+    assert_eq!(
+        svc.revision_content(f.doc, f.owner, at.revision_id)
+            .await
+            .unwrap()
+            .covered_by_snapshot,
+        Some(snap6)
     );
 
     cleanup(&db, &f).await;

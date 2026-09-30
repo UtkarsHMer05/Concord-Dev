@@ -681,7 +681,7 @@ pub fn validate_integrity(
 /// Maps a fetched row to the typed [`SnapshotRow`]. The status string is
 /// stored verbatim (the DB CHECK constraint is its authority); see the
 /// [`status`] constants.
-fn row_to_snapshot(row: &tokio_postgres::Row) -> SnapshotRow {
+pub(crate) fn row_to_snapshot(row: &tokio_postgres::Row) -> SnapshotRow {
     SnapshotRow {
         snapshot_id: row.get("snapshot_id"),
         document_id: row.get("document_id"),

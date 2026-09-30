@@ -10,6 +10,7 @@
 #include "concord/crdt/doc.hpp"
 
 #include <algorithm>
+#include <set>
 
 namespace concord::crdt {
 
@@ -565,6 +566,21 @@ StateSummary Doc::state_summary() const {
         summary.contiguous.emplace(replica_key, counter_value);
     }
     return summary;
+}
+
+std::vector<ReplicaId> Doc::historical_replicas() const {
+    std::set<ReplicaId> replicas;
+    const auto add = [&replicas](const std::optional<OpId>& id) {
+        if (id.has_value() && ReplicaId::is_valid(id->replica.value())) replicas.insert(id->replica);
+    };
+    for (const auto& id : applied_) replicas.insert(id.replica);
+    for (const auto& item : items_) {
+        replicas.insert(item.id.replica); add(item.left); add(item.right);
+    }
+    for (const auto& op : pending_) {
+        replicas.insert(op.id.replica); add(op.left); add(op.right); add(op.target);
+    }
+    return {replicas.begin(), replicas.end()};
 }
 
 DocDiagnostics Doc::diagnostics() const {

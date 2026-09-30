@@ -29,6 +29,7 @@ doc must be fixed):
 | Sync gateway | `rust/sync-gateway/src/config.rs` (`Config::from_env()`, exit code 2 on config error, exit code 3 on DB/migration failure) |
 | Connect-rate override | `rust/sync-gateway/src/ephemeral/ratelimit.rs` |
 | Native worker | binary path contract via `GATEWAY_WORKER_BINARY` (validated by config.rs) |
+| Signed history | `maintenance/proofs.rs`, `maintenance/concordpack.rs`, and `http/concordpack.rs` (stable signer and destination import policy) |
 
 ## Scope conventions
 
@@ -137,6 +138,22 @@ The worker is not env-configured — it is a **binary path contract**:
   validated at gateway startup (exit 2 if not a file).
 - The worker protocol is deterministic frame-based (commands 1–9); see
   docs/OPERATIONS.md § "Native recovery worker".
+
+### Signed history archives
+
+These feature settings are checked by the signing/import path, separately from
+the general environment validation script. They do not prevent an otherwise
+configured gateway from serving normal collaboration.
+
+| Variable | Default | Contract |
+|---|---|---|
+| `GATEWAY_SIGNING_KEY` | ephemeral receipt key | Server-only 32-byte Ed25519 seed, encoded as 64 hexadecimal characters. Missing/invalid uses an ephemeral key for existing receipts; **signed history export refuses with 503** until a stable seed is configured. Keep the seed in runtime secrets. |
+| `GATEWAY_TRUSTED_IMPORT_KEYS` | no additional keys | Comma-separated independently approved **public keys**, each exactly 64 lowercase hexadecimal characters. The gateway's own stable public key is also allowed. Unknown signers return 400; malformed policy returns 503. No key from an incoming archive is automatically approved. |
+
+Both import and export require a configured native worker. Import creates a
+private personal document for the authenticated user, with no copied source
+permissions. See [CONCORDPACK.md](CONCORDPACK.md) for separate recipient trust,
+offline verification, retention limits, and the restore workflow.
 
 ## Infrastructure
 

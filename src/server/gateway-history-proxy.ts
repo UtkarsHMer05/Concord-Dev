@@ -1,7 +1,7 @@
 import "server-only";
 
 import { parseSyncGatewayOrigin } from "@/server/env";
-import { readJsonRequest } from "@/server/request-body";
+import { readJsonRequest, readRequestBytes } from "@/server/request-body";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY_BYTES = 4096;
@@ -44,6 +44,47 @@ function proofUrl(documentId: string, seq: string | null): URL | null {
   } catch {
     return null;
   }
+}
+
+/** Fixed archive paths: the caller cannot select an upstream host or path. */
+export async function proxyConcordpackRequest(request: Request, documentId?: string, provenance = false): Promise<Response> {
+  if (documentId !== undefined && !UUID.test(documentId)) return jsonError(404, "not_found");
+  const importing = documentId === undefined;
+  if (request.method !== (importing ? "POST" : "GET")) return jsonError(405, "method_not_allowed");
+  const authorization = request.headers.get("authorization");
+  if (!authorization || authorization.length > 16_384 || !/^Bearer\s+\S+$/i.test(authorization)) return jsonError(401, "unauthorized");
+  const target = gatewayUrl(documentId ?? "");
+  if (!target) return jsonError(503, "concordpack_unavailable");
+  target.pathname = target.pathname.replace(/\/documents\/[^/]*\/revisions$/, importing
+    ? "/concordpack/import" : `/documents/${documentId}/concordpack${provenance ? "/provenance" : ""}`);
+  let body: Uint8Array<ArrayBuffer> | undefined;
+  if (importing) {
+    const query = new URL(request.url).searchParams;
+    const required = ["requestId", "title", "publicKey", "documentId", "seq", "baseSnapshotSeq", "workspace"];
+    if (required.some((key) => query.getAll(key).length !== 1) || [...query.keys()].some((key) =>
+      ![...required, "revisionId"].includes(key) || query.getAll(key).length !== 1)) return jsonError(400, "invalid_request");
+    if (!UUID.test(query.get("requestId")!) || !UUID.test(query.get("documentId")!) ||
+      (query.has("revisionId") && !UUID.test(query.get("revisionId")!)) ||
+      !/^[0-9a-f]{64}$/.test(query.get("publicKey")!) || query.get("workspace") !== "personal" ||
+      !query.get("title")!.trim() || Array.from(query.get("title")!).length > 200 ||
+      ["seq", "baseSnapshotSeq"].some((key) => !/^(0|[1-9][0-9]{0,18})$/.test(query.get(key)!) || BigInt(query.get(key)!) > 9223372036854775807n)) return jsonError(400, "invalid_request");
+    target.search = query.toString();
+    if (request.headers.get("content-type") !== "application/vnd.concord.concordpack") return jsonError(415, "concordpack_content_type_required");
+    try {
+      const bytes = await readRequestBytes(request, 64 * 1024 * 1024);
+      if (bytes instanceof Response) return bytes;
+      body = bytes;
+    } catch { return jsonError(400, "invalid_request"); }
+  }
+  try {
+    const response = await fetch(target, { method: request.method, headers: { authorization,
+      ...(body ? { "content-type": "application/vnd.concord.concordpack" } : {}) }, body,
+      cache: "no-store", redirect: "error", signal: AbortSignal.timeout(600_000) });
+    return new Response(response.body, { status: response.status, headers: {
+      "Cache-Control": "no-store", "Content-Type": response.headers.get("content-type") ?? "application/json",
+      ...(response.headers.get("content-disposition") ? { "Content-Disposition": response.headers.get("content-disposition")! } : {}),
+    } });
+  } catch { return jsonError(503, "concordpack_unavailable"); }
 }
 
 async function checkpointBody(request: Request): Promise<{ label: string; targetSeq?: number } | Response> {

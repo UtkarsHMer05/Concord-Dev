@@ -103,12 +103,9 @@ async fn lock(tx: &Transaction<'_>, document: Uuid) -> Result<(), BranchError> {
 
 async fn cursor(tx: &Transaction<'_>, document: Uuid) -> Result<i64, BranchError> {
     Ok(tx
-        .query_one(
-            "SELECT COALESCE(MAX(id), 0)::bigint AS seq FROM crdt_operations WHERE document_id=$1",
-            &[&document],
-        )
+        .query_one(crate::db::repo::DURABLE_CURSOR_QUERY, &[&document])
         .await?
-        .get("seq"))
+        .get("cursor"))
 }
 
 fn branch_json(row: &Row) -> Value {

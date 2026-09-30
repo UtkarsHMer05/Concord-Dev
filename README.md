@@ -34,6 +34,8 @@ proposals, and shared notes. Create a document, write and format it with
 teammates, keep editing through a disconnection, and review proposed changes
 on a separate branch before merging them into the shared document. Comments,
 checkpoints, and version history keep the discussion connected to the work.
+Signed history archives let you verify an exported document independently
+and carry its retained revisions to another Concord instance.
 
 Each browser keeps a durable local copy. A custom C++ conflict-free replicated
 data type (CRDT), compiled to WebAssembly, merges concurrent edits; a Rust
@@ -54,7 +56,8 @@ project's core engineering.
 | **Comments and suggestions** | Attach discussions to document ranges, resolve threads, and propose text changes for acceptance or rejection. Pending comment actions have an offline outbox. |
 | **History and restore** | Save named checkpoints, preview durable revisions, and restore an earlier version as new edits. A local replay inspector lets you step through the browser's operation log. |
 | **Sharing and permissions** | Grant owner, editor, commenter, or viewer access. The server checks document permissions for requests and sync batches, including revocation. |
-| **Markdown and portable bundles** | Import/export the supported Markdown subset and export a `.concordpack` with checksums, document digests, Merkle proofs, and a signed server receipt. |
+| **Signed history archives** | Export retained operations, snapshots, and revision provenance; verify them locally or with the standalone offline CLI using a separately trusted key; restore them into a new private document. |
+| **Markdown and content bundles** | Import/export the supported Markdown subset, inspect a local content bundle, or apply supported visible content as new edits. |
 | **Installable workspace** | Install the production PWA and reopen previously cached documents and editor assets offline. |
 | **Collaboration failure lab** | Replay disconnections, duplicate delivery, lost acknowledgements, and recovery; inspect replica states, download traces, and reduce a known failure to a smaller reproduction. |
 
@@ -66,6 +69,30 @@ document, and lets the reviewer choose individual changes. A saved merge can
 be retried after a lost response without applying it twice.
 
 ![Review branch comparison showing conflicts, selected changes, and the merge action](docs/assets/review-branches/comparison.png)
+
+### Take your document history with you
+
+Export a signed `.concordpack`, verify its signature and reconstructed states
+with separately trusted verification details, and restore it into a new
+document on another instance. Retained operation identities and saved revisions
+survive the move. The recipient owns the private copy and chooses who can
+access it; original author IDs remain in provenance.
+
+The standalone verifier works with the original server stopped. A modified
+archive or an unexpected signer is rejected, and a retry after a lost import
+response returns the same document.
+
+![Restored document with its original named revisions and matching historical preview](docs/assets/concordpack/history.png)
+
+<details>
+<summary><strong>See verification before restoration</strong></summary>
+
+The browser checks the trusted source, saved version, file checksums, and
+retained revision states before enabling restoration:
+
+![Locally verified archive, retained history counts, rich-text preview, and private restoration action](docs/assets/concordpack/verified.png)
+
+</details>
 
 <details>
 <summary><strong>See rich-text collaboration and offline recovery</strong></summary>
@@ -86,7 +113,8 @@ An older worker receives an explicit upgrade path while local data is retained:
 
 Feature guides: [rich-text collaboration](docs/RICH_TEXT_COLLABORATION.md),
 [review branches](docs/REVIEW_BRANCHES.md), and
-[history, comments, replay, and bundles](docs/REVIEW_TOOLS.md).
+[signed history archives](docs/CONCORDPACK.md). See
+[review tools](docs/REVIEW_TOOLS.md) for comments, replay, and local bundles.
 
 ## Architecture
 
@@ -233,6 +261,14 @@ and browser prerequisites. Authenticated browser runs use disposable Clerk
 users and a dedicated test database; they are separate from the remote CI
 jobs shown by the badges.
 
+The [signed-history verification report](docs/audits/CONCORDPACK_REPORT.md)
+adds a production Chromium journey across separate source and destination
+instances: offline verification after source shutdown, rejection checks,
+matching saved revisions, private ownership, retry after response loss,
+continued editing and history restore, plus keyboard and mobile checks.
+Run it with `CONCORD_E2E_MODE=production npm run test:concordpack:browser`;
+the [archive guide](docs/CONCORDPACK.md#verification) lists its prerequisites.
+
 ## Getting started
 
 **Prerequisites:** Node.js 24, Docker Compose, and a Clerk development instance
@@ -288,10 +324,16 @@ public/    Editor assets, CRDT worker, and bundled WASM
 - Concurrent rich-text collaboration covers the subset listed above. Tables,
   images, blockquotes, and code blocks use whole-document persistence with an
   explicit local-only mode. Incompatible clients receive an upgrade path.
-- Markdown round-tripping has a defined subset and loss warnings. Bundle
-  verification checks integrity and a server's signed statement; independent
-  trust requires a separately trusted signing key. Import into a new document
-  while preserving the full retained operation history is future work.
+- Signed history archives preserve retained CRDT history in a new personal
+  document. They require a stable server signing key and separately trusted
+  verification details; the destination must authorize that signer. Source
+  permissions, comments, and branch relationships are not imported. Previously
+  pruned states remain unavailable. Archives are bounded to 64 MiB, 200
+  revisions, and 500 snapshots; oversized exports fail explicitly.
+- Markdown round-tripping has a defined subset and loss warnings. Local v1
+  content bundles remain compatible and apply visible content as new edits.
+  A trusted signature authenticates the server's statement; it does not prove
+  physical storage durability.
 - Verification covers local infrastructure and authenticated browser runs.
   Hosted operation, authenticated browser CI, and a fresh container release
   scan require separate acceptance. The documented data tier is single-node
@@ -303,6 +345,7 @@ public/    Editor assets, CRDT worker, and bundled WASM
 |---|---|
 | System design and engineering decisions | [Engineering brief](docs/ENGINEERING_BRIEF.md) · [Architecture](docs/ARCHITECTURE.md) · [Decisions](docs/DECISIONS.md) |
 | Sync and recovery contracts | [Protocol](docs/PROTOCOL.md) · [Consistency](docs/CONSISTENCY_MODEL.md) · [Recovery](docs/RECOVERY.md) |
+| Portable document history | [Signed archives and offline verification](docs/CONCORDPACK.md) · [Acceptance report](docs/audits/CONCORDPACK_REPORT.md) |
 | Security and permissions | [Security](docs/SECURITY.md) · [Authorization](docs/AUTHORIZATION.md) |
 | Measurements and validation | [Benchmarks](docs/BENCHMARKS.md) · [Testing](docs/TESTING.md) · [Verification](docs/VERIFICATION.md) |
 | Running and operating the stack | [Configuration](docs/CONFIGURATION.md) · [Operations](docs/OPERATIONS.md) · [Deployment](docs/DEPLOYMENT.md) |
@@ -311,7 +354,8 @@ public/    Editor assets, CRDT worker, and bundled WASM
 Detailed implementation evidence is preserved in the
 [rich-text report](docs/audits/RICH_TEXT_COLLABORATION_REPORT.md),
 [review-branches report](docs/audits/REVIEW_BRANCHES_REPORT.md), and
-[failure-lab report](docs/audits/FAILURE_LAB_REPORT.md).
+[failure-lab report](docs/audits/FAILURE_LAB_REPORT.md), and
+[signed-history report](docs/audits/CONCORDPACK_REPORT.md).
 
 ## Attribution and license
 

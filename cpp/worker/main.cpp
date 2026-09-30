@@ -111,6 +111,7 @@ constexpr std::uint32_t kCmdRestoreDiff = 7;       // two snapshots -> forward-r
 constexpr std::uint32_t kCmdVisibleAfter = 8;      // optional snapshot + tail ops -> visible JSON
 constexpr std::uint32_t kCmdFoldAfter = 9;         // snapshot + tail ops -> digest + folded snapshot
 constexpr std::uint32_t kCmdMergeDiff = 10;       // selected block ranges -> verified forward ops
+constexpr std::uint32_t kCmdSnapshotReplicas = 11; // snapshot -> digest + historical replica ids
 
 // Status codes.
 constexpr std::uint32_t kStatusOk = 0;
@@ -359,6 +360,7 @@ enum class ParseResult { Ok, Malformed, VersionUnsupported, OpApplyError, SizeEx
         case kCmdExportSnapshot:
             return read_op_batches(frame, offset, body, error);
         case kCmdImportVerify:
+        case kCmdSnapshotReplicas:
         case kCmdVerifySnapshot: {
             const ParseResult result = read_snapshot_into(frame, offset, body.snapshot, error);
             if (result != ParseResult::Ok) {
@@ -1655,6 +1657,20 @@ struct CommandResult {
             case kCmdVerifySnapshot: {
                 const crdt::Doc doc = crdt::Doc::import_snapshot(kMaintenanceReplica, body.snapshot);
                 result.digest = doc.canonical_digest();
+                return result;
+            }
+            case kCmdSnapshotReplicas: {
+                const crdt::Doc doc = crdt::Doc::import_snapshot(kMaintenanceReplica, body.snapshot);
+                result.digest = doc.canonical_digest();
+                result.visible_state = true;
+                result.visible_json = "[";
+                bool first = true;
+                for (const auto replica : doc.historical_replicas()) {
+                    if (!first) result.visible_json += ",";
+                    first = false;
+                    result.visible_json += "\"" + std::to_string(replica.value()) + "\"";
+                }
+                result.visible_json += "]";
                 return result;
             }
             case kCmdDigestAfter: {
