@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "date": "2026-09-30",
+  "webMode": "production",
+  "browser": "Chromium",
+  "stages": [
+    "named revision creates a separate rich CRDT branch with independent sharing",
+    "author edits offline; main edits concurrently; reconnect and reload keep both documents independent",
+    "explicit branch commenter invitation, anchored review feedback, separate main ACL, no reviewer merge/edit access",
+    "selective merge preserves main conflict, unrelated main edits and omitted branch change; lost-response recovery commits once",
+    "merge source/result appear in history; branch comments and untouched main anchors and nested task state survive",
+    "explicit Use branch conflict resolution preserves unrelated edits; visible service failure and saved retry, responsive panel and accessibility check pass"
+  ],
+  "mergeRecords": 2,
+  "recoveryProducedNoExtraOps": true,
+  "criticalOrSeriousPanelAccessibilityViolations": 0
+}

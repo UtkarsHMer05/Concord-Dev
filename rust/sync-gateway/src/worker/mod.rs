@@ -38,6 +38,7 @@ pub mod cmd {
     pub const RESTORE_DIFF: u32 = 7;
     pub const VISIBLE_AFTER: u32 = 8;
     pub const FOLD_AFTER: u32 = 9;
+    pub const MERGE_DIFF: u32 = 10;
 }
 
 /// Worker status codes (mirrors cpp/worker/main.cpp).
@@ -425,65 +426,89 @@ impl WorkerPool {
         put_u32le(&mut body, target_snapshot.len() as u32);
         body.extend_from_slice(target_snapshot);
         let frame = self.request_frame(cmd::RESTORE_DIFF, body).await?;
-        let mut offset = 0usize;
-        let get_u32 = |f: &[u8], o: usize| -> Option<u32> {
-            f.get(o..o + 4)
-                .map(|b| u32::from_le_bytes(b.try_into().expect("4")))
-        };
-        let Some(status_code) = get_u32(&frame, offset) else {
-            return Err(WorkerError::MalformedResponse("short status".into()));
-        };
-        offset += 4;
-        if status_code != status::OK {
-            let Some(msg_len) = get_u32(&frame, offset) else {
-                return Err(WorkerError::MalformedResponse(
-                    "error length missing".into(),
-                ));
-            };
-            offset += 4;
-            let Some(bytes) = frame.get(offset..offset + msg_len as usize) else {
-                return Err(WorkerError::MalformedResponse(
-                    "error message truncated".into(),
-                ));
-            };
-            return Err(WorkerError::Status {
-                status: status_code,
-                message: String::from_utf8_lossy(bytes).trim().to_string(),
-            });
-        }
-        let Some(digest_len) = get_u32(&frame, offset) else {
-            return Err(WorkerError::MalformedResponse(
-                "digest length missing".into(),
-            ));
-        };
-        offset += 4;
-        let Some(digest_bytes) = frame.get(offset..offset + digest_len as usize) else {
-            return Err(WorkerError::MalformedResponse("digest truncated".into()));
-        };
-        let digest = String::from_utf8(digest_bytes.to_vec())
-            .map_err(|_| WorkerError::MalformedResponse("digest not utf-8".into()))?;
-        offset += digest_len as usize;
-        let Some(batch_len) = get_u32(&frame, offset) else {
-            return Err(WorkerError::MalformedResponse(
-                "batch length missing".into(),
-            ));
-        };
-        offset += 4;
-        let Some(batch) = frame.get(offset..offset + batch_len as usize) else {
-            return Err(WorkerError::MalformedResponse("batch truncated".into()));
-        };
-        let batch = batch.to_vec();
-        offset += batch_len as usize;
-        if offset != frame.len() {
-            return Err(WorkerError::MalformedResponse(
-                "trailing bytes in restore diff".into(),
-            ));
-        }
-        Ok(RestoreDiff {
-            target_digest: digest,
-            batch,
-        })
+        decode_restore_diff(&frame)
     }
+
+    /// Selectively replace reviewed block ranges, retaining unrelated item IDs.
+    /// The native worker proves the resulting visible document before emitting REST ops.
+    pub async fn merge_diff(
+        &self,
+        current: &[u8],
+        source: &[u8],
+        ranges: &[[u32; 4]],
+    ) -> Result<RestoreDiff, WorkerError> {
+        let mut body = encode_snapshot_only(current);
+        body.extend(encode_snapshot_only(source));
+        put_u32le(&mut body, ranges.len() as u32);
+        for range in ranges {
+            for value in range {
+                put_u32le(&mut body, *value);
+            }
+        }
+        let frame = self.request_frame(cmd::MERGE_DIFF, body).await?;
+        decode_restore_diff(&frame)
+    }
+}
+
+fn decode_restore_diff(frame: &[u8]) -> Result<RestoreDiff, WorkerError> {
+    let mut offset = 0usize;
+    let get_u32 = |f: &[u8], o: usize| -> Option<u32> {
+        f.get(o..o + 4)
+            .map(|b| u32::from_le_bytes(b.try_into().expect("4")))
+    };
+    let Some(status_code) = get_u32(frame, offset) else {
+        return Err(WorkerError::MalformedResponse("short status".into()));
+    };
+    offset += 4;
+    if status_code != status::OK {
+        let Some(msg_len) = get_u32(frame, offset) else {
+            return Err(WorkerError::MalformedResponse(
+                "error length missing".into(),
+            ));
+        };
+        offset += 4;
+        let Some(bytes) = frame.get(offset..offset + msg_len as usize) else {
+            return Err(WorkerError::MalformedResponse(
+                "error message truncated".into(),
+            ));
+        };
+        return Err(WorkerError::Status {
+            status: status_code,
+            message: String::from_utf8_lossy(bytes).trim().to_string(),
+        });
+    }
+    let Some(digest_len) = get_u32(frame, offset) else {
+        return Err(WorkerError::MalformedResponse(
+            "digest length missing".into(),
+        ));
+    };
+    offset += 4;
+    let Some(digest_bytes) = frame.get(offset..offset + digest_len as usize) else {
+        return Err(WorkerError::MalformedResponse("digest truncated".into()));
+    };
+    let digest = String::from_utf8(digest_bytes.to_vec())
+        .map_err(|_| WorkerError::MalformedResponse("digest not utf-8".into()))?;
+    offset += digest_len as usize;
+    let Some(batch_len) = get_u32(frame, offset) else {
+        return Err(WorkerError::MalformedResponse(
+            "batch length missing".into(),
+        ));
+    };
+    offset += 4;
+    let Some(batch) = frame.get(offset..offset + batch_len as usize) else {
+        return Err(WorkerError::MalformedResponse("batch truncated".into()));
+    };
+    let batch = batch.to_vec();
+    offset += batch_len as usize;
+    if offset != frame.len() {
+        return Err(WorkerError::MalformedResponse(
+            "trailing bytes in restore diff".into(),
+        ));
+    }
+    Ok(RestoreDiff {
+        target_digest: digest,
+        batch,
+    })
 }
 
 /// A generated op stream (CMD_GENERATE_OPS): the digest of the final

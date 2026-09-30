@@ -386,7 +386,7 @@ impl RevisionService {
     /// same not-found the insert would produce; Forbidden-shaped
     /// callers have already authorized the document, so this is an
     /// internal-consistency error surfaced as Pg.
-    async fn resolve_boundary(
+    pub(crate) async fn resolve_boundary(
         tx: &Transaction<'_>,
         document: Uuid,
         candidate: Option<i64>,
@@ -651,7 +651,7 @@ impl RevisionService {
     /// Uses the same validated snapshot and fixed durable boundary as digest
     /// reconstruction, then asks the native CRDT worker for the visible
     /// blocks used by the editor's read-only history preview.
-    async fn visible_at_boundary(
+    pub(crate) async fn visible_at_boundary(
         &self,
         document: Uuid,
         boundary: i64,
@@ -1027,7 +1027,7 @@ impl RevisionService {
     /// bytes (worker fold of the log prefix ≤ boundary; the export
     /// shape CMD 1 emits). The boundary must be reconstructable —
     /// callers have already validated that.
-    async fn export_state_inner(
+    pub(crate) async fn export_state_inner(
         &self,
         document: Uuid,
         boundary: i64,
@@ -1051,7 +1051,7 @@ impl RevisionService {
 
 /// Splits ONE serialize_batch frame into per-op payloads (each DB row /
 /// envelope stores one raw op).
-fn split_batch_frame(frame: &[u8]) -> Vec<Vec<u8>> {
+pub(crate) fn split_batch_frame(frame: &[u8]) -> Vec<Vec<u8>> {
     let mut ops = Vec::new();
     if frame.is_empty() {
         return ops;

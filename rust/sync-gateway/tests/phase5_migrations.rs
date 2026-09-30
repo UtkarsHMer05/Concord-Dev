@@ -137,11 +137,11 @@ async fn phase5_tables_and_columns_exist() {
 }
 
 #[tokio::test]
-async fn gateway_migration_version_is_five_and_idempotent() {
+async fn gateway_migration_version_is_current_and_idempotent() {
     let Some(db) = test_db().await else { return };
     run_migrations(&db).await.expect("first apply");
     let v1 = current_version(&db).await.expect("version");
-    assert_eq!(v1, 5, "all gateway migrations must be applied");
+    assert_eq!(v1, 6, "all gateway migrations must be applied");
     run_migrations(&db).await.expect("re-apply");
     let v2 = current_version(&db).await.expect("version after re-apply");
     assert_eq!(v1, v2, "re-apply must be a no-op");
@@ -221,7 +221,7 @@ async fn phase5_applies_on_phase4_shaped_database() {
         .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
         .await
         .expect("cleanup disposable schema");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
     assert_eq!(fk_count, 1, "floor snapshot FK missing after apply");
 }
 

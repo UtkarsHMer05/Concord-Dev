@@ -16,6 +16,9 @@ use sync_gateway::db::migrations::run_migrations;
 use sync_gateway::db::pool::Db;
 use sync_gateway::db::repo::{GatewayRepo, UserId};
 use sync_gateway::db::snapshots::SnapshotRepo;
+use sync_gateway::maintenance::branches::{
+    BranchError, BranchService, CreateBranch, MergeRequest, Selection,
+};
 use sync_gateway::maintenance::history::{revision_kind, RevisionService};
 use sync_gateway::maintenance::{prune_to_boundary, HistoryError, JobRepo, SnapshotPipeline};
 use sync_gateway::protocol::envelope::validate_op;
@@ -223,6 +226,321 @@ fn service(db: &Db, workers: &WorkerPool) -> RevisionService {
         workers.clone(),
         JobRepo::new(db.clone()),
     )
+}
+
+fn review_edit(replica: u64, letter: u8, left: Option<(u64, u64)>) -> Vec<u8> {
+    let mut op = golden::golden_insert_op();
+    op[2..10].copy_from_slice(&replica.to_le_bytes());
+    op[10..18].copy_from_slice(&1u64.to_le_bytes());
+    op[18..26].copy_from_slice(&1000u64.to_le_bytes());
+    op[30] = letter;
+    if let Some((r, c)) = left {
+        op[26] = 1;
+        let mut anchor = r.to_le_bytes().to_vec();
+        anchor.extend(c.to_le_bytes());
+        op.splice(27..27, anchor);
+    }
+    validate_op(&op).expect("review edit fixture");
+    op
+}
+
+async fn review_fixture(db: &Db, workers: &WorkerPool) -> (Fixture, Uuid, BranchService) {
+    let f = fixture(db).await;
+    let svc = BranchService {
+        history: service(db, workers),
+    };
+    ingest(
+        &svc.history.repo,
+        f.owner,
+        f.doc,
+        &[golden::golden_insert_op(), golden::golden_delimiter_op()],
+    )
+    .await;
+    let base = svc
+        .history
+        .create_revision(f.doc, f.owner, revision_kind::NAMED, Some("RFC base"), None)
+        .await
+        .unwrap();
+    let branch = Uuid::new_v4();
+    let input = CreateBranch {
+        branch_id: branch,
+        base_revision_id: base.revision_id,
+        name: "Alice's RFC".into(),
+    };
+    let created = svc.create(f.doc, f.editor, input.clone()).await.unwrap();
+    let seed_count = svc.history.repo.durable_cursor(branch).await.unwrap();
+    assert_eq!(svc.create(f.doc, f.editor, input).await.unwrap(), created);
+    assert_eq!(
+        svc.history.repo.durable_cursor(branch).await.unwrap(),
+        seed_count,
+        "creation retry did not reseed"
+    );
+    ingest(
+        &svc.history.repo,
+        f.editor,
+        branch,
+        &[review_edit(0x777, b'A', None)],
+    )
+    .await;
+    ingest(
+        &svc.history.repo,
+        f.owner,
+        f.doc,
+        &[review_edit(0x888, b'B', Some((0xD4, 18)))],
+    )
+    .await;
+    (f, branch, svc)
+}
+
+fn reviewed_request(comparison: &serde_json::Value) -> MergeRequest {
+    let changes = comparison["changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0]["conflict"], false, "{comparison}");
+    MergeRequest {
+        request_id: Uuid::new_v4(),
+        expected_main_seq: comparison["mainSeq"].as_str().unwrap().into(),
+        expected_branch_seq: comparison["branchSeq"].as_str().unwrap().into(),
+        selections: vec![Selection {
+            id: changes[0]["id"].as_str().unwrap().into(),
+            resolution: "apply".into(),
+        }],
+    }
+}
+
+#[tokio::test]
+async fn shared_review_merge_rolls_back_before_commit_and_recovers_after_lost_response() {
+    let Some(db) = test_db().await else { return };
+    let Some(workers) = live_worker_pool() else {
+        return;
+    };
+    let (f, branch, svc) = review_fixture(&db, &workers).await;
+    let comparison = svc.compare(f.doc, branch, f.owner).await.unwrap();
+    let request = reviewed_request(&comparison);
+    let before = svc.history.repo.durable_cursor(f.doc).await.unwrap();
+    // Inject a process-failure equivalent at the last write, after the edit
+    // batch and revision rows but before COMMIT. Nothing may survive it.
+    let client = db.get().await.unwrap();
+    client.batch_execute(&format!("CREATE OR REPLACE FUNCTION review_test_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.branch_document_id='{branch}'::uuid THEN RAISE EXCEPTION 'injected merge interruption'; END IF; RETURN NEW; END $$; CREATE TRIGGER review_test_fail BEFORE INSERT ON review_merges FOR EACH ROW EXECUTE FUNCTION review_test_fail();")).await.unwrap();
+    let failed = svc.merge(f.doc, branch, f.owner, request.clone()).await;
+    client
+        .batch_execute(
+            "DROP TRIGGER review_test_fail ON review_merges; DROP FUNCTION review_test_fail();",
+        )
+        .await
+        .unwrap();
+    assert!(matches!(failed, Err(BranchError::Pg(_))));
+    assert_eq!(
+        svc.history.repo.durable_cursor(f.doc).await.unwrap(),
+        before
+    );
+    assert_eq!(
+        client
+            .query_one(
+                "SELECT count(*)::bigint FROM review_merges WHERE branch_document_id=$1",
+                &[&branch]
+            )
+            .await
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
+    assert_eq!(
+        client
+            .query_one(
+                "SELECT count(*)::bigint FROM crdt_revisions WHERE document_id=$1",
+                &[&f.doc]
+            )
+            .await
+            .unwrap()
+            .get::<_, i64>(0),
+        1,
+        "result revision also rolled back"
+    );
+    let outcome = svc
+        .merge(f.doc, branch, f.owner, request.clone())
+        .await
+        .unwrap();
+    assert!(!outcome.committed_ops.is_empty());
+    let result_id: Uuid = outcome.response["merge"]["resultRevisionId"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let result = svc
+        .history
+        .revision_content(f.doc, f.owner, result_id)
+        .await
+        .unwrap();
+    let blocks = result.visible_content["blocks"].as_array().unwrap();
+    assert!(blocks[0].to_string().contains('A'));
+    assert!(
+        blocks[1].to_string().contains('B'),
+        "Bob's unrelated change survived"
+    );
+    // A fresh service knows nothing about the lost HTTP response. Recovery
+    // reads the committed record and returns the identical revision IDs.
+    let restarted = BranchService {
+        history: service(&db, &workers),
+    };
+    let recovered = restarted
+        .merge(f.doc, branch, f.owner, request.clone())
+        .await
+        .unwrap();
+    assert_eq!(recovered.response["duplicate"], true);
+    assert!(recovered.committed_ops.is_empty());
+    assert_eq!(recovered.response["merge"], outcome.response["merge"]);
+    assert_eq!(
+        restarted.history.repo.durable_cursor(f.doc).await.unwrap(),
+        outcome.durable_cursor
+    );
+    let mut conflicting = request;
+    conflicting.selections[0].resolution = "branch".into();
+    assert!(matches!(
+        restarted.merge(f.doc, branch, f.owner, conflicting).await,
+        Err(BranchError::RetryConflict)
+    ));
+    client
+        .execute("DELETE FROM documents WHERE id=$1", &[&branch])
+        .await
+        .unwrap();
+    drop(client);
+    cleanup(&db, &f).await;
+}
+
+#[tokio::test]
+async fn shared_review_revalidates_both_heads_and_separate_branch_permissions() {
+    let Some(db) = test_db().await else { return };
+    let Some(workers) = live_worker_pool() else {
+        return;
+    };
+    let (f, branch, svc) = review_fixture(&db, &workers).await;
+    assert!(matches!(
+        svc.compare(f.doc, branch, f.viewer).await,
+        Err(BranchError::NotFound)
+    ));
+    assert!(matches!(
+        svc.compare(f.doc, branch, f.stranger).await,
+        Err(BranchError::NotFound)
+    ));
+    let client = db.get().await.unwrap();
+    client.execute("INSERT INTO document_user_permissions(document_id,user_id,role) VALUES($1,$2,'COMMENTER')",&[&branch,&f.viewer.0]).await.unwrap();
+    assert_eq!(
+        svc.compare(f.doc, branch, f.viewer).await.unwrap()["canMerge"],
+        false
+    );
+    let comparison = svc.compare(f.doc, branch, f.owner).await.unwrap();
+    let request = reviewed_request(&comparison);
+    assert!(matches!(
+        svc.merge(f.doc, branch, f.viewer, request.clone()).await,
+        Err(BranchError::NotFound)
+    ));
+    let before = svc.history.repo.durable_cursor(f.doc).await.unwrap();
+    ingest(
+        &svc.history.repo,
+        f.editor,
+        branch,
+        &[review_edit(0x999, b'C', None)],
+    )
+    .await;
+    assert!(matches!(
+        svc.merge(f.doc, branch, f.owner, request.clone()).await,
+        Err(BranchError::Stale)
+    ));
+    assert_eq!(
+        svc.history.repo.durable_cursor(f.doc).await.unwrap(),
+        before
+    );
+    let fresh = svc.compare(f.doc, branch, f.owner).await.unwrap();
+    let request = reviewed_request(&fresh);
+    ingest(
+        &svc.history.repo,
+        f.owner,
+        f.doc,
+        &[review_edit(0xaaa, b'D', Some((0xD4, 18)))],
+    )
+    .await;
+    assert!(matches!(
+        svc.merge(f.doc, branch, f.owner, request.clone()).await,
+        Err(BranchError::Stale)
+    ));
+    client
+        .execute(
+            "DELETE FROM document_user_permissions WHERE document_id=$1 AND user_id=$2",
+            &[&branch, &f.owner.0],
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        svc.merge(f.doc, branch, f.owner, request).await,
+        Err(BranchError::NotFound)
+    ));
+    client
+        .execute("DELETE FROM documents WHERE id=$1", &[&branch])
+        .await
+        .unwrap();
+    drop(client);
+    cleanup(&db, &f).await;
+}
+
+/// =========================================================================
+#[tokio::test]
+async fn shared_review_conflicts_require_a_choice_and_concurrent_retries_commit_once() {
+    let Some(db) = test_db().await else { return };
+    let Some(workers) = live_worker_pool() else {
+        return;
+    };
+    let (f, branch, svc) = review_fixture(&db, &workers).await;
+    ingest(
+        &svc.history.repo,
+        f.owner,
+        f.doc,
+        &[golden::golden_delete_op()],
+    )
+    .await;
+    let comparison = svc.compare(f.doc, branch, f.owner).await.unwrap();
+    assert_eq!(comparison["changes"][0]["conflict"], true, "{comparison}");
+    let mut request = MergeRequest {
+        request_id: Uuid::new_v4(),
+        expected_main_seq: comparison["mainSeq"].as_str().unwrap().into(),
+        expected_branch_seq: comparison["branchSeq"].as_str().unwrap().into(),
+        selections: vec![Selection {
+            id: comparison["changes"][0]["id"].as_str().unwrap().into(),
+            resolution: "apply".into(),
+        }],
+    };
+    assert!(matches!(
+        svc.merge(f.doc, branch, f.owner, request.clone()).await,
+        Err(BranchError::Conflict)
+    ));
+    request.selections[0].resolution = "branch".into();
+    let (a, b) = tokio::join!(
+        svc.merge(f.doc, branch, f.owner, request.clone()),
+        svc.merge(f.doc, branch, f.owner, request)
+    );
+    let a = a.unwrap();
+    let b = b.unwrap();
+    assert_ne!(a.response["duplicate"], b.response["duplicate"]);
+    assert_eq!(a.response["merge"], b.response["merge"]);
+    assert_eq!(
+        svc.history.repo.durable_cursor(f.doc).await.unwrap(),
+        a.durable_cursor
+    );
+    let client = db.get().await.unwrap();
+    let count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM review_merges WHERE main_document_id=$1",
+            &[&f.doc],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(count, 1);
+    client
+        .execute("DELETE FROM documents WHERE id=$1", &[&branch])
+        .await
+        .unwrap();
+    drop(client);
+    cleanup(&db, &f).await;
 }
 
 /// =========================================================================

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { proxyRevisionRequest } from "@/server/gateway-history-proxy";
+import { proxyRevisionRequest, proxyBranchRequest } from "@/server/gateway-history-proxy";
 
 const documentId = "11111111-1111-4111-8111-111111111111";
 const revisionId = "22222222-2222-4222-8222-222222222222";
@@ -11,6 +11,17 @@ afterEach(() => {
 });
 
 describe("history gateway proxy", () => {
+  it("forwards review requests only to the configured gateway and rejects path escapes", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SYNC_GATEWAY_URL", "wss://sync.example.test/api/v1/sync");
+    const upstream = vi.fn().mockResolvedValue(new Response('{"duplicate":true}', { status: 200 })); vi.stubGlobal("fetch", upstream);
+    const request = new Request("http://app.test", { method: "POST", headers: { authorization: "Bearer token", "content-type": "application/json" }, body: '{"requestId":"fixed"}' });
+    const response = await proxyBranchRequest(request, documentId, [revisionId, "merge"]);
+    expect(response.status).toBe(200);
+    expect(upstream.mock.calls[0][0].toString()).toBe(`https://sync.example.test/api/v1/documents/${documentId}/branches/${revisionId}/merge`);
+    expect(upstream.mock.calls[0][1]).toMatchObject({ cache: "no-store", redirect: "error", body: '{"requestId":"fixed"}' });
+    expect((await proxyBranchRequest(new Request("http://app.test"), documentId, [".."])).status).toBe(404);
+    expect((await proxyBranchRequest(new Request("http://app.test"), documentId)).status).toBe(401);
+  });
   it("forwards only the fixed history endpoint and the Clerk bearer token", async () => {
     vi.stubEnv("NEXT_PUBLIC_SYNC_GATEWAY_URL", "wss://sync.example.test/api/v1/sync");
     const upstream = vi.fn().mockResolvedValue(new Response('{"revisions":[]}', {

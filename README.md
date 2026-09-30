@@ -33,6 +33,43 @@
 > deployment or remote CI result is claimed; release and container-scan
 > evidence dated 2026-09-14 remains historical.
 
+## Shared review branches and selective merge (2026-09-30)
+
+**Propose changes in a shared branch, review them against current main, and
+merge only the changes you choose.** Create a branch from a named checkpoint,
+edit it independently or offline, and invite collaborators through **Share**.
+Each branch has its own permissions and anchored comments.
+
+The **Branches** tab shows the original base, current main and proposed branch.
+Conflicts default to **Keep main**; **Use branch** explicitly chooses the
+proposal. Merges retain unrelated main edits and omitted changes. Whole list
+groups are reviewed together to preserve nested structure.
+
+![Review comparison with a conflicting paragraph, current main and proposed branch, and selective change controls](docs/assets/review-branches/comparison.png)
+
+Selected edits, a source revision, a resulting revision and merge provenance
+commit in one PostgreSQL transaction. If the response is lost after commit,
+reopen the comparison and use **Retry saved merge**: the same request returns
+its original result without another edit batch or revision pair.
+
+![Review service failure remains visible with a saved merge request and Retry saved merge action](docs/assets/review-branches/recovery.png)
+
+![Main document after selected proposal changes merged, with the owner's independent budget edit and omitted rollout proposal preserved](docs/assets/review-branches/merged.png)
+
+The real-auth browser acceptance driver passes six stages: independent offline
+edits, UI-managed invitations, commenter feedback and permission isolation,
+selective merge, interrupted-response recovery, and explicit conflict resolution.
+It checks source/result history, preserved anchors and task state, responsive
+layout, and zero critical/serious panel accessibility violations.
+
+See the [feature specification](docs/REVIEW_BRANCHES.md),
+[implementation and verification report](docs/audits/REVIEW_BRANCHES_REPORT.md),
+[machine-readable result](docs/assets/review-branches/report.json) and
+[mobile comparison](docs/assets/review-branches/mobile.png). Run it with
+`npm run test:review-branches:browser -- --headed` using the existing disposable
+Clerk test harness. Creating, sharing, comparing and merging require the sync
+gateway; an existing branch uses the editor's normal offline persistence.
+
 ## Rich-text collaboration update (2026-09-30)
 
 **Nested lists, tasks, links and formatting now collaborate through the same

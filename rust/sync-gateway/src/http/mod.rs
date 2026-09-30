@@ -28,6 +28,7 @@ use crate::sessions::SessionRegistry;
 use crate::telemetry::Metrics;
 use crate::worker::WorkerPool;
 use crate::ws;
+mod branches;
 
 /// Shared application state (all clones are cheap Arc handles).
 #[derive(Clone)]
@@ -69,6 +70,18 @@ pub fn router(state: AppState) -> Router {
             post(restore_revision),
         )
         .route("/api/v1/documents/{document_id}/proof", get(document_proof))
+        .route(
+            "/api/v1/documents/{document_id}/branches",
+            get(branches::list).post(branches::create),
+        )
+        .route(
+            "/api/v1/documents/{document_id}/branches/{branch_id}",
+            get(branches::compare),
+        )
+        .route(
+            "/api/v1/documents/{document_id}/branches/{branch_id}/merge",
+            post(branches::merge),
+        )
         .route("/api/v1/sync", get(ws::upgrade))
         .with_state(state)
 }
@@ -526,15 +539,48 @@ async fn restore_revision(
     // RevisionService has already committed the restore operations and the
     // restore_event before returning. Fanout is best-effort, matching the
     // WebSocket path; reconnecting clients recover from durable catch-up.
-    let committed_ops = outcome.committed_ops;
+    publish_committed_ops(
+        &app,
+        document,
+        (outcome.restore_event.revision_id.as_u128() as u64).max(1),
+        outcome.durable_cursor,
+        outcome.committed_ops,
+    )
+    .await;
+
+    Ok(Json(json!({
+        "restoreEvent": {
+            "revisionId": outcome.restore_event.revision_id,
+            "documentId": outcome.restore_event.document_id,
+            "kind": outcome.restore_event.kind,
+            "targetSeq": outcome.restore_event.target_seq,
+            "createdBy": outcome.restore_event.created_by,
+            "snapshotId": outcome.restore_event.snapshot_id,
+            "restoreSourceRevision": outcome.restore_event.restore_source_revision,
+        },
+        "boundary": outcome.boundary,
+        "anchorSnapshotId": outcome.anchor_snapshot_id,
+        "targetStateDigest": outcome.target_state_digest,
+        "currentStateDigest": outcome.current_state_digest,
+        "appliedOps": outcome.applied_ops,
+        "duplicateOps": outcome.duplicate_ops,
+    })))
+}
+
+async fn publish_committed_ops(
+    app: &AppState,
+    document: Uuid,
+    event_id: u64,
+    durable_cursor: i64,
+    committed_ops: Vec<Vec<u8>>,
+) {
     if !committed_ops.is_empty() {
-        let event_id = (outcome.restore_event.revision_id.as_u128() as u64).max(1);
         if let Err(error) = app
             .bus
             .publish_batch(
                 document,
                 event_id,
-                outcome.durable_cursor.max(0) as u64,
+                durable_cursor.max(0) as u64,
                 committed_ops.clone(),
             )
             .await
@@ -567,24 +613,6 @@ async fn restore_revision(
             }
         }
     }
-
-    Ok(Json(json!({
-        "restoreEvent": {
-            "revisionId": outcome.restore_event.revision_id,
-            "documentId": outcome.restore_event.document_id,
-            "kind": outcome.restore_event.kind,
-            "targetSeq": outcome.restore_event.target_seq,
-            "createdBy": outcome.restore_event.created_by,
-            "snapshotId": outcome.restore_event.snapshot_id,
-            "restoreSourceRevision": outcome.restore_event.restore_source_revision,
-        },
-        "boundary": outcome.boundary,
-        "anchorSnapshotId": outcome.anchor_snapshot_id,
-        "targetStateDigest": outcome.target_state_digest,
-        "currentStateDigest": outcome.current_state_digest,
-        "appliedOps": outcome.applied_ops,
-        "duplicateOps": outcome.duplicate_ops,
-    })))
 }
 
 async fn live() -> Json<Value> {

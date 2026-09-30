@@ -8,6 +8,7 @@ import { CrdtClient } from "@/lib/crdt/worker/client";
 import type { CatchupBriefing } from "@/lib/sync/catchup-briefing";
 import { parseDocumentContent } from "@/lib/collaboration/content";
 import { DocumentSessionProvider } from "@/lib/collaboration/provider";
+import { ReviewBranchBanner } from "@/components/review-branches-panel";
 
 import { Editor } from "./editor";
 import { Navbar } from "./navbar";
@@ -86,13 +87,14 @@ export const Document = ({ document }: DocumentProps) => {
               className="text-sm text-muted-foreground bg-muted/60 border border-border rounded-md px-3 py-1.5"
               role="status"
             >
-              You have view-only access to this document.
+              {document.effectiveRole === "COMMENTER" ? "You can select text and comment. Editing is disabled." : "You have view-only access to this document."}
             </div>
           )}
         </div>
         {/* The reconnect briefing adds one row below the fixed chrome; the
             816px sheet scrolls horizontally on narrow viewports. */}
-        <div className={catchupBriefing ? "pt-[196px] print:pt-0" : "pt-[114px] print:pt-0"}>
+        <div className={catchupBriefing ? (canEdit ? "pt-[196px] print:pt-0" : "pt-[236px] print:pt-0") : (canEdit ? "pt-[114px] print:pt-0" : "pt-[154px] print:pt-0")}>
+          <div className="px-4 print:hidden"><ReviewBranchBanner documentId={documentId} /></div>
           <Editor
             crdtClient={crdtClient}
             documentId={documentId}

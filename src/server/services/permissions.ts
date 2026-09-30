@@ -19,8 +19,7 @@ import { usersRepository } from "../repositories/users";
  * - grants for the owner are rejected (ownership is intrinsic);
  * - every change writes an audit event.
  *
- * There is no sharing UI in Phase 1; this service is exercised by tests and
- * forms the foundation for the later sharing product surface.
+ * The Share tab and its authenticated route use this same service.
  */
 
 export const GRANTABLE_ROLES: readonly DocumentRole[] = [

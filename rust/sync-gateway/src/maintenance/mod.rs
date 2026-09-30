@@ -2,6 +2,8 @@
 //! orchestration. Rust owns I/O, scheduling, leases, and process
 //! lifecycle; the native C++ worker owns CRDT semantics (DEC-038).
 
+pub mod branch_merge;
+pub mod branches;
 pub mod compaction;
 pub mod history;
 pub mod jobs;

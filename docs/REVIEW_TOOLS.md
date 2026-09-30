@@ -1,11 +1,16 @@
 # Review and recovery tools
 
 Status: Working local prototype  
-Last updated: 2026-09-25
+Last updated: 2026-09-30
 
-The editor's **Review & history** panel groups five post-v1 collaboration
+The editor's **Review & history** panel groups post-v1 collaboration
 tools. They use the existing document ACL, CRDT worker, IndexedDB replica,
 and Rust durable gateway; they do not add a second collaboration engine.
+
+The **Branches** and **Share** tabs now provide shared proposal documents,
+independent permissions, selective conflict resolution and atomic merge
+recovery. See [REVIEW_BRANCHES.md](REVIEW_BRANCHES.md) for the workflow,
+permissions and durability semantics.
 
 ## History and restore
 

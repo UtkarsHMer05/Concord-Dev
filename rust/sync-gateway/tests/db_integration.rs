@@ -119,7 +119,7 @@ async fn concurrent_first_start_migrations_are_idempotent() {
         errors.is_empty(),
         "concurrent migration failures: {errors:?}"
     );
-    assert_eq!(version.expect("current version"), 5);
+    assert_eq!(version.expect("current version"), 6);
     let versions: Vec<i32> = rows
         .expect("registry rows")
         .iter()
@@ -127,7 +127,7 @@ async fn concurrent_first_start_migrations_are_idempotent() {
         .collect();
     assert_eq!(
         versions,
-        vec![1, 2, 3, 4, 5],
+        vec![1, 2, 3, 4, 5, 6],
         "each migration is recorded once"
     );
 }
@@ -143,6 +143,7 @@ async fn v5_quarantines_existing_client_replicas_and_preserves_operations() {
             "CREATE SCHEMA {schema};
              CREATE TABLE {schema}.users (id UUID PRIMARY KEY);
              CREATE TABLE {schema}.documents (id UUID PRIMARY KEY);
+             CREATE TABLE {schema}.crdt_revisions (revision_id UUID PRIMARY KEY);
              CREATE TABLE {schema}.crdt_operations (
                  document_id UUID NOT NULL, replica_id BIGINT NOT NULL);
              CREATE TABLE {schema}.crdt_replica_owners (
@@ -209,7 +210,7 @@ async fn v5_quarantines_existing_client_replicas_and_preserves_operations() {
 
     assert_eq!(legacy_ids, vec![9_101], "maintenance replicas stay exempt");
     assert_eq!(operation_count, 3, "v5 leaves the durable log intact");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 }
 
 /// Canonical minimal insert op bytes (matches protocol::envelope tests).

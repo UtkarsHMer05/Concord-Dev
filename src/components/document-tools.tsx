@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { FileText, History, Lightbulb, MessageSquareText, PackageOpen, GitBranch, Rewind, X } from "lucide-react";
+import { FileText, History, Lightbulb, MessageSquareText, PackageOpen, GitBranch, Rewind, X, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ElementType, type FormEvent, type ReactNode } from "react";
 import type { Editor as TipTapEditor } from "@tiptap/react";
 
@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { CommentsPanel, type CommentSelection } from "@/components/comments-panel";
 import { SuggestionsPanel } from "@/components/suggestions-panel";
 import { DraftsPanel } from "@/components/drafts-panel";
+import { ReviewBranchesPanel } from "@/components/review-branches-panel";
+import { SharingPanel } from "@/components/sharing-panel";
 import { anchorSelection, resolveAnchors as resolveAnchorSet, type CrdtRangeAnchor } from "@/lib/comments/anchors";
 import { loadBrowserCrdtFactory } from "@/lib/crdt/browser-factory";
 import { blocksToPmDoc, validRichTextValue, type CanonicalBlock, type PmNode } from "@/lib/crdt/pm-model";
@@ -30,7 +32,7 @@ import type { DocumentDetailDto } from "@/server/services/documents";
 import { useEditorStore } from "@/store/use-editor-store";
 import { useSyncStatusStore } from "@/store/use-sync-status-store";
 
-type ToolTab = "history" | "comments" | "drafts" | "bundle" | "replay" | "markdown" | "suggestions";
+type ToolTab = "history" | "comments" | "drafts" | "bundle" | "replay" | "markdown" | "suggestions" | "branches" | "share";
 
 interface DocumentToolsProps {
   document: DocumentDetailDto;
@@ -735,6 +737,8 @@ export function DocumentTools({ document, crdtClient, syncNow }: DocumentToolsPr
   const tabItems: Array<{ id: ToolTab; label: string; icon: typeof History }> = [
     { id: "history", label: "History", icon: History },
     { id: "comments", label: "Comments", icon: MessageSquareText },
+    { id: "branches", label: "Branches", icon: GitBranch },
+    { id: "share", label: "Share", icon: Users },
     { id: "drafts", label: "Drafts", icon: GitBranch },
     { id: "bundle", label: "Concordpack", icon: PackageOpen },
     { id: "replay", label: "Replay", icon: Rewind },
@@ -770,7 +774,7 @@ export function DocumentTools({ document, crdtClient, syncNow }: DocumentToolsPr
         <header className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Review and document history</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Anchored comments, checkpoints, drafts, and recovery.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Review branches, anchored comments, checkpoints, and recovery.</p>
           </div>
           <Button type="button" variant="ghost" size="icon" aria-label="Close review and history panel" onClick={() => setOpen(false)}><X /></Button>
         </header>
@@ -795,6 +799,8 @@ export function DocumentTools({ document, crdtClient, syncNow }: DocumentToolsPr
         </div>
         <div id="document-tool-panel" role="tabpanel" tabIndex={0} aria-labelledby={`document-tool-tab-${tab}`} className="min-h-0 flex-1 overflow-y-auto">
           {tab === "history" && <HistoryPanel documentId={document.id} role={document.effectiveRole} syncNow={syncNow} />}
+          {tab === "branches" && <ReviewBranchesPanel documentId={document.id} canCreate={canEdit} client={crdtClient} syncNow={syncNow} renderPreview={documentPreview} />}
+          {tab === "share" && <SharingPanel documentId={document.id} />}
           {tab === "comments" && (userId ? (
             <CommentsPanel
               documentId={document.id}

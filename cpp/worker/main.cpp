@@ -110,6 +110,7 @@ constexpr std::uint32_t kCmdGenerateOps = 6;       // seed + shape -> ops + dige
 constexpr std::uint32_t kCmdRestoreDiff = 7;       // two snapshots -> forward-restore ops (P5-M036)
 constexpr std::uint32_t kCmdVisibleAfter = 8;      // optional snapshot + tail ops -> visible JSON
 constexpr std::uint32_t kCmdFoldAfter = 9;         // snapshot + tail ops -> digest + folded snapshot
+constexpr std::uint32_t kCmdMergeDiff = 10;       // selected block ranges -> verified forward ops
 
 // Status codes.
 constexpr std::uint32_t kStatusOk = 0;
@@ -188,6 +189,8 @@ struct RequestBody {
     // (restore-boundary) state's snapshot (B).
     std::string snapshot_a;
     std::string snapshot_b;
+    struct MergeRange { std::uint32_t start, end, source_start, source_end; };
+    std::vector<MergeRange> merge_ranges;
 
     // CMD 6 (generate_ops) parameters.
     std::uint64_t gen_seed = 0;
@@ -421,7 +424,8 @@ enum class ParseResult { Ok, Malformed, VersionUnsupported, OpApplyError, SizeEx
             }
             break;
         }
-        case kCmdRestoreDiff: {
+        case kCmdRestoreDiff:
+        case kCmdMergeDiff: {
             // [u32 current_snapshot_len][current snapshot bytes]
             // [u32 target_snapshot_len][target snapshot bytes]
             const ParseResult current_result =
@@ -433,6 +437,20 @@ enum class ParseResult { Ok, Malformed, VersionUnsupported, OpApplyError, SizeEx
                 read_snapshot_into(frame, offset, body.snapshot_b, error);
             if (target_result != ParseResult::Ok) {
                 return target_result;
+            }
+            if (body.command == kCmdMergeDiff) {
+                if (offset + 4 > frame.size()) return ParseResult::Malformed;
+                const auto count = load_u32le(frame, offset);
+                offset += 4;
+                if (count > 2000 || static_cast<std::uint64_t>(count) * 16 > frame.size() - offset) {
+                    error = "invalid merge range count";
+                    return ParseResult::Malformed;
+                }
+                for (std::uint32_t i = 0; i < count; ++i) {
+                    body.merge_ranges.push_back({load_u32le(frame, offset), load_u32le(frame, offset + 4),
+                        load_u32le(frame, offset + 8), load_u32le(frame, offset + 12)});
+                    offset += 16;
+                }
             }
             break;
         }
@@ -1694,6 +1712,82 @@ struct CommandResult {
                 // Serialize in size-capped chunks; the op vector is released
                 // with the GenerateResult before any batch is written out.
                 result.batches = batch_generated(generated.stream.ops);
+                return result;
+            }
+            case kCmdMergeDiff: {
+                const auto current = crdt::Doc::import_snapshot(kMaintenanceReplica, body.snapshot_a);
+                const auto source = crdt::Doc::import_snapshot(kMaintenanceReplica, body.snapshot_b).visible_document();
+                auto expected = current.visible_document();
+                auto target = crdt::Doc::import_snapshot(kMaintenanceReplica, body.snapshot_a);
+                std::uint32_t previous_end = 0;
+                bool first = true;
+                for (const auto& range : body.merge_ranges) {
+                    if (range.start > range.end || range.end > expected.size() ||
+                        range.source_start > range.source_end || range.source_end > source.size() ||
+                        (!first && (range.start < previous_end || (range.start == previous_end && range.start == range.end)))) {
+                        result.status = kStatusMalformed;
+                        result.digest = "invalid or overlapping merge ranges";
+                        return result;
+                    }
+                    previous_end = range.end;
+                    first = false;
+                }
+                std::size_t generated = 0;
+                for (auto it = body.merge_ranges.rbegin(); it != body.merge_ranges.rend(); ++it) {
+                    const auto entries = target.stream_entries();
+                    std::vector<std::size_t> starts;
+                    for (std::size_t i = 0; i < entries.size(); ++i) {
+                        if (!entries[i].tombstoned && (starts.empty() || entries[i].kind == crdt::ItemKind::Delimiter)) starts.push_back(i);
+                    }
+                    if (starts.empty()) starts.push_back(entries.size());
+                    starts.push_back(entries.size());
+                    const auto begin = starts[it->start];
+                    const auto end = starts[it->end];
+                    std::uint64_t cost = 0;
+                    for (auto i = begin; i < end; ++i) cost += !entries[i].tombstoned;
+                    for (auto b = it->source_start; b < it->source_end; ++b) {
+                        cost += 1 + source[b].attrs.size();
+                        for (const auto& ch : source[b].chars) cost += 1 + ch.marks.size();
+                    }
+                    if (cost > kMaxRestoreDiffOps - generated) {
+                        result.status = kStatusSizeExceeded;
+                        result.digest = "merge exceeds operation limit";
+                        return result;
+                    }
+                    generated += cost;
+                    for (auto i = begin; i < end; ++i) {
+                        if (!entries[i].tombstoned) (void)target.local_delete(i);
+                    }
+                    auto position = begin;
+                    for (auto b = it->source_start; b < it->source_end; ++b) {
+                        const auto& block = source[b];
+                        (void)target.local_insert_delimiter(position, block.type);
+                        for (const auto& [name, value] : block.attrs) {
+                            (void)target.local_set_attr(position, name, value);
+                        }
+                        ++position;
+                        for (const auto& ch : block.chars) {
+                            (void)target.local_insert_text(position, ch.scalar);
+                            for (const auto& [name, value] : ch.marks) {
+                                (void)target.local_set_attr(position, name, value);
+                            }
+                            ++position;
+                        }
+                    }
+                    expected.erase(expected.begin() + it->start, expected.begin() + it->end);
+                    expected.insert(expected.begin() + it->start, source.begin() + it->source_start, source.begin() + it->source_end);
+                }
+                if (expected.empty()) expected = crdt::Doc(kMaintenanceReplica).visible_document();
+                if (target.visible_document() != expected) {
+                    result.status = kStatusOpApplyError;
+                    result.digest = "merge target did not preserve selected content";
+                    return result;
+                }
+                const auto diff = compute_restore_diff(body.snapshot_a, target.export_snapshot());
+                if (diff.status != kStatusOk) { result.status = diff.status; result.digest = diff.message; return result; }
+                result.digest = diff.digest_b;
+                result.restore_diff = true;
+                result.diff_batch = diff.batch;
                 return result;
             }
             case kCmdRestoreDiff: {

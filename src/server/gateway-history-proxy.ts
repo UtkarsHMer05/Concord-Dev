@@ -1,6 +1,7 @@
 import "server-only";
 
 import { parseSyncGatewayOrigin } from "@/server/env";
+import { readJsonRequest } from "@/server/request-body";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY_BYTES = 4096;
@@ -46,39 +47,8 @@ function proofUrl(documentId: string, seq: string | null): URL | null {
 }
 
 async function checkpointBody(request: Request): Promise<{ label: string; targetSeq?: number } | Response> {
-  const declaredLength = Number(request.headers.get("content-length") ?? 0);
-  if (declaredLength > MAX_BODY_BYTES) return jsonError(413, "request_too_large");
-  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
-    return jsonError(415, "content_type_required");
-  }
-
-  const reader = request.body?.getReader();
-  if (!reader) return jsonError(400, "invalid_request");
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
-      await reader.cancel();
-      return jsonError(413, "request_too_large");
-    }
-    chunks.push(value);
-  }
-
-  let body: unknown;
-  try {
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  } catch {
-    return jsonError(400, "invalid_json");
-  }
+  const body = await readJsonRequest(request, MAX_BODY_BYTES);
+  if (body instanceof Response) return body;
   if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonError(400, "invalid_request");
   const input = body as Record<string, unknown>;
   if (Object.keys(input).some((key) => key !== "label" && key !== "targetSeq")) return jsonError(400, "invalid_request");
@@ -194,4 +164,31 @@ export async function proxyProofRequest(
   } catch {
     return jsonError(503, "gateway_unavailable");
   }
+}
+
+/** Shared reviews use the gateway's transaction, never the transitional save API. */
+export async function proxyBranchRequest(request: Request, documentId: string, segments: string[] = []): Promise<Response> {
+  if (!UUID.test(documentId) || segments.length > 2 || (segments[0] && !UUID.test(segments[0])) ||
+    (segments.length === 2 && segments[1] !== "merge")) return jsonError(404, "not_found");
+  const merge = segments.length === 2;
+  if ((merge && request.method !== "POST") || (!merge && segments.length === 1 && request.method !== "GET") ||
+    (!["GET", "POST"].includes(request.method))) return jsonError(405, "method_not_allowed");
+  const authorization = request.headers.get("authorization");
+  if (!authorization || authorization.length > 16_384 || !/^Bearer\s+\S+$/i.test(authorization)) return jsonError(401, "unauthorized");
+  const target = gatewayUrl(documentId);
+  if (!target) return jsonError(503, "branches_unavailable");
+  target.pathname = target.pathname.replace(/\/revisions$/, "/branches") + (segments.length ? "/" + segments.join("/") : "");
+  let body: string | undefined;
+  if (request.method === "POST") {
+    const parsed = await readJsonRequest(request, 128 * 1024);
+    if (parsed instanceof Response) return parsed;
+    body = JSON.stringify(parsed);
+  }
+  try {
+    const response = await fetch(target, { method: request.method, headers: { authorization, accept: "application/json",
+      ...(body === undefined ? {} : { "content-type": "application/json" }) }, body,
+      cache: "no-store", redirect: "error", signal: AbortSignal.timeout(60_000) });
+    return new Response(response.body, { status: response.status, headers: { "Cache-Control": "no-store",
+      "Content-Type": response.headers.get("content-type") ?? "application/json" } });
+  } catch { return jsonError(503, "gateway_unavailable"); }
 }

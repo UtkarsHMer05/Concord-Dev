@@ -232,6 +232,38 @@ const MIGRATIONS: &[Migration] = &[
         ON CONFLICT (document_id, replica_id) DO NOTHING;
     "#,
     },
+    Migration {
+        version: 6,
+        name: "shared review branches and atomic merge records",
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS review_branches (
+            document_id UUID PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+            main_document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            base_revision_id UUID NOT NULL REFERENCES crdt_revisions(revision_id) DEFERRABLE INITIALLY DEFERRED,
+            base_seq BIGINT NOT NULL CHECK (base_seq >= 0),
+            base_digest TEXT NOT NULL,
+            base_content JSONB NOT NULL,
+            name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 120),
+            created_by UUID NOT NULL REFERENCES users(id),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CHECK (document_id <> main_document_id)
+        );
+        CREATE INDEX IF NOT EXISTS review_branches_main_idx ON review_branches(main_document_id, created_at);
+        CREATE TABLE IF NOT EXISTS review_merges (
+            id UUID PRIMARY KEY,
+            main_document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            branch_document_id UUID NOT NULL REFERENCES review_branches(document_id) ON DELETE CASCADE,
+            base_revision_id UUID NOT NULL REFERENCES crdt_revisions(revision_id) DEFERRABLE INITIALLY DEFERRED,
+            source_revision_id UUID NOT NULL REFERENCES crdt_revisions(revision_id) DEFERRABLE INITIALLY DEFERRED,
+            result_revision_id UUID NOT NULL REFERENCES crdt_revisions(revision_id) DEFERRABLE INITIALLY DEFERRED,
+            actor_id UUID NOT NULL REFERENCES users(id),
+            request JSONB NOT NULL,
+            result_seq BIGINT NOT NULL CHECK (result_seq >= 0),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS review_merges_branch_idx ON review_merges(branch_document_id, created_at);
+        "#,
+    },
 ];
 
 /// Applies all pending migrations idempotently, including concurrent starts

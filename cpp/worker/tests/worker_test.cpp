@@ -18,6 +18,7 @@
 #include "test_harness.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -2107,6 +2108,80 @@ CONCORD_TEST(version_flag_prints_and_exits_zero) {
     CHECK_EQ(space_after_version, std::string::npos);  // plain form required
 #endif
 #endif
+}
+
+std::string merge_request(const Doc& current, const Doc& source, const std::vector<std::array<std::uint32_t,4>>& ranges) {
+    Bytes b; b.u32(10); b.blob(current.export_snapshot()); b.blob(source.export_snapshot());
+    b.u32(static_cast<std::uint32_t>(ranges.size()));
+    for (const auto& range : ranges) for (const auto value : range) b.u32(value);
+    return b.data;
+}
+
+Doc review_document(std::uint64_t replica, const std::u32string& letters) {
+    Doc doc(ReplicaId{replica});
+    for (const auto letter : letters) {
+        (void)doc.local_insert_delimiter(doc.stream_size(), "paragraph");
+        (void)doc.local_insert_text(doc.stream_size(), letter);
+    }
+    return doc;
+}
+
+CONCORD_TEST(selective_merge_preserves_unrelated_ids_and_rich_nested_list_content) {
+    const auto current = review_document(700, U"ABC");
+    Doc source(ReplicaId{701});
+    (void)source.local_insert_delimiter(0,"list-item");
+    (void)source.local_set_attr(0,"list","task");
+    (void)source.local_set_attr(0,"depth","0");
+    (void)source.local_set_attr(0,"checked","yes");
+    (void)source.local_insert_text(1,U'Ω');
+    (void)source.local_set_attr(1,"bold","1");
+    (void)source.local_set_attr(1,"link","https://example.com/rfc");
+    (void)source.local_insert_delimiter(2,"list-item");
+    (void)source.local_set_attr(2,"list","task");
+    (void)source.local_set_attr(2,"depth","1");
+    (void)source.local_set_attr(2,"checked","no");
+    (void)source.local_insert_text(3,U'子');
+    (void)source.local_set_attr(3,"code","1");
+    const auto run = run_worker(merge_request(current,source,{{0,1,0,2}}));
+    CHECK_EQ(run.exit_code,0);
+    const auto diff = parse_diff_ok(run);
+    auto folded = fold_snapshot_with_batch(current.export_snapshot(),diff.batch);
+    auto expected = source.visible_document();
+    const auto before = current.visible_document();
+    expected.insert(expected.end(),before.begin()+1,before.end());
+    CHECK(folded.visible_document()==expected);
+    const auto originals = current.stream_entries();
+    const auto merged = folded.stream_entries();
+    for (std::size_t i=2; i<originals.size(); ++i) {
+        const auto found = std::find_if(merged.begin(),merged.end(),[&](const auto& entry){return entry.id==originals[i].id;});
+        CHECK(found!=merged.end()); CHECK(*found==originals[i]);
+    }
+    const auto digest = folded.canonical_digest();
+    (void)folded.apply_batch(diff.ops);
+    CHECK_EQ(folded.canonical_digest(),digest);
+    CHECK_EQ(folded.pending_count(),0U);
+}
+
+CONCORD_TEST(selective_merge_handles_insert_delete_and_multiple_selected_ranges) {
+    const auto current = review_document(710,U"ABC");
+    const auto source = review_document(711,U"XYZ");
+    const auto diff = parse_diff_ok(run_worker(merge_request(current,source,{{0,1,0,0},{2,2,1,2}})));
+    const auto folded = fold_snapshot_with_batch(current.export_snapshot(),diff.batch);
+    const auto a = current.visible_document(); const auto b = source.visible_document();
+    CHECK(folded.visible_document()==std::vector<VisibleBlock>({a[1],b[1],a[2]}));
+    const Doc empty(ReplicaId{712});
+    const auto from_empty = parse_diff_ok(run_worker(merge_request(empty,source,{{0,1,0,3}})));
+    CHECK(fold_snapshot_with_batch(empty.export_snapshot(),from_empty.batch).visible_document()==source.visible_document());
+}
+
+CONCORD_TEST(selective_merge_rejects_bad_ranges_and_truncated_frames) {
+    const auto current = review_document(720,U"ABC"); const auto source = review_document(721,U"XYZ");
+    for (const auto& ranges : std::vector<std::vector<std::array<std::uint32_t,4>>>{ {{0,4,0,1}}, {{0,1,0,4}}, {{2,1,0,1}}, {{0,2,0,1},{1,3,1,2}} }) {
+        const auto run = run_worker(merge_request(current,source,ranges));
+        CHECK_EQ(run.exit_code,0); Reader r{run.stdout_bytes}; CHECK_EQ(r.u32(),kStatusMalformed);
+    }
+    auto request = merge_request(current,source,{{0,1,0,1}}); request.pop_back();
+    const auto run = run_worker(request); CHECK_EQ(run.exit_code,0); Reader r{run.stdout_bytes}; CHECK_EQ(r.u32(),kStatusMalformed);
 }
 
 }  // namespace
