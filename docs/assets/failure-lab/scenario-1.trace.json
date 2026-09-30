@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "name": "Offline edits, duplicate delivery, lost acknowledgement and gateway restart",
+  "mode": "fixed",
+  "actions": [
+    {
+      "kind": "connect",
+      "client": 0
+    },
+    {
+      "kind": "connect",
+      "client": 1
+    },
+    {
+      "kind": "connect",
+      "client": 2
+    },
+    {
+      "kind": "edit",
+      "client": 0,
+      "codepoint": 65,
+      "index": 0
+    },
+    {
+      "kind": "disconnect",
+      "client": 1
+    },
+    {
+      "kind": "edit",
+      "client": 1,
+      "codepoint": 66,
+      "index": 0
+    },
+    {
+      "kind": "drop-ack",
+      "client": 2
+    },
+    {
+      "kind": "edit",
+      "client": 2,
+      "codepoint": 67,
+      "index": 0
+    },
+    {
+      "kind": "duplicate",
+      "client": 0
+    },
+    {
+      "kind": "restart-gateway"
+    },
+    {
+      "kind": "recover"
+    }
+  ],
+  "operations": [
+    {
+      "step": 3,
+      "client": 0,
+      "identity": "101:1",
+      "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+    },
+    {
+      "step": 5,
+      "client": 1,
+      "identity": "102:1",
+      "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+    },
+    {
+      "step": 7,
+      "client": 2,
+      "identity": "103:1",
+      "bytes": "AQFnAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQwA="
+    }
+  ]
+}

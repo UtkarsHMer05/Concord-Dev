@@ -1,0 +1,1008 @@
+{
+  "trace": {
+    "version": 1,
+    "name": "Two tabs allocate independent replica identities",
+    "mode": "fixed",
+    "actions": [
+      {
+        "kind": "edit",
+        "client": 2,
+        "codepoint": 90,
+        "index": 0
+      },
+      {
+        "kind": "edit",
+        "client": 0,
+        "codepoint": 65,
+        "index": 0
+      },
+      {
+        "kind": "edit",
+        "client": 1,
+        "codepoint": 66,
+        "index": 0
+      },
+      {
+        "kind": "recover"
+      },
+      {
+        "kind": "duplicate",
+        "client": 2
+      }
+    ],
+    "operations": [
+      {
+        "step": 0,
+        "client": 2,
+        "identity": "103:1",
+        "bytes": "AQFnAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBWgA="
+      },
+      {
+        "step": 1,
+        "client": 0,
+        "identity": "101:1",
+        "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+      },
+      {
+        "step": 2,
+        "client": 1,
+        "identity": "102:1",
+        "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+      }
+    ]
+  },
+  "scope": "Real session and WASM; simulated transport and memory persistence",
+  "scheduleHash": "b31edb888f0e54d326a717110cb81e75eadbaa5349c076bbc7d65f3396704e8c",
+  "passed": false,
+  "failure": {
+    "invariant": "session_error",
+    "message": "Cursor decreased"
+  },
+  "observations": [
+    {
+      "step": 0,
+      "action": {
+        "kind": "edit",
+        "client": 2,
+        "codepoint": 90,
+        "index": 0
+      },
+      "clients": [
+        {
+          "name": "Alice",
+          "replica": "101",
+          "status": "offline",
+          "pending": 0,
+          "sent": 0,
+          "acknowledged": 0,
+          "cursor": "0",
+          "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "Bob",
+          "replica": "102",
+          "status": "offline",
+          "pending": 0,
+          "sent": 0,
+          "acknowledged": 0,
+          "cursor": "0",
+          "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "Reviewer",
+          "replica": "103",
+          "status": "offline",
+          "pending": 1,
+          "sent": 0,
+          "acknowledged": 0,
+          "cursor": "0",
+          "digest": "sha256:a3661a1b051b02cb48605e857ca34d222d97bcffc0f207c8d30d021f077cde82",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "Z",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "durableOperations": 0,
+      "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+    },
+    {
+      "step": 1,
+      "action": {
+        "kind": "edit",
+        "client": 0,
+        "codepoint": 65,
+        "index": 0
+      },
+      "clients": [
+        {
+          "name": "Alice",
+          "replica": "101",
+          "status": "offline",
+          "pending": 1,
+          "sent": 0,
+          "acknowledged": 0,
+          "cursor": "0",
+          "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "A",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "Bob",
+          "replica": "102",
+          "status": "offline",
+          "pending": 0,
+          "sent": 0,
+          "acknowledged": 0,
+          "cursor": "0",
+          "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "Reviewer",
+          "replica": "103",
+          "status": "offline",
+          "pending": 1,
+          "sent": 0,
+          "acknowledged": 0,
+          "cursor": "0",
+          "digest": "sha256:a3661a1b051b02cb48605e857ca34d222d97bcffc0f207c8d30d021f077cde82",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "Z",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "durableOperations": 0,
+      "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+    },
+    {
+      "step": 2,
+      "action": {
+        "kind": "edit",
+        "client": 1,
+        "codepoint": 66,
+        "index": 0
+      },
+      "clients": [
+        {
+          "name": "Alice",
+          "replica": "101",
+          "status": "offline",
+          "pending": 1,
+          "sent": 0,
+          "acknowledged": 0,
+          "cursor": "0",
+          "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "A",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "Bob",
+          "replica": "102",
+          "status": "offline",
+          "pending": 1,
+          "sent": 0,
+          "acknowledged": 0,
+          "cursor": "0",
+          "digest": "sha256:6cb2533b72ef3f7620d1140184ed788bd1aa60ce9741663e6bf950c6d5865e6f",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "B",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "Reviewer",
+          "replica": "103",
+          "status": "offline",
+          "pending": 1,
+          "sent": 0,
+          "acknowledged": 0,
+          "cursor": "0",
+          "digest": "sha256:a3661a1b051b02cb48605e857ca34d222d97bcffc0f207c8d30d021f077cde82",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "Z",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "durableOperations": 0,
+      "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+    },
+    {
+      "step": 3,
+      "action": {
+        "kind": "recover"
+      },
+      "clients": [
+        {
+          "name": "Alice",
+          "replica": "101",
+          "status": "ready",
+          "pending": 0,
+          "sent": 0,
+          "acknowledged": 1,
+          "cursor": "3",
+          "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "ABZ",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "Bob",
+          "replica": "102",
+          "status": "ready",
+          "pending": 0,
+          "sent": 0,
+          "acknowledged": 1,
+          "cursor": "3",
+          "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "ABZ",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "Reviewer",
+          "replica": "103",
+          "status": "ready",
+          "pending": 0,
+          "sent": 0,
+          "acknowledged": 1,
+          "cursor": "3",
+          "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "ABZ",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "durableOperations": 3,
+      "gatewayDigest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90"
+    },
+    {
+      "step": 4,
+      "action": {
+        "kind": "duplicate",
+        "client": 2
+      },
+      "clients": [
+        {
+          "name": "Alice",
+          "replica": "101",
+          "status": "ready",
+          "pending": 0,
+          "sent": 0,
+          "acknowledged": 1,
+          "cursor": "3",
+          "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "ABZ",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "Bob",
+          "replica": "102",
+          "status": "ready",
+          "pending": 0,
+          "sent": 0,
+          "acknowledged": 1,
+          "cursor": "3",
+          "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "ABZ",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "Reviewer",
+          "replica": "103",
+          "status": "ready",
+          "pending": 0,
+          "sent": 0,
+          "acknowledged": 1,
+          "cursor": "3",
+          "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+          "content": {
+            "blocks": [
+              {
+                "type": "paragraph",
+                "attrs": {},
+                "runs": [
+                  {
+                    "t": "ABZ",
+                    "m": {}
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "durableOperations": 3,
+      "gatewayDigest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90"
+    }
+  ],
+  "wire": [
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "client \u2192 server",
+      "kind": "hello",
+      "data": {
+        "clientProtocolVersion": 1,
+        "capabilities": [
+          "rich-text-v2"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "server \u2192 client",
+      "kind": "hello_ack",
+      "data": {
+        "protocolVersion": 1,
+        "connectionId": "lab-0",
+        "capabilities": [
+          "rich-text-v2"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "client \u2192 server",
+      "kind": "authenticate",
+      "data": {
+        "modelAuthentication": true
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "server \u2192 client",
+      "kind": "authenticated",
+      "data": {
+        "userId": "lab",
+        "clerkUserId": "lab"
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "client \u2192 server",
+      "kind": "join_document",
+      "data": {
+        "documentId": "concord-failure-lab",
+        "stateSummary": [
+          {
+            "replicaId": "101",
+            "sequence": "1"
+          }
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "server \u2192 client",
+      "kind": "join_accepted",
+      "data": {
+        "documentId": "concord-failure-lab",
+        "role": "owner",
+        "durableCursor": "0"
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "client \u2192 server",
+      "kind": "sync_request",
+      "data": {
+        "cursor": "0"
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "server \u2192 client",
+      "kind": "sync_done",
+      "data": {}
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "client \u2192 server",
+      "kind": "client_ops",
+      "data": {
+        "batchId": "1",
+        "operations": [
+          {
+            "identity": "101:1",
+            "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+          }
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "model transaction",
+      "kind": "committed",
+      "data": {
+        "cursor": "1",
+        "identities": [
+          "101:1"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "server \u2192 client",
+      "kind": "durable_ack",
+      "data": {
+        "batchId": "1",
+        "opIds": [
+          "101:1"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "client \u2192 server",
+      "kind": "hello",
+      "data": {
+        "clientProtocolVersion": 1,
+        "capabilities": [
+          "rich-text-v2"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "server \u2192 client",
+      "kind": "hello_ack",
+      "data": {
+        "protocolVersion": 1,
+        "connectionId": "lab-1",
+        "capabilities": [
+          "rich-text-v2"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "client \u2192 server",
+      "kind": "authenticate",
+      "data": {
+        "modelAuthentication": true
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "server \u2192 client",
+      "kind": "authenticated",
+      "data": {
+        "userId": "lab",
+        "clerkUserId": "lab"
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "client \u2192 server",
+      "kind": "join_document",
+      "data": {
+        "documentId": "concord-failure-lab",
+        "stateSummary": [
+          {
+            "replicaId": "102",
+            "sequence": "1"
+          }
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "server \u2192 client",
+      "kind": "join_accepted",
+      "data": {
+        "documentId": "concord-failure-lab",
+        "role": "owner",
+        "durableCursor": "1"
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "client \u2192 server",
+      "kind": "sync_request",
+      "data": {
+        "cursor": "0"
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "server \u2192 client",
+      "kind": "sync_batch",
+      "data": {
+        "cursor": "1",
+        "identities": [
+          "101:1"
+        ],
+        "bytes": "ASEAAAAAAAAAAQAAAQAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAA=="
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "server \u2192 client",
+      "kind": "sync_done",
+      "data": {}
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "client \u2192 server",
+      "kind": "client_ops",
+      "data": {
+        "batchId": "1",
+        "operations": [
+          {
+            "identity": "102:1",
+            "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+          }
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "model transaction",
+      "kind": "committed",
+      "data": {
+        "cursor": "2",
+        "identities": [
+          "102:1"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "server \u2192 client",
+      "kind": "durable_ack",
+      "data": {
+        "batchId": "1",
+        "opIds": [
+          "102:1"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "client \u2192 server",
+      "kind": "hello",
+      "data": {
+        "clientProtocolVersion": 1,
+        "capabilities": [
+          "rich-text-v2"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "hello_ack",
+      "data": {
+        "protocolVersion": 1,
+        "connectionId": "lab-2",
+        "capabilities": [
+          "rich-text-v2"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "client \u2192 server",
+      "kind": "authenticate",
+      "data": {
+        "modelAuthentication": true
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "authenticated",
+      "data": {
+        "userId": "lab",
+        "clerkUserId": "lab"
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "client \u2192 server",
+      "kind": "join_document",
+      "data": {
+        "documentId": "concord-failure-lab",
+        "stateSummary": [
+          {
+            "replicaId": "103",
+            "sequence": "1"
+          }
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "join_accepted",
+      "data": {
+        "documentId": "concord-failure-lab",
+        "role": "owner",
+        "durableCursor": "2"
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "client \u2192 server",
+      "kind": "sync_request",
+      "data": {
+        "cursor": "0"
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "sync_batch",
+      "data": {
+        "cursor": "2",
+        "identities": [
+          "101:1",
+          "102:1"
+        ],
+        "bytes": "ASEAAAAAAAAAAgAAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "sync_done",
+      "data": {}
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "client \u2192 server",
+      "kind": "client_ops",
+      "data": {
+        "batchId": "1",
+        "operations": [
+          {
+            "identity": "103:1",
+            "bytes": "AQFnAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBWgA="
+          }
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "model transaction",
+      "kind": "committed",
+      "data": {
+        "cursor": "3",
+        "identities": [
+          "103:1"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "durable_ack",
+      "data": {
+        "batchId": "1",
+        "opIds": [
+          "103:1"
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "client \u2192 server",
+      "kind": "sync_request",
+      "data": {
+        "cursor": "0"
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "server \u2192 client",
+      "kind": "sync_batch",
+      "data": {
+        "cursor": "2",
+        "identities": [
+          "101:1",
+          "102:1"
+        ],
+        "bytes": "ASEAAAAAAAAAAgEAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "server \u2192 client",
+      "kind": "sync_batch",
+      "data": {
+        "cursor": "3",
+        "identities": [
+          "103:1"
+        ],
+        "bytes": "ASEAAAAAAAAAAwAAAQAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFaAA=="
+      }
+    },
+    {
+      "step": 3,
+      "client": 0,
+      "direction": "server \u2192 client",
+      "kind": "sync_done",
+      "data": {}
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "client \u2192 server",
+      "kind": "sync_request",
+      "data": {
+        "cursor": "1"
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "server \u2192 client",
+      "kind": "sync_batch",
+      "data": {
+        "cursor": "3",
+        "identities": [
+          "102:1",
+          "103:1"
+        ],
+        "bytes": "ASEAAAAAAAAAAwAAAgAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAAAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFaAA=="
+      }
+    },
+    {
+      "step": 3,
+      "client": 1,
+      "direction": "server \u2192 client",
+      "kind": "sync_done",
+      "data": {}
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "client \u2192 server",
+      "kind": "sync_request",
+      "data": {
+        "cursor": "2"
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "sync_batch",
+      "data": {
+        "cursor": "3",
+        "identities": [
+          "103:1"
+        ],
+        "bytes": "ASEAAAAAAAAAAwAAAQAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFaAA=="
+      }
+    },
+    {
+      "step": 3,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "sync_done",
+      "data": {}
+    },
+    {
+      "step": 4,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "sync_batch",
+      "data": {
+        "cursor": "2",
+        "identities": [
+          "101:1",
+          "102:1"
+        ],
+        "bytes": "ASEAAAAAAAAAAgEAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+      }
+    },
+    {
+      "step": 4,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "sync_batch",
+      "data": {
+        "cursor": "3",
+        "identities": [
+          "103:1"
+        ],
+        "bytes": "ASEAAAAAAAAAAwAAAQAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFaAA=="
+      }
+    },
+    {
+      "step": 4,
+      "client": 2,
+      "direction": "server \u2192 client",
+      "kind": "sync_done",
+      "data": {}
+    }
+  ]
+}

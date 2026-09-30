@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "command": "run",
+  "startedAt": "2026-09-30T12:39:16.656Z",
+  "coverage": "simulation only; live checks not requested",
+  "environment": {
+    "node": "v24.20.0",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "sourceRevision": "c8a9e8c2f9cc1820b5a6b3ae61e627402faeef38",
+    "workingTreeDirty": true,
+    "nativeToolchain": "installed Command Line Tools"
+  },
+  "lanes": [
+    {
+      "id": "simulation",
+      "label": "Recorded session and real-WASM scenarios",
+      "kind": "simulated",
+      "status": "incomplete",
+      "passed": 0,
+      "skipped": 0,
+      "reason": "Missing dependencies: built WASM (npm run wasm:build)"
+    }
+  ],
+  "finishedAt": "2026-09-30T12:39:16.754Z",
+  "status": "incomplete"
+}

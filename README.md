@@ -33,6 +33,49 @@
 > deployment or remote CI result is claimed; release and container-scan
 > evidence dated 2026-09-14 remains historical.
 
+## Reproducible collaboration failure lab (2026-09-30)
+
+**Reproduce a collaboration failure, inspect its operation trace, and replay
+the fix.** One command brings the existing correctness tools into an
+interactive developer report:
+
+```bash
+npm run failure-lab -- --headed
+```
+
+Open `output/playwright/failure-lab/latest/index.html`. Choose a recorded
+scenario and move through disconnection, duplicate delivery, lost sends,
+interrupted acknowledgements, restart and recovery. Each step exposes three
+replicas' pending/sent operations, confirmed operations, cursor, document
+content and digest. Download the trace to execute its exact ordered actions
+and check its generated engine bytes again.
+
+![Failure lab showing converged replicas and separately labelled live coverage](docs/assets/failure-lab/overview.png)
+
+The lab deliberately reproduces a historical replica identity collision,
+reduces five actions to two, and passes the same two actions with independent
+identities. The new duplicate-delivery scenario also exposed a real cursor
+regression: an older catch-up page could rewind the session cursor. The
+shared session now advances cursors monotonically; the exported regression
+trace passes through that fix.
+
+![Reduced replica identity failure with pending operations and the exact failing identity](docs/assets/failure-lab/failure.png)
+
+The timeline uses the real session and WASM engine with a model gateway and
+memory storage. Separate live lanes run PostgreSQL/native reconstruction,
+actual compaction and stale-client recovery, the realtime gateway matrix,
+authenticated shared-storage browser tabs, mixed worker versions, and a
+branch-merge crash after acceptance followed by an idempotent retry. Missing
+dependencies produce an **incomplete** result; `--sim-only` visibly limits
+coverage to simulation.
+
+See the [run/replay guide](docs/FAILURE_LAB.md),
+[implementation and verification report](docs/audits/FAILURE_LAB_REPORT.md),
+[machine-readable acceptance result](docs/assets/failure-lab/report.json),
+and [mobile inspector](docs/assets/failure-lab/mobile.png). No new package or
+production service is needed; the full run uses the existing local test
+infrastructure and disposable Clerk test harness.
+
 ## Shared review branches and selective merge (2026-09-30)
 
 **Propose changes in a shared branch, review them against current main, and

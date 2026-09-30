@@ -480,6 +480,13 @@ export class SyncSession {
 
   private async persistCursor(cursor: string): Promise<void> {
     await this.options.engine.persistCursor?.(cursor);
+    this.advanceCursor(cursor);
+  }
+
+  private advanceCursor(cursor: string): void {
+    // Re-delivered catch-up pages may cover an older prefix. Their ops still
+    // integrate idempotently, but must not rewind the next sync request.
+    if (BigInt(cursor) < BigInt(this.lastCursor)) return;
     this.options.setCursor(cursor);
     this.lastCursor = cursor;
   }
@@ -509,8 +516,7 @@ export class SyncSession {
       try {
         await this.applyRemoteOps(ops, cursor);
         if (cursor !== undefined) {
-          this.options.setCursor(cursor);
-          this.lastCursor = cursor;
+          this.advanceCursor(cursor);
         }
       } catch (error) {
         this.catchupFailed = true;

@@ -86,8 +86,11 @@ try {
     await surface(bob).click();
     for (const line of lines) { await bob.keyboard.insertText(line); await bob.keyboard.press('Enter'); }
     await bob.getByRole('button', { name: 'Lists', exact: true }).click(); await bob.getByRole('menuitem', { name: 'Task List', exact: true }).click();
+    await expect(surface(bob)).toBeFocused();
+    await expect(bob.locator('.tiptap input[type=checkbox]')).toHaveCount(1);
     await bob.keyboard.insertText('Release checklist'); await bob.keyboard.press('Enter'); await bob.keyboard.insertText('Verify recovery');
     await bob.getByRole('button', { name: 'Lists', exact: true }).click(); await bob.getByRole('menuitem', { name: 'Indent list item', exact: true }).click();
+    await expect(surface(bob)).toBeFocused();
     await bob.locator('.tiptap input[type=checkbox]').first().check();
     await settle(bob);
     await grant(bob, aliceId, 'EDITOR');

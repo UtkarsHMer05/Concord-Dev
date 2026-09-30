@@ -94,6 +94,7 @@ try {
     await expect(surface(a)).toBeFocused();
     await a.keyboard.press('ArrowRight', { delay: 80 });
     await a.getByRole('button', { name: 'Inline code', exact: true }).click();
+    await expect(surface(a)).toBeFocused();
     await a.keyboard.press('Enter');
     await input(a, 'Concurrent formatting');
     await settle(a);
@@ -164,15 +165,21 @@ try {
     await matches(); stages.push('same browser, cloned sessionStorage: distinct replicas and concurrent edits converge');
     await c.close();
 
-    const old = await contextA.newPage();
-    await old.route('**/crdt-worker.js', (route) => route.fulfill({ contentType: 'application/javascript', body: 'self.onmessage = ({data}) => self.postMessage({id:data.id,ok:true,result:{kind:"init",ready:true}});' }));
+    // Page routes cannot replace responses owned by the PWA service worker.
+    // Isolate only the stale-bundle fixture; the real tab/offline checks above
+    // keep their normal service worker and shared IndexedDB context.
+    const oldContext = await browser.newContext({ baseURL: origin, storageState: await contextA.storageState(), serviceWorkers: 'block', viewport: { width: 1440, height: 1000 } });
+    const old = await oldContext.newPage();
+    let staleBundleRequests = 0;
+    await old.route('**/crdt-worker.js', (route) => { staleBundleRequests += 1; return route.fulfill({ contentType: 'application/javascript', body: 'self.onmessage = ({data}) => self.postMessage({id:data.id,ok:true,result:{kind:"init",ready:true}});' }); });
     await old.goto(`/documents/${id}`);
+    await expect.poll(() => staleBundleRequests).toBeGreaterThan(0);
     await expect(old.getByText('Update required. Offline edits are preserved.', { exact: true })).toBeVisible();
     await expect(old.getByRole('button', { name: 'Reload Concord' })).toBeVisible();
     await expect(old.getByRole('status').filter({ hasText: 'Waiting for update' })).toBeVisible();
     await expect(old.locator('.ProseMirror')).toHaveAttribute('contenteditable', 'false');
     await old.screenshot({ path: path.join(output, 'upgrade.png') });
-    await old.close(); stages.push('stale worker shows explicit reload/upgrade path and disables editing');
+    await oldContext.close(); stages.push('stale worker shows explicit reload/upgrade path and disables editing');
 
     await a.evaluate(() => window.scrollTo(0, 0)); await b.evaluate(() => window.scrollTo(0, 0));
     await a.screenshot({ path: path.join(output, 'alice.png'), fullPage: false });

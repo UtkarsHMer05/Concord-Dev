@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "name": "Two tabs allocate independent replica identities",
+  "mode": "fixed",
+  "actions": [
+    {
+      "kind": "edit",
+      "client": 0,
+      "codepoint": 65,
+      "index": 0
+    },
+    {
+      "kind": "edit",
+      "client": 1,
+      "codepoint": 66,
+      "index": 0
+    }
+  ],
+  "operations": [
+    {
+      "step": 0,
+      "client": 0,
+      "identity": "101:1",
+      "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+    },
+    {
+      "step": 1,
+      "client": 1,
+      "identity": "102:1",
+      "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+    }
+  ]
+}

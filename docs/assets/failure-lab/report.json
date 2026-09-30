@@ -1,0 +1,5825 @@
+{
+  "version": 1,
+  "command": "run",
+  "startedAt": "2026-09-30T12:56:47.845Z",
+  "coverage": "simulation and live infrastructure",
+  "environment": {
+    "node": "v24.20.0",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "sourceRevision": "c8a9e8c2f9cc1820b5a6b3ae61e627402faeef38",
+    "workingTreeDirty": true,
+    "nativeToolchain": "installed Command Line Tools",
+    "wasmSha256": "3d421466d07adac264e2b22aeb19c281927d4e9e53bfe5aed32865f578cacf4a"
+  },
+  "lanes": [
+    {
+      "id": "simulation",
+      "label": "Recorded session and real-WASM scenarios",
+      "kind": "simulated",
+      "status": "passed",
+      "passed": 1,
+      "skipped": 0,
+      "exitCode": 0,
+      "knownFailureReproduced": true
+    },
+    {
+      "id": "convergence",
+      "label": "PostgreSQL commit ordering and native reconstruction",
+      "kind": "live",
+      "status": "passed",
+      "passed": 2,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    {
+      "id": "compaction",
+      "label": "Stale client after real snapshot compaction",
+      "kind": "live",
+      "status": "passed",
+      "passed": 1,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    {
+      "id": "realtime",
+      "label": "Real gateway restart, ACK interruption and transport recovery",
+      "kind": "live",
+      "status": "passed",
+      "passed": 21,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    {
+      "id": "browser-tabs",
+      "label": "Real Chromium: shared IndexedDB tabs and stale worker upgrade",
+      "kind": "browser",
+      "status": "passed",
+      "passed": 6,
+      "skipped": 0,
+      "exitCode": 0,
+      "stages": [
+        "two users: nested bullets, numbered lists, tasks, link and inline code",
+        "offline indent, overlapping bold/italic, task toggle, reconnect convergence",
+        "native gateway checkpoint, rich preview and forward restore retain formatting",
+        "reload preserves identical content, formatting and task state",
+        "same browser, cloned sessionStorage: distinct replicas and concurrent edits converge",
+        "stale worker shows explicit reload/upgrade path and disables editing"
+      ]
+    },
+    {
+      "id": "browser-acceptance",
+      "label": "Real Chromium: crash after merge acceptance and retry",
+      "kind": "browser",
+      "status": "passed",
+      "passed": 6,
+      "skipped": 0,
+      "exitCode": 0,
+      "stages": [
+        "named revision creates a separate rich CRDT branch with independent sharing",
+        "author edits offline; main edits concurrently; reconnect and reload keep both documents independent",
+        "explicit branch commenter invitation, anchored review feedback, separate main ACL, no reviewer merge/edit access",
+        "selective merge preserves main conflict, unrelated main edits and omitted branch change; lost-response recovery commits once",
+        "merge source/result appear in history; branch comments and untouched main anchors and nested task state survive",
+        "explicit Use branch conflict resolution preserves unrelated edits; visible service failure and saved retry, responsive panel and accessibility check pass"
+      ]
+    }
+  ],
+  "finishedAt": "2026-09-30T12:59:19.534Z",
+  "status": "passed",
+  "simulation": {
+    "results": [
+      {
+        "trace": {
+          "version": 1,
+          "name": "Offline edits, duplicate delivery, lost acknowledgement and gateway restart",
+          "mode": "fixed",
+          "actions": [
+            {
+              "kind": "connect",
+              "client": 0
+            },
+            {
+              "kind": "connect",
+              "client": 1
+            },
+            {
+              "kind": "connect",
+              "client": 2
+            },
+            {
+              "kind": "edit",
+              "client": 0,
+              "codepoint": 65,
+              "index": 0
+            },
+            {
+              "kind": "disconnect",
+              "client": 1
+            },
+            {
+              "kind": "edit",
+              "client": 1,
+              "codepoint": 66,
+              "index": 0
+            },
+            {
+              "kind": "drop-ack",
+              "client": 2
+            },
+            {
+              "kind": "edit",
+              "client": 2,
+              "codepoint": 67,
+              "index": 0
+            },
+            {
+              "kind": "duplicate",
+              "client": 0
+            },
+            {
+              "kind": "restart-gateway"
+            },
+            {
+              "kind": "recover"
+            }
+          ],
+          "operations": [
+            {
+              "step": 3,
+              "client": 0,
+              "identity": "101:1",
+              "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+            },
+            {
+              "step": 5,
+              "client": 1,
+              "identity": "102:1",
+              "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+            },
+            {
+              "step": 7,
+              "client": 2,
+              "identity": "103:1",
+              "bytes": "AQFnAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQwA="
+            }
+          ]
+        },
+        "scope": "Real session and WASM; simulated transport and memory persistence",
+        "scheduleHash": "b4617011dc7e4dd078f3531a2f105951c1ef8982f2fca5be065bf096ba8a0d2b",
+        "passed": true,
+        "failure": null,
+        "observations": [
+          {
+            "step": 0,
+            "action": {
+              "kind": "connect",
+              "client": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 1,
+            "action": {
+              "kind": "connect",
+              "client": 1
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 2,
+            "action": {
+              "kind": "connect",
+              "client": 2
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 3,
+            "action": {
+              "kind": "edit",
+              "client": 0,
+              "codepoint": 65,
+              "index": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "0",
+                "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "A",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 1,
+            "gatewayDigest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349"
+          },
+          {
+            "step": 4,
+            "action": {
+              "kind": "disconnect",
+              "client": 1
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "0",
+                "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "A",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 1,
+            "gatewayDigest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349"
+          },
+          {
+            "step": 5,
+            "action": {
+              "kind": "edit",
+              "client": 1,
+              "codepoint": 66,
+              "index": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "0",
+                "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "A",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:6cb2533b72ef3f7620d1140184ed788bd1aa60ce9741663e6bf950c6d5865e6f",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "B",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 1,
+            "gatewayDigest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349"
+          },
+          {
+            "step": 6,
+            "action": {
+              "kind": "drop-ack",
+              "client": 2
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "0",
+                "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "A",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:6cb2533b72ef3f7620d1140184ed788bd1aa60ce9741663e6bf950c6d5865e6f",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "B",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 1,
+            "gatewayDigest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349"
+          },
+          {
+            "step": 7,
+            "action": {
+              "kind": "edit",
+              "client": 2,
+              "codepoint": 67,
+              "index": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "0",
+                "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "A",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:6cb2533b72ef3f7620d1140184ed788bd1aa60ce9741663e6bf950c6d5865e6f",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "B",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 1,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:7eec3cac054b523b993b5b6e1fc2a2bd2cbdc19aa7218e2df92979a79123f601",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "C",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 2,
+            "gatewayDigest": "sha256:f12685559882e3d4fc3fc6b212ac578fc54a8a67c03fe777d0f0ce0723bfd926"
+          },
+          {
+            "step": 8,
+            "action": {
+              "kind": "duplicate",
+              "client": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "2",
+                "digest": "sha256:f12685559882e3d4fc3fc6b212ac578fc54a8a67c03fe777d0f0ce0723bfd926",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "AC",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:6cb2533b72ef3f7620d1140184ed788bd1aa60ce9741663e6bf950c6d5865e6f",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "B",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 1,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:7eec3cac054b523b993b5b6e1fc2a2bd2cbdc19aa7218e2df92979a79123f601",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "C",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 2,
+            "gatewayDigest": "sha256:f12685559882e3d4fc3fc6b212ac578fc54a8a67c03fe777d0f0ce0723bfd926"
+          },
+          {
+            "step": 9,
+            "action": {
+              "kind": "restart-gateway"
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "2",
+                "digest": "sha256:f12685559882e3d4fc3fc6b212ac578fc54a8a67c03fe777d0f0ce0723bfd926",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "AC",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:6cb2533b72ef3f7620d1140184ed788bd1aa60ce9741663e6bf950c6d5865e6f",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "B",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 0,
+                "sent": 1,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:7eec3cac054b523b993b5b6e1fc2a2bd2cbdc19aa7218e2df92979a79123f601",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "C",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 2,
+            "gatewayDigest": "sha256:f12685559882e3d4fc3fc6b212ac578fc54a8a67c03fe777d0f0ce0723bfd926"
+          },
+          {
+            "step": 10,
+            "action": {
+              "kind": "recover"
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:36276add51224b9472b7de40af2b130d8ea93c18e5342697647dab181135f8c8",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABC",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:36276add51224b9472b7de40af2b130d8ea93c18e5342697647dab181135f8c8",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABC",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:36276add51224b9472b7de40af2b130d8ea93c18e5342697647dab181135f8c8",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABC",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 3,
+            "gatewayDigest": "sha256:36276add51224b9472b7de40af2b130d8ea93c18e5342697647dab181135f8c8"
+          },
+          {
+            "step": 11,
+            "action": {
+              "kind": "final-recovery"
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:36276add51224b9472b7de40af2b130d8ea93c18e5342697647dab181135f8c8",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABC",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:36276add51224b9472b7de40af2b130d8ea93c18e5342697647dab181135f8c8",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABC",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:36276add51224b9472b7de40af2b130d8ea93c18e5342697647dab181135f8c8",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABC",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 3,
+            "gatewayDigest": "sha256:36276add51224b9472b7de40af2b130d8ea93c18e5342697647dab181135f8c8"
+          }
+        ],
+        "wire": [
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-0",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "101",
+                  "sequence": "0"
+                }
+              ]
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "0"
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 1,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 1,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-1",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 1,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 1,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 1,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "102",
+                  "sequence": "0"
+                }
+              ]
+            }
+          },
+          {
+            "step": 1,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "0"
+            }
+          },
+          {
+            "step": 1,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 1,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 2,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 2,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-2",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 2,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 2,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 2,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "103",
+                  "sequence": "0"
+                }
+              ]
+            }
+          },
+          {
+            "step": 2,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "0"
+            }
+          },
+          {
+            "step": 2,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 2,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "client_ops",
+            "data": {
+              "batchId": "1",
+              "operations": [
+                {
+                  "identity": "101:1",
+                  "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+                }
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "model transaction",
+            "kind": "committed",
+            "data": {
+              "cursor": "1",
+              "identities": [
+                "101:1"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "durable_ack",
+            "data": {
+              "batchId": "1",
+              "opIds": [
+                "101:1"
+              ]
+            }
+          },
+          {
+            "step": 7,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "client_ops",
+            "data": {
+              "batchId": "1",
+              "operations": [
+                {
+                  "identity": "103:1",
+                  "bytes": "AQFnAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQwA="
+                }
+              ]
+            }
+          },
+          {
+            "step": 7,
+            "client": 2,
+            "direction": "model transaction",
+            "kind": "committed",
+            "data": {
+              "cursor": "2",
+              "identities": [
+                "103:1"
+              ]
+            }
+          },
+          {
+            "step": 7,
+            "client": 2,
+            "direction": "fault",
+            "kind": "acknowledgement interrupted after commit"
+          },
+          {
+            "step": 8,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "2",
+              "identities": [
+                "101:1",
+                "103:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAgAAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFDAA=="
+            }
+          },
+          {
+            "step": 8,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 9,
+            "client": -1,
+            "direction": "fault",
+            "kind": "model gateway restarted; committed log retained"
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-0",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "101",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "2"
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "2"
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-1",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "102",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "2"
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "2",
+              "identities": [
+                "101:1",
+                "103:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAgAAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFDAA=="
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "client_ops",
+            "data": {
+              "batchId": "1",
+              "operations": [
+                {
+                  "identity": "102:1",
+                  "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+                }
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "model transaction",
+            "kind": "committed",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "102:1"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "durable_ack",
+            "data": {
+              "batchId": "1",
+              "opIds": [
+                "102:1"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-2",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "103",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "3"
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "2",
+              "identities": [
+                "101:1",
+                "103:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAgEAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFDAA=="
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "102:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAwAAAQAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "client_ops",
+            "data": {
+              "batchId": "1",
+              "operations": [
+                {
+                  "identity": "103:1",
+                  "bytes": "AQFnAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQwA="
+                }
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "model transaction",
+            "kind": "committed",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "103:1"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "durable_ack",
+            "data": {
+              "batchId": "1",
+              "opIds": [
+                "103:1"
+              ]
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "2"
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "102:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAwAAAQAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+            }
+          },
+          {
+            "step": 10,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "2"
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "102:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAwAAAQAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+            }
+          },
+          {
+            "step": 10,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 10,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-0",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "101",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "3"
+            }
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-1",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "102",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "3"
+            }
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-2",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "103",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "3"
+            }
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 11,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 11,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 11,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          }
+        ]
+      },
+      {
+        "trace": {
+          "version": 1,
+          "name": "Dropped send retains pending operations until reconnect",
+          "mode": "fixed",
+          "actions": [
+            {
+              "kind": "connect",
+              "client": 0
+            },
+            {
+              "kind": "drop-send",
+              "client": 0
+            },
+            {
+              "kind": "edit",
+              "client": 0,
+              "codepoint": 128640,
+              "index": 0
+            },
+            {
+              "kind": "disconnect",
+              "client": 0
+            },
+            {
+              "kind": "recover"
+            }
+          ],
+          "operations": [
+            {
+              "step": 2,
+              "client": 0,
+              "identity": "101:1",
+              "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEE8J+agAA="
+            }
+          ]
+        },
+        "scope": "Real session and WASM; simulated transport and memory persistence",
+        "scheduleHash": "6a0dcf8c80db023e1571ff2f6a867b7863998d09fc6acee22757cff7b3d1b58a",
+        "passed": true,
+        "failure": null,
+        "observations": [
+          {
+            "step": 0,
+            "action": {
+              "kind": "connect",
+              "client": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 1,
+            "action": {
+              "kind": "drop-send",
+              "client": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 2,
+            "action": {
+              "kind": "edit",
+              "client": 0,
+              "codepoint": 128640,
+              "index": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 1,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "🚀",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 3,
+            "action": {
+              "kind": "disconnect",
+              "client": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "offline",
+                "pending": 0,
+                "sent": 1,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "🚀",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 4,
+            "action": {
+              "kind": "recover"
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "1",
+                "digest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "🚀",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "1",
+                "digest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "🚀",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "1",
+                "digest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "🚀",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 1,
+            "gatewayDigest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84"
+          },
+          {
+            "step": 5,
+            "action": {
+              "kind": "final-recovery"
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "1",
+                "digest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "🚀",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "1",
+                "digest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "🚀",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "1",
+                "digest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "🚀",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 1,
+            "gatewayDigest": "sha256:d529e0fc1b28481e56c7f73dfa86c3a3f4481f51966339f9e794e4d18903ce84"
+          }
+        ],
+        "wire": [
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-0",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "101",
+                  "sequence": "0"
+                }
+              ]
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "0"
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 0,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 2,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "client_ops",
+            "data": {
+              "batchId": "1",
+              "operations": [
+                {
+                  "identity": "101:1",
+                  "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEE8J+agAA="
+                }
+              ]
+            }
+          },
+          {
+            "step": 2,
+            "client": 0,
+            "direction": "fault",
+            "kind": "send dropped before ingest"
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-0",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "101",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "0"
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "client_ops",
+            "data": {
+              "batchId": "1",
+              "operations": [
+                {
+                  "identity": "101:1",
+                  "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEE8J+agAA="
+                }
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "model transaction",
+            "kind": "committed",
+            "data": {
+              "cursor": "1",
+              "identities": [
+                "101:1"
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "durable_ack",
+            "data": {
+              "batchId": "1",
+              "opIds": [
+                "101:1"
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-1",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "102",
+                  "sequence": "0"
+                }
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "1"
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "1",
+              "identities": [
+                "101:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAQAAAQAAACMBAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQTwn5qAAA=="
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-2",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "103",
+                  "sequence": "0"
+                }
+              ]
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "1"
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "1",
+              "identities": [
+                "101:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAQAAAQAAACMBAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQTwn5qAAA=="
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "1",
+              "identities": [
+                "101:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAQAAAQAAACMBAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQTwn5qAAA=="
+            }
+          },
+          {
+            "step": 4,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "1"
+            }
+          },
+          {
+            "step": 4,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "1"
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-0",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "101",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "1"
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "1"
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-1",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "102",
+                  "sequence": "0"
+                }
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "1"
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "1"
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-2",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "103",
+                  "sequence": "0"
+                }
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "1"
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "1"
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "1"
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "1"
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "1"
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          }
+        ]
+      },
+      {
+        "trace": {
+          "version": 1,
+          "name": "Two tabs allocate independent replica identities",
+          "mode": "fixed",
+          "actions": [
+            {
+              "kind": "edit",
+              "client": 2,
+              "codepoint": 90,
+              "index": 0
+            },
+            {
+              "kind": "edit",
+              "client": 0,
+              "codepoint": 65,
+              "index": 0
+            },
+            {
+              "kind": "edit",
+              "client": 1,
+              "codepoint": 66,
+              "index": 0
+            },
+            {
+              "kind": "recover"
+            },
+            {
+              "kind": "duplicate",
+              "client": 2
+            }
+          ],
+          "operations": [
+            {
+              "step": 0,
+              "client": 2,
+              "identity": "103:1",
+              "bytes": "AQFnAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBWgA="
+            },
+            {
+              "step": 1,
+              "client": 0,
+              "identity": "101:1",
+              "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+            },
+            {
+              "step": 2,
+              "client": 1,
+              "identity": "102:1",
+              "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+            }
+          ]
+        },
+        "scope": "Real session and WASM; simulated transport and memory persistence",
+        "scheduleHash": "b31edb888f0e54d326a717110cb81e75eadbaa5349c076bbc7d65f3396704e8c",
+        "passed": true,
+        "failure": null,
+        "observations": [
+          {
+            "step": 0,
+            "action": {
+              "kind": "edit",
+              "client": 2,
+              "codepoint": 90,
+              "index": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:a3661a1b051b02cb48605e857ca34d222d97bcffc0f207c8d30d021f077cde82",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "Z",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 1,
+            "action": {
+              "kind": "edit",
+              "client": 0,
+              "codepoint": 65,
+              "index": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "A",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:a3661a1b051b02cb48605e857ca34d222d97bcffc0f207c8d30d021f077cde82",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "Z",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 2,
+            "action": {
+              "kind": "edit",
+              "client": 1,
+              "codepoint": 66,
+              "index": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "A",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:6cb2533b72ef3f7620d1140184ed788bd1aa60ce9741663e6bf950c6d5865e6f",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "B",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:a3661a1b051b02cb48605e857ca34d222d97bcffc0f207c8d30d021f077cde82",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "Z",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 3,
+            "action": {
+              "kind": "recover"
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABZ",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABZ",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABZ",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 3,
+            "gatewayDigest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90"
+          },
+          {
+            "step": 4,
+            "action": {
+              "kind": "duplicate",
+              "client": 2
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABZ",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABZ",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABZ",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 3,
+            "gatewayDigest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90"
+          },
+          {
+            "step": 5,
+            "action": {
+              "kind": "final-recovery"
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABZ",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "102",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABZ",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "ready",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 1,
+                "cursor": "3",
+                "digest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "ABZ",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 3,
+            "gatewayDigest": "sha256:3397e9f5a4b1f83c4f6073b5292139c2c21fd9af2882b6728fa9a95a0b789c90"
+          }
+        ],
+        "wire": [
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-0",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "101",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "0"
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "client_ops",
+            "data": {
+              "batchId": "1",
+              "operations": [
+                {
+                  "identity": "101:1",
+                  "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+                }
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "model transaction",
+            "kind": "committed",
+            "data": {
+              "cursor": "1",
+              "identities": [
+                "101:1"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "durable_ack",
+            "data": {
+              "batchId": "1",
+              "opIds": [
+                "101:1"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-1",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "102",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "1"
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "1",
+              "identities": [
+                "101:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAQAAAQAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAA=="
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "client_ops",
+            "data": {
+              "batchId": "1",
+              "operations": [
+                {
+                  "identity": "102:1",
+                  "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+                }
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "model transaction",
+            "kind": "committed",
+            "data": {
+              "cursor": "2",
+              "identities": [
+                "102:1"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "durable_ack",
+            "data": {
+              "batchId": "1",
+              "opIds": [
+                "102:1"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-2",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "103",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "2"
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "2",
+              "identities": [
+                "101:1",
+                "102:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAgAAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "client_ops",
+            "data": {
+              "batchId": "1",
+              "operations": [
+                {
+                  "identity": "103:1",
+                  "bytes": "AQFnAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBWgA="
+                }
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "model transaction",
+            "kind": "committed",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "103:1"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "durable_ack",
+            "data": {
+              "batchId": "1",
+              "opIds": [
+                "103:1"
+              ]
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "0"
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "2",
+              "identities": [
+                "101:1",
+                "102:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAgEAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "103:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAwAAAQAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFaAA=="
+            }
+          },
+          {
+            "step": 3,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "1"
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "102:1",
+                "103:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAwAAAgAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAAAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFaAA=="
+            }
+          },
+          {
+            "step": 3,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "2"
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "103:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAwAAAQAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFaAA=="
+            }
+          },
+          {
+            "step": 3,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "2",
+              "identities": [
+                "101:1",
+                "102:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAgEAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_batch",
+            "data": {
+              "cursor": "3",
+              "identities": [
+                "103:1"
+              ],
+              "bytes": "ASEAAAAAAAAAAwAAAQAAACABAWcAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFaAA=="
+            }
+          },
+          {
+            "step": 4,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-0",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "101",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "3"
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-1",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "102",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "3"
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "hello",
+            "data": {
+              "clientProtocolVersion": 1,
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "hello_ack",
+            "data": {
+              "protocolVersion": 1,
+              "connectionId": "lab-2",
+              "capabilities": [
+                "rich-text-v2"
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "authenticate",
+            "data": {
+              "modelAuthentication": true
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "authenticated",
+            "data": {
+              "userId": "lab",
+              "clerkUserId": "lab"
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "join_document",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "stateSummary": [
+                {
+                  "replicaId": "103",
+                  "sequence": "1"
+                }
+              ]
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "join_accepted",
+            "data": {
+              "documentId": "concord-failure-lab",
+              "role": "owner",
+              "durableCursor": "3"
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 5,
+            "client": 0,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 5,
+            "client": 1,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "client → server",
+            "kind": "sync_request",
+            "data": {
+              "cursor": "3"
+            }
+          },
+          {
+            "step": 5,
+            "client": 2,
+            "direction": "server → client",
+            "kind": "sync_done",
+            "data": {}
+          }
+        ]
+      }
+    ],
+    "reduction": {
+      "originalActions": 5,
+      "reducedActions": 2,
+      "attempts": 7,
+      "oneActionMinimal": true,
+      "result": {
+        "trace": {
+          "version": 1,
+          "name": "Two tabs allocate independent replica identities",
+          "mode": "legacy-replica-alias",
+          "actions": [
+            {
+              "kind": "edit",
+              "client": 0,
+              "codepoint": 65,
+              "index": 0
+            },
+            {
+              "kind": "edit",
+              "client": 1,
+              "codepoint": 66,
+              "index": 0
+            }
+          ],
+          "operations": [
+            {
+              "step": 0,
+              "client": 0,
+              "identity": "101:1",
+              "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+            },
+            {
+              "step": 1,
+              "client": 1,
+              "identity": "101:1",
+              "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+            }
+          ]
+        },
+        "scope": "Real session and WASM; simulated transport and memory persistence",
+        "scheduleHash": "8398c1ecdf3cdb8c720fb040802e450ce0efd12c7ff3b2cb42a0922a500ceec4",
+        "passed": false,
+        "failure": {
+          "invariant": "replica_identity_collision",
+          "message": "Alice and Bob generated different bytes for 101:1."
+        },
+        "observations": [
+          {
+            "step": 0,
+            "action": {
+              "kind": "edit",
+              "client": 0,
+              "codepoint": 65,
+              "index": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "A",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "101",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          },
+          {
+            "step": 1,
+            "action": {
+              "kind": "edit",
+              "client": 1,
+              "codepoint": 66,
+              "index": 0
+            },
+            "clients": [
+              {
+                "name": "Alice",
+                "replica": "101",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "A",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Bob",
+                "replica": "101",
+                "status": "offline",
+                "pending": 1,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:e3cb76830d261a7bd69cb0e9df53ca71365504d0e4a0e77c7888841656cfb9eb",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": [
+                        {
+                          "t": "B",
+                          "m": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Reviewer",
+                "replica": "103",
+                "status": "offline",
+                "pending": 0,
+                "sent": 0,
+                "acknowledged": 0,
+                "cursor": "0",
+                "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+                "content": {
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {},
+                      "runs": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "durableOperations": 0,
+            "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+          }
+        ],
+        "wire": []
+      }
+    },
+    "fixedReplay": {
+      "trace": {
+        "version": 1,
+        "name": "Two tabs allocate independent replica identities",
+        "mode": "fixed",
+        "actions": [
+          {
+            "kind": "edit",
+            "client": 0,
+            "codepoint": 65,
+            "index": 0
+          },
+          {
+            "kind": "edit",
+            "client": 1,
+            "codepoint": 66,
+            "index": 0
+          }
+        ],
+        "operations": [
+          {
+            "step": 0,
+            "client": 0,
+            "identity": "101:1",
+            "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+          },
+          {
+            "step": 1,
+            "client": 1,
+            "identity": "102:1",
+            "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+          }
+        ]
+      },
+      "scope": "Real session and WASM; simulated transport and memory persistence",
+      "scheduleHash": "8398c1ecdf3cdb8c720fb040802e450ce0efd12c7ff3b2cb42a0922a500ceec4",
+      "passed": true,
+      "failure": null,
+      "observations": [
+        {
+          "step": 0,
+          "action": {
+            "kind": "edit",
+            "client": 0,
+            "codepoint": 65,
+            "index": 0
+          },
+          "clients": [
+            {
+              "name": "Alice",
+              "replica": "101",
+              "status": "offline",
+              "pending": 1,
+              "sent": 0,
+              "acknowledged": 0,
+              "cursor": "0",
+              "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+              "content": {
+                "blocks": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {},
+                    "runs": [
+                      {
+                        "t": "A",
+                        "m": {}
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Bob",
+              "replica": "102",
+              "status": "offline",
+              "pending": 0,
+              "sent": 0,
+              "acknowledged": 0,
+              "cursor": "0",
+              "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+              "content": {
+                "blocks": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {},
+                    "runs": []
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Reviewer",
+              "replica": "103",
+              "status": "offline",
+              "pending": 0,
+              "sent": 0,
+              "acknowledged": 0,
+              "cursor": "0",
+              "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+              "content": {
+                "blocks": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {},
+                    "runs": []
+                  }
+                ]
+              }
+            }
+          ],
+          "durableOperations": 0,
+          "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+        },
+        {
+          "step": 1,
+          "action": {
+            "kind": "edit",
+            "client": 1,
+            "codepoint": 66,
+            "index": 0
+          },
+          "clients": [
+            {
+              "name": "Alice",
+              "replica": "101",
+              "status": "offline",
+              "pending": 1,
+              "sent": 0,
+              "acknowledged": 0,
+              "cursor": "0",
+              "digest": "sha256:f4cee6ba4dc94ba483669ce8436c3b3aec25d7498d77103b36a76583c9b0b349",
+              "content": {
+                "blocks": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {},
+                    "runs": [
+                      {
+                        "t": "A",
+                        "m": {}
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Bob",
+              "replica": "102",
+              "status": "offline",
+              "pending": 1,
+              "sent": 0,
+              "acknowledged": 0,
+              "cursor": "0",
+              "digest": "sha256:6cb2533b72ef3f7620d1140184ed788bd1aa60ce9741663e6bf950c6d5865e6f",
+              "content": {
+                "blocks": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {},
+                    "runs": [
+                      {
+                        "t": "B",
+                        "m": {}
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Reviewer",
+              "replica": "103",
+              "status": "offline",
+              "pending": 0,
+              "sent": 0,
+              "acknowledged": 0,
+              "cursor": "0",
+              "digest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+              "content": {
+                "blocks": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {},
+                    "runs": []
+                  }
+                ]
+              }
+            }
+          ],
+          "durableOperations": 0,
+          "gatewayDigest": "sha256:15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"
+        },
+        {
+          "step": 2,
+          "action": {
+            "kind": "final-recovery"
+          },
+          "clients": [
+            {
+              "name": "Alice",
+              "replica": "101",
+              "status": "ready",
+              "pending": 0,
+              "sent": 0,
+              "acknowledged": 1,
+              "cursor": "2",
+              "digest": "sha256:dfab81a60d9aa4b2b6ee00bf535de39e96d8de1f1ff1098b72209d387b2dd9a7",
+              "content": {
+                "blocks": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {},
+                    "runs": [
+                      {
+                        "t": "AB",
+                        "m": {}
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Bob",
+              "replica": "102",
+              "status": "ready",
+              "pending": 0,
+              "sent": 0,
+              "acknowledged": 1,
+              "cursor": "2",
+              "digest": "sha256:dfab81a60d9aa4b2b6ee00bf535de39e96d8de1f1ff1098b72209d387b2dd9a7",
+              "content": {
+                "blocks": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {},
+                    "runs": [
+                      {
+                        "t": "AB",
+                        "m": {}
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Reviewer",
+              "replica": "103",
+              "status": "ready",
+              "pending": 0,
+              "sent": 0,
+              "acknowledged": 0,
+              "cursor": "2",
+              "digest": "sha256:dfab81a60d9aa4b2b6ee00bf535de39e96d8de1f1ff1098b72209d387b2dd9a7",
+              "content": {
+                "blocks": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {},
+                    "runs": [
+                      {
+                        "t": "AB",
+                        "m": {}
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "durableOperations": 2,
+          "gatewayDigest": "sha256:dfab81a60d9aa4b2b6ee00bf535de39e96d8de1f1ff1098b72209d387b2dd9a7"
+        }
+      ],
+      "wire": [
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "client → server",
+          "kind": "hello",
+          "data": {
+            "clientProtocolVersion": 1,
+            "capabilities": [
+              "rich-text-v2"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "server → client",
+          "kind": "hello_ack",
+          "data": {
+            "protocolVersion": 1,
+            "connectionId": "lab-0",
+            "capabilities": [
+              "rich-text-v2"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "client → server",
+          "kind": "authenticate",
+          "data": {
+            "modelAuthentication": true
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "server → client",
+          "kind": "authenticated",
+          "data": {
+            "userId": "lab",
+            "clerkUserId": "lab"
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "client → server",
+          "kind": "join_document",
+          "data": {
+            "documentId": "concord-failure-lab",
+            "stateSummary": [
+              {
+                "replicaId": "101",
+                "sequence": "1"
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "server → client",
+          "kind": "join_accepted",
+          "data": {
+            "documentId": "concord-failure-lab",
+            "role": "owner",
+            "durableCursor": "0"
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "client → server",
+          "kind": "sync_request",
+          "data": {
+            "cursor": "0"
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "server → client",
+          "kind": "sync_done",
+          "data": {}
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "client → server",
+          "kind": "client_ops",
+          "data": {
+            "batchId": "1",
+            "operations": [
+              {
+                "identity": "101:1",
+                "bytes": "AQFlAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQQA="
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "model transaction",
+          "kind": "committed",
+          "data": {
+            "cursor": "1",
+            "identities": [
+              "101:1"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "server → client",
+          "kind": "durable_ack",
+          "data": {
+            "batchId": "1",
+            "opIds": [
+              "101:1"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "client → server",
+          "kind": "hello",
+          "data": {
+            "clientProtocolVersion": 1,
+            "capabilities": [
+              "rich-text-v2"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "server → client",
+          "kind": "hello_ack",
+          "data": {
+            "protocolVersion": 1,
+            "connectionId": "lab-1",
+            "capabilities": [
+              "rich-text-v2"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "client → server",
+          "kind": "authenticate",
+          "data": {
+            "modelAuthentication": true
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "server → client",
+          "kind": "authenticated",
+          "data": {
+            "userId": "lab",
+            "clerkUserId": "lab"
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "client → server",
+          "kind": "join_document",
+          "data": {
+            "documentId": "concord-failure-lab",
+            "stateSummary": [
+              {
+                "replicaId": "102",
+                "sequence": "1"
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "server → client",
+          "kind": "join_accepted",
+          "data": {
+            "documentId": "concord-failure-lab",
+            "role": "owner",
+            "durableCursor": "1"
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "client → server",
+          "kind": "sync_request",
+          "data": {
+            "cursor": "0"
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "server → client",
+          "kind": "sync_batch",
+          "data": {
+            "cursor": "1",
+            "identities": [
+              "101:1"
+            ],
+            "bytes": "ASEAAAAAAAAAAQAAAQAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAA=="
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "server → client",
+          "kind": "sync_done",
+          "data": {}
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "client → server",
+          "kind": "client_ops",
+          "data": {
+            "batchId": "1",
+            "operations": [
+              {
+                "identity": "102:1",
+                "bytes": "AQFmAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAEBQgA="
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "model transaction",
+          "kind": "committed",
+          "data": {
+            "cursor": "2",
+            "identities": [
+              "102:1"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "server → client",
+          "kind": "durable_ack",
+          "data": {
+            "batchId": "1",
+            "opIds": [
+              "102:1"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "client → server",
+          "kind": "hello",
+          "data": {
+            "clientProtocolVersion": 1,
+            "capabilities": [
+              "rich-text-v2"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "server → client",
+          "kind": "hello_ack",
+          "data": {
+            "protocolVersion": 1,
+            "connectionId": "lab-2",
+            "capabilities": [
+              "rich-text-v2"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "client → server",
+          "kind": "authenticate",
+          "data": {
+            "modelAuthentication": true
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "server → client",
+          "kind": "authenticated",
+          "data": {
+            "userId": "lab",
+            "clerkUserId": "lab"
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "client → server",
+          "kind": "join_document",
+          "data": {
+            "documentId": "concord-failure-lab",
+            "stateSummary": [
+              {
+                "replicaId": "103",
+                "sequence": "0"
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "server → client",
+          "kind": "join_accepted",
+          "data": {
+            "documentId": "concord-failure-lab",
+            "role": "owner",
+            "durableCursor": "2"
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "client → server",
+          "kind": "sync_request",
+          "data": {
+            "cursor": "0"
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "server → client",
+          "kind": "sync_batch",
+          "data": {
+            "cursor": "2",
+            "identities": [
+              "101:1",
+              "102:1"
+            ],
+            "bytes": "ASEAAAAAAAAAAgAAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "server → client",
+          "kind": "sync_done",
+          "data": {}
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "client → server",
+          "kind": "sync_request",
+          "data": {
+            "cursor": "0"
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "server → client",
+          "kind": "sync_batch",
+          "data": {
+            "cursor": "2",
+            "identities": [
+              "101:1",
+              "102:1"
+            ],
+            "bytes": "ASEAAAAAAAAAAgAAAgAAACABAWUAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFBAAAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+          }
+        },
+        {
+          "step": 2,
+          "client": 0,
+          "direction": "server → client",
+          "kind": "sync_done",
+          "data": {}
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "client → server",
+          "kind": "sync_request",
+          "data": {
+            "cursor": "1"
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "server → client",
+          "kind": "sync_batch",
+          "data": {
+            "cursor": "2",
+            "identities": [
+              "102:1"
+            ],
+            "bytes": "ASEAAAAAAAAAAgAAAQAAACABAWYAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAQFCAA=="
+          }
+        },
+        {
+          "step": 2,
+          "client": 1,
+          "direction": "server → client",
+          "kind": "sync_done",
+          "data": {}
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "client → server",
+          "kind": "sync_request",
+          "data": {
+            "cursor": "2"
+          }
+        },
+        {
+          "step": 2,
+          "client": 2,
+          "direction": "server → client",
+          "kind": "sync_done",
+          "data": {}
+        }
+      ]
+    }
+  }
+}

@@ -60,6 +60,18 @@ every DB-project run**. `npm run db:test:prepare` recreates it on demand.
 The `unit` project does not connect to or reset PostgreSQL, even when
 `.env.local` defines `DATABASE_TEST_URL`.
 
+### Reproducible failure lab
+
+`npm run failure-lab` runs recorded real-session/WASM scenarios, the existing
+native/PostgreSQL convergence and compaction checks, the realtime matrix,
+and authenticated production Chromium tab/merge-recovery flows. It generates
+`output/playwright/failure-lab/latest/index.html`, a JSON result and exact
+operation traces. `--sim-only` explicitly requests the model boundary;
+`replay` and `minimize` execute exported traces. A full run returns exit 2
+for missing or skipped dependencies instead of claiming complete coverage.
+See [FAILURE_LAB.md](FAILURE_LAB.md) for prerequisites, isolation, exit codes
+and the exact replay/minimization contract.
+
 ### Fresh GitHub Actions runners
 
 Generated files and local test databases are not part of a checkout. Each

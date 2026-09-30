@@ -21,218 +21,16 @@
 // interleavings, so a failure is a genuine bug regardless of the seed that
 // surfaced it. The seed is printed to reproduce the schedule shape.
 
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import { CrdtWorkerCore } from "@/lib/crdt/worker/core";
-import type { PersistenceAdapter, LocalState } from "@/lib/crdt/worker/idb";
 import { WorkerEnginePort } from "@/lib/sync/worker-engine-port";
-import type { PendingOpStore, PendingOpRecord } from "@/lib/sync/pending-store";
+import type { PendingOpStore } from "@/lib/sync/pending-store";
 import { identityFromOpBytes } from "@/lib/sync/identities";
 import { SyncSession } from "@/lib/sync/sync-session";
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const wasmDist = path.join(repoRoot, "wasm/dist");
-
-async function loadFactory(): Promise<never> {
-    const source = await readFile(path.join(wasmDist, "concord-crdt.js"), "utf8");
-    const binary = await readFile(path.join(wasmDist, "concord-crdt.wasm"));
-    const load = new Function(`${source}; return loadConcordCrdt;`)();
-    return (await load({
-        instantiateWasm(
-            info: WebAssembly.Imports,
-            receiveInstance: (instance: WebAssembly.Instance) => void,
-        ) {
-            WebAssembly.instantiate(binary, info).then((result) =>
-                receiveInstance(result.instance),
-            );
-            return {};
-        },
-    })) as never;
-}
-
+import { loadFactory, MemoryPersistence, MemoryPendingStore, CoreBackedClient } from "./engine-harness";
 const factoryPromise = loadFactory();
 
-// ---------------------------------------------------------------------------
-// Client-side memory harness (same shape as worker-engine-port.test.ts)
-// ---------------------------------------------------------------------------
-
-class MemoryPersistence implements PersistenceAdapter {
-    snapshots = new Map<string, Uint8Array>();
-    logs = new Map<string, { seq: number; op: Uint8Array; identity?: string }[]>();
-    cursors = new Map<string, string>();
-
-    async loadLocalState(documentId: string): Promise<LocalState> {
-        return {
-            snapshot: this.snapshots.get(documentId) ?? null,
-            ops: (this.logs.get(documentId) ?? []).map((entry) => entry.op),
-        };
-    }
-    async appendOps(
-        documentId: string,
-        ops: Uint8Array[],
-        sync?: { cursor: string; coveredOpIds: string[] },
-    ): Promise<void> {
-        const log = [...(this.logs.get(documentId) ?? [])];
-        for (const op of ops) {
-            const parsed = identityFromOpBytes(op);
-            const identity = parsed === null ? undefined : `${parsed.replica}:${parsed.counter}`;
-            log.push({ seq: log.length, op, ...(identity === undefined ? {} : { identity }) });
-        }
-        this.logs.set(documentId, log);
-        if (sync !== undefined) {
-            const previous = this.cursors.get(documentId) ?? "0";
-            this.cursors.set(documentId, BigInt(previous) >= BigInt(sync.cursor) ? previous : sync.cursor);
-        }
-    }
-    async loadSyncCursor(documentId: string): Promise<string> {
-        return this.cursors.get(documentId) ?? "0";
-    }
-    async saveSyncCursor(documentId: string, cursor: string): Promise<void> {
-        this.cursors.set(documentId, cursor);
-    }
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async loadCoveredOpIds(_documentId: string, _identities: string[]): Promise<Set<string>> {
-        return new Set();
-    }
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async clearCoveredOpIds(_documentId: string, _identities: string[]): Promise<void> {}
-    async saveSnapshot(documentId: string, snapshot: Uint8Array): Promise<void> {
-        this.snapshots.set(documentId, snapshot);
-    }
-    async clearDocument(documentId: string): Promise<void> {
-        this.snapshots.delete(documentId);
-        this.logs.delete(documentId);
-        this.cursors.delete(documentId);
-    }
-}
-
-class MemoryPendingStore {
-    private records = new Map<string, PendingOpRecord>();
-    constructor(
-        private readonly docId: string,
-        private readonly persistence?: MemoryPersistence,
-    ) {}
-    private key(id: string): string {
-        return `${this.docId}:${id}`;
-    }
-    async addPending(id: string, op: Uint8Array): Promise<void> {
-        const key = this.key(id);
-        if (!this.records.has(key)) {
-            this.records.set(key, {
-                id: key as PendingOpRecord["id"],
-                op,
-                state: "pending",
-                seq: this.records.size,
-                savedAt: Date.now(),
-            });
-        }
-    }
-    async lastSeenCounter(): Promise<string> {
-        return "0";
-    }
-    async unackedOps(): Promise<PendingOpRecord[]> {
-        return [...this.records.values()]
-            .filter((r) => r.state !== "durably_acked")
-            .sort((a, b) => a.seq - b.seq);
-    }
-    async markSent(ids: string[]): Promise<void> {
-        for (const id of ids) {
-            const rec = this.records.get(this.key(id));
-            if (rec && rec.state !== "durably_acked") rec.state = "sent";
-        }
-    }
-    async markDurablyAcked(ids: string[]): Promise<void> {
-        for (const id of ids) {
-            const rec = this.records.get(this.key(id));
-            if (rec) rec.state = "durably_acked";
-        }
-    }
-    async clearAcked(ids: string[]): Promise<number> {
-        const covered = await this.persistence?.loadCoveredOpIds(this.docId, ids) ?? new Set<string>();
-        let removed = 0;
-        for (const id of ids) {
-            if (!covered.has(id)) continue;
-            if (this.records.get(this.key(id))?.state === "durably_acked") {
-                this.records.delete(this.key(id));
-                removed += 1;
-            }
-        }
-        return removed;
-    }
-    async stateCounts(): Promise<Record<string, number>> {
-        const counts = { pending: 0, sent: 0, durably_acked: 0 };
-        for (const record of this.records.values()) counts[record.state] += 1;
-        return counts;
-    }
-    close(): void {}
-}
-
-class CoreBackedClient {
-    private nextId = 1;
-    private listeners = new Set<(ops: Uint8Array[]) => void>();
-
-    constructor(
-        private readonly core: CrdtWorkerCore,
-        private readonly documentId: string,
-    ) {}
-
-    private notifyLocal(ops: Uint8Array[]): void {
-        if (ops.length === 0) return;
-        for (const listener of this.listeners) listener(ops);
-    }
-
-    async init(replicaId: bigint): Promise<void> {
-        await this.core.handle({
-            id: this.nextId++,
-            kind: "init",
-            documentId: this.documentId,
-            replicaId: replicaId.toString(),
-        });
-    }
-    async localInsertText(streamIndex: number, codepoint: number): Promise<Uint8Array[]> {
-        const r = await this.core.handle({
-            id: this.nextId++,
-            kind: "localInsertText",
-            streamIndex,
-            codepoint,
-        });
-        const ops = (r as { ops: Uint8Array[] }).ops;
-        this.notifyLocal(ops);
-        return ops;
-    }
-    async applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }> {
-        return (await this.core.handle({ id: this.nextId++, kind: "applyRemote", ops, cursor })) as {
-            applied: number;
-            duplicates: number;
-        };
-    }
-    async digest(): Promise<string> {
-        const r = await this.core.handle({ id: this.nextId++, kind: "digest" });
-        return (r as { digest: string }).digest;
-    }
-    async syncCursor(): Promise<string> {
-        const r = await this.core.handle({ id: this.nextId++, kind: "getSyncCursor" });
-        return (r as { kind: "getSyncCursor"; cursor: string }).cursor;
-    }
-    async persistSyncCursor(cursor: string): Promise<void> {
-        await this.core.handle({ id: this.nextId++, kind: "persistSyncCursor", cursor });
-    }
-    async replicaInfo(): Promise<{ replicaId: string; sequence: string }> {
-        const r = await this.core.handle({ id: this.nextId++, kind: "replicaInfo" });
-        return r as { replicaId: string; sequence: string };
-    }
-    async localOpsSince(counter: string): Promise<{ ops: Uint8Array[]; nextCounter: string }> {
-        const r = await this.core.handle({ id: this.nextId++, kind: "localOpsSince", counter });
-        return r as { ops: Uint8Array[]; nextCounter: string };
-    }
-    onLocalOps(handler: (ops: Uint8Array[]) => void): () => void {
-        this.listeners.add(handler);
-        return () => this.listeners.delete(handler);
-    }
-}
 interface Simulation {
     /** One-shot flag: the next inbound client_ops batch is dropped pre-ingest. */
     dropNextBatch: boolean;
@@ -543,6 +341,7 @@ async function runSimulation(seed: bigint, policy: SchedulePolicy): Promise<SimH
         engine: port,
         getCursor: () => cursors[cursors.length - 1] ?? "0",
         setCursor: (cursor) => {
+            expect(BigInt(cursor) >= BigInt(cursors[cursors.length - 1] ?? "0"), "cursor callback must not decrease").toBe(true);
             if (cursors.length === 0 || BigInt(cursor) > BigInt(cursors[cursors.length - 1])) {
                 cursors.push(cursor);
             }
@@ -580,6 +379,7 @@ async function runSimulation(seed: bigint, policy: SchedulePolicy): Promise<SimH
                     engine: port,
                     getCursor: () => cursors[cursors.length - 1] ?? "0",
                     setCursor: (cursor) => {
+                        expect(BigInt(cursor) >= BigInt(cursors[cursors.length - 1] ?? "0"), "cursor callback must not decrease").toBe(true);
                         if (cursors.length === 0 || BigInt(cursor) > BigInt(cursors[cursors.length - 1])) {
                             cursors.push(cursor);
                         }
@@ -605,6 +405,7 @@ async function runSimulation(seed: bigint, policy: SchedulePolicy): Promise<SimH
             engine: port,
             getCursor: () => cursors[cursors.length - 1] ?? "0",
             setCursor: (cursor) => {
+                expect(BigInt(cursor) >= BigInt(cursors[cursors.length - 1] ?? "0"), "cursor callback must not decrease").toBe(true);
                 if (cursors.length === 0 || BigInt(cursor) > BigInt(cursors[cursors.length - 1])) {
                     cursors.push(cursor);
                 }
