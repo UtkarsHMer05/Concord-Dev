@@ -2,7 +2,8 @@
 
 Verified locally on 2026-10-01 on macOS arm64 with Node 24 and production
 Chromium. Acceptance exercised base revision
-`52c1e6b09efb30fac9539b40462a51d3a46fb8a7` plus this feature's working changes.
+`52c1e6b09efb30fac9539b40462a51d3a46fb8a7` plus this feature's working changes;
+the final browser run repeats acceptance after the dependency patch below.
 Exact browser run times, archive checksum, environment, and results are in
 [report.json](../assets/concordpack/report.json). The standalone verifier's
 result is preserved in [offline.json](../assets/concordpack/offline.json).
@@ -93,6 +94,7 @@ disposable users, organizations, and source/destination processes.
 | History / migrations | **11 + 4 passed** |
 | Selected gateway / recovery integration | **68 passed** across the suites below |
 | Rust formatting + clippy | Passed, all targets, warnings denied |
+| npm audit at high threshold | Passed with Next.js 16.3.6; no reported vulnerabilities |
 
 The signed-history integration additionally checks source read authorization,
 every independent trust field, signed invalid digests, truncation, transaction
@@ -129,6 +131,14 @@ CONCORD_E2E_MODE=production npm run test:concordpack:browser
 The Phase 5 CI workflow now runs the native/PostgreSQL signed-history
 integration gate. Authenticated browser acceptance remains local and requires
 the development Clerk configuration described in the guide.
+
+The first push passed the feature's recovery/native/WASM/web checks but failed
+the security job on the newly published Next.js dependency advisory
+[GHSA-vcvr-r3jv-pc5j](https://github.com/advisories/GHSA-vcvr-r3jv-pc5j).
+Next.js and its matching ESLint configuration were updated from 16.3.5 to
+**16.3.6**, the patched version. The audit threshold was retained, and web
+checks plus the complete production browser journey were repeated with the
+patch installed.
 
 ## Boundaries
 

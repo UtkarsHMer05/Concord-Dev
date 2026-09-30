@@ -1,34 +1,34 @@
 {
   "result": "verified",
-  "documentId": "83f64b80-091e-4cab-89bb-3c736035ad24",
-  "seq": "362",
+  "documentId": "377d949d-0388-4f58-b56b-65e0cc917634",
+  "seq": "403",
   "baseSnapshotSeq": "0",
-  "stateDigest": "sha256:15e732888a8fcbed41cb47193d5f8ea00e8fb5d1b3ef15791a7a3c9f28f71b51",
-  "keyId": "a534548388c97ba3",
+  "stateDigest": "sha256:fc462f001ae8bcf09b51305633470e568e2fa67f4f89bf9c1a2d8edd04f786d7",
+  "keyId": "2336e6217565be8d",
   "operationCount": 210,
   "snapshotCount": 2,
   "revisions": [
     {
-      "revisionId": "438394d4-b810-4667-a7fa-39fc685e7a88",
-      "seq": "301",
+      "revisionId": "996b4785-282a-4dd5-8fdb-4314e2c8f97e",
+      "seq": "310",
       "kind": "named",
       "label": "RFC baseline",
-      "createdBy": "cec05a10-7a1c-47ad-858b-180dd28df52b",
-      "createdAtMs": "1790795273792",
+      "createdBy": "b0e45271-90cf-4e63-84c5-e1762f00670b",
+      "createdAtMs": "1790797096681",
       "snapshotId": null,
       "restoreSourceRevision": null,
-      "stateDigest": "sha256:22f9ca3fa3f5ff55fa567854621522b54b3a6a6d861c1140e864881f68a82731"
+      "stateDigest": "sha256:a9b1918a4850ba6f5221a870ed301613eb9f1f3db79ffe1068b9630094865690"
     },
     {
-      "revisionId": "573276f1-bc83-4e2b-858f-8a8f1392f9c0",
-      "seq": "362",
+      "revisionId": "ed20a1e7-c24e-4290-950c-812ed9df3249",
+      "seq": "403",
       "kind": "named",
       "label": "RFC recovery plan",
-      "createdBy": "cec05a10-7a1c-47ad-858b-180dd28df52b",
-      "createdAtMs": "1790795274091",
+      "createdBy": "b0e45271-90cf-4e63-84c5-e1762f00670b",
+      "createdAtMs": "1790797096999",
       "snapshotId": null,
       "restoreSourceRevision": null,
-      "stateDigest": "sha256:15e732888a8fcbed41cb47193d5f8ea00e8fb5d1b3ef15791a7a3c9f28f71b51"
+      "stateDigest": "sha256:fc462f001ae8bcf09b51305633470e568e2fa67f4f89bf9c1a2d8edd04f786d7"
     }
   ],
   "guarantee": "Signature authenticates the trusted server's statement; it does not prove physical persistence.",
