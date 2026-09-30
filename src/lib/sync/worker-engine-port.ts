@@ -32,6 +32,7 @@ export interface WorkerEnginePortOptions {
     /** The document's durable outbox — the UNSYNCED op set source. */
     store: PendingOpStore;
     /** Fires after a remote batch integrated ≥1 new op (editor re-render). */
+    applyRemote?: (ops: Uint8Array[], cursor?: string) => Promise<{ applied: number; duplicates: number }>;
     onRemoteApplied?: () => void;
 }
 
@@ -43,9 +44,10 @@ export class WorkerEnginePort implements ResyncEnginePort {
     }
 
     async applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }> {
+        if (this.options.applyRemote) return this.options.applyRemote(ops, cursor);
         const result = await this.options.client.applyRemote(ops, cursor);
         if (result.applied > 0) {
-            this.options.onRemoteApplied?.();
+            await this.options.onRemoteApplied?.();
         }
         return result;
     }
@@ -77,10 +79,10 @@ export class WorkerEnginePort implements ResyncEnginePort {
     }
 
     async importSnapshot(inner: Uint8Array): Promise<void> {
-        await this.options.client.importSnapshot(inner);
+        await this.options.client.importSnapshot(inner, true);
         // The base was replaced: the editor must re-render from the new
         // state (the bridge's renderRemote reads the worker, not its cache).
-        this.options.onRemoteApplied?.();
+        await this.options.onRemoteApplied?.();
     }
 
     /** The UNSYNCED outbox set (pending + sent — never durably acked). */

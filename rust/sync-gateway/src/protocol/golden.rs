@@ -123,6 +123,7 @@ fn fixtures() -> FixtureFile {
                 id: Some("req-1".into()),
                 frame: Frame::Hello(Hello {
                     client_protocol_version: 1,
+                    capabilities: vec![],
                 }),
             }
             .encode(),
@@ -134,6 +135,7 @@ fn fixtures() -> FixtureFile {
                 frame: Frame::HelloAck(HelloAck {
                     protocol_version: 1,
                     connection_id: "conn-0f1e2d3c".into(),
+                    capabilities: vec![],
                 }),
             }
             .encode(),

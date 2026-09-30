@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cassert>
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -24,23 +25,75 @@ struct AllowedAttrs {
     static bool is_allowed(ItemKind kind, const std::string& name) {
         if (kind == ItemKind::Text) {
             return name == "bold" || name == "italic" || name == "underline" ||
-                   name == "strikethrough";
+                   name == "strikethrough" || name == "code" || name == "link" ||
+                   name == "linkTarget" || name == "linkRel" || name == "color" ||
+                   name == "fontFamily" || name == "fontSize" || name == "highlight";
         }
         // `lineHeight` completes the registry to match the product editor and
         // the TypeScript adapter (pm-model.ts) — values are a fixed set.
-        return name == "type" || name == "align" || name == "lineHeight";
+        return name == "type" || name == "align" || name == "lineHeight" ||
+               name == "list" || name == "depth" || name == "checked" ||
+               name == "listStart" || name == "contentType";
     }
 
     static bool is_allowed_value(ItemKind kind, const std::string& name,
                                  const std::string& value) {
+        if (value.empty() || value.size() > 256 || std::any_of(value.begin(), value.end(),
+                [](unsigned char ch) { return ch < 0x20 || ch == 0x7f; })) return false;
         if (kind == ItemKind::Text) {
-            return value == "1";
+            const auto ascii_alnum = [](unsigned char ch) {
+                return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                       (ch >= '0' && ch <= '9');
+            };
+            if (name == "link") {
+                std::string lower = value;
+                for (char& ch : lower) if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+                const bool scheme = lower.starts_with("https://") || lower.starts_with("http://") ||
+                    lower.starts_with("mailto:") || lower.starts_with("tel:") ||
+                    (lower.starts_with('/') && !lower.starts_with("//")) || lower.starts_with('#');
+                return scheme && value.find_first_of(" <>\\\t\r\n") == std::string::npos;
+            }
+            if (name == "linkTarget") return value == "_blank" || value == "_self" || value == "_parent" || value == "_top";
+            if (name == "linkRel") {
+                std::size_t start = 0;
+                while (start < value.size()) {
+                    const auto end = value.find(' ', start);
+                    const auto token = value.substr(start, end == std::string::npos ? end : end - start);
+                    if (token != "noopener" && token != "noreferrer" && token != "nofollow") return false;
+                    if (end == std::string::npos) return true;
+                    start = end + 1;
+                }
+                return false;
+            }
+            if (name == "fontSize") {
+                if (!value.ends_with("px")) return false;
+                const auto number = value.substr(0, value.size() - 2);
+                const auto dot = number.find('.');
+                const auto whole = number.substr(0, dot);
+                if (whole.empty() || whole.size() > 3 || whole[0] == '0') return false;
+                if (dot != std::string::npos && (number.size() - dot - 1 < 1 || number.size() - dot - 1 > 2)) return false;
+                for (std::size_t i = 0; i < number.size(); ++i)
+                    if (i != dot && (number[i] < '0' || number[i] > '9')) return false;
+                return std::stod(number) <= 400;
+            }
+            if (name == "fontFamily" || name == "color" || name == "highlight") {
+                const std::string punctuation = name == "fontFamily" ? " ,'\"-" : "#(),.% -";
+                return std::all_of(value.begin(), value.end(), [&](unsigned char ch) {
+                    return ascii_alnum(ch) || punctuation.find(static_cast<char>(ch)) != std::string::npos;
+                });
+            }
+            return is_allowed(kind, name) && value == "1";
         }
-        if (name == "type") {
+        if (name == "type" || name == "contentType") {
             return value == "paragraph" || value == "heading-1" || value == "heading-2" ||
                    value == "heading-3" || value == "heading-4" || value == "heading-5" ||
-                   value == "heading-6";
+                   value == "heading-6" || (name == "type" && (value == "list-item" || value == "list-continuation"));
         }
+        if (name == "list") return value == "bullet" || value == "ordered" || value == "task";
+        if (name == "depth") return value.size() == 1 && value[0] >= '0' && value[0] <= '8';
+        if (name == "checked") return value == "yes" || value == "no";
+        if (name == "listStart") return value.size() <= 6 && value[0] >= '1' && value[0] <= '9' &&
+            std::all_of(value.begin(), value.end(), [](char ch) { return ch >= '0' && ch <= '9'; });
         if (name == "align") {
             return value == "left" || value == "center" || value == "right" ||
                    value == "justify";

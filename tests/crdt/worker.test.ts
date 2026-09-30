@@ -83,6 +83,25 @@ async function newCore(persistence: PersistenceAdapter, replicaId = 7n, storageI
 }
 
 describe("worker core: local durability", () => {
+    it("discards a whole reconciliation if generation or durable append fails", async () => {
+        const persistence = new MemoryPersistence();
+        const core = await newCore(persistence);
+        const before = await core.handle({ id: 1, kind: "digest" });
+        await expect(core.handle({ id: 2, kind: "reconcile", ops: [
+            { kind: "insertText", streamIndex: 0, codepoint: 0x61 },
+            { kind: "setAttr", streamIndex: 0, name: "link", value: "javascript:alert(1)" },
+        ] })).rejects.toThrow();
+        expect(await core.handle({ id: 3, kind: "digest" })).toEqual(before);
+        expect(persistence.logs.get(DOCUMENT) ?? []).toHaveLength(0);
+        persistence.failNextAppend = true;
+        await expect(core.handle({ id: 4, kind: "reconcile", ops: [
+            { kind: "insertText", streamIndex: 0, codepoint: 0x61 },
+            { kind: "setAttr", streamIndex: 0, name: "bold", value: "1" },
+        ] })).rejects.toThrow("simulated IndexedDB write failure");
+        expect(await core.handle({ id: 5, kind: "digest" })).toEqual(before);
+        expect(persistence.logs.get(DOCUMENT) ?? []).toHaveLength(0);
+    });
+
     it("acknowledges local edits only after durable append (M036)", async () => {
         const persistence = new MemoryPersistence();
         const core = await newCore(persistence);
@@ -137,6 +156,24 @@ describe("worker core: local durability", () => {
 });
 
 describe("worker core: reload/crash restoration (M037)", () => {
+    it("preserves durable local rich-text edits during sync snapshot import", async () => {
+        const source = await newCore(new MemoryPersistence(), 8n);
+        const snapshot = (await source.handle({ id: 1, kind: "exportSnapshot" }) as { snapshot: Uint8Array }).snapshot;
+        const persistence = new MemoryPersistence();
+        const target = await newCore(persistence, 7n);
+        await target.handle({ id: 2, kind: "reconcile", ops: [
+            { kind: "insertText", streamIndex: 0, codepoint: 0x61 },
+            { kind: "setAttr", streamIndex: 0, name: "code", value: "1" },
+        ] });
+        const before = await target.handle({ id: 3, kind: "digest" });
+        await target.handle({ id: 4, kind: "importSnapshot", snapshot, preserveLocal: true });
+        expect(await target.handle({ id: 5, kind: "digest" })).toEqual(before);
+        const next = await target.handle({ id: 6, kind: "localInsertText", streamIndex: 1, codepoint: 0x62 });
+        expect(new DataView((next as { ops: Uint8Array[] }).ops[0].buffer).getBigUint64(10, true)).toBe(3n);
+        const reloaded = await newCore(persistence, 7n);
+        expect(await reloaded.handle({ id: 7, kind: "digest" })).toEqual(await target.handle({ id: 8, kind: "digest" }));
+    });
+
     it("isolates local replica state for different authenticated users", async () => {
         const persistence = new MemoryPersistence();
         const firstUser = await newCore(persistence, 7n, `${DOCUMENT}:user:user-a`);

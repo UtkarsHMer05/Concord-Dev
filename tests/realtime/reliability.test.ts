@@ -864,7 +864,7 @@ describe("M035 matrix · 4: gateway failover under SIGKILL", () => {
 
     // Gateway B serves the full durable history + the client resends the
     // unacked ops — the unique index dedups; everything converges.
-    const converged = await waitFor(async () => engineB.applied.length === 4 && session.status === "ready", 20_000);
+    const converged = await waitFor(async () => engineB.applied.length === 4 && session.status === "ready" && (await storeB.unackedOps()).length === 0, 20_000);
     expect(converged).toBe(true);
 
     // No loss of acked state: both acked ops + the resent pair are durable

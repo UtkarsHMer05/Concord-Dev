@@ -108,7 +108,7 @@ fn regression_broker_event_74_byte_frame_panicked_index_out_of_bounds() {
 // ---------------------------------------------------------------------------
 
 const CONTROL_SEEDS: &[&str] = &[
-    r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#,
+    r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#,
     r#"{"v":1,"id":"c-7","type":"authenticate","payload":{"token":"eyJhbGciOiJFUzI1NiJ9.x.y"}}"#,
     r#"{"v":1,"type":"join_document","payload":{"documentId":"doc","stateSummary":[]}}"#,
     r#"{"v":1,"type":"sync_request","payload":{"cursor":"12345"}}"#,
@@ -117,10 +117,10 @@ const CONTROL_SEEDS: &[&str] = &[
     r#"{"v":1,"type":"fetch_snapshot","payload":{"snapshotId":"abc"}}"#,
     r#"{"v":1,"type":"error","payload":{"code":"x","message":"m"}}"#,
     // Mutations: wrong version / unknown type / wrong shapes / extra fields.
-    r#"{"v":2,"type":"hello","payload":{"clientProtocolVersion":1}}"#,
+    r#"{"v":2,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#,
     r#"{"v":0,"type":"hello","payload":{"clientProtocolVersion":0}}"#,
     r#"{"v":1,"type":"unknown_type","payload":{}}"#,
-    r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1},"extra":true}"#,
+    r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]},"extra":true}"#,
     r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":"one"}}"#,
     r#"{"v":1,"type":"hello","payload":null}"#,
     r#"{"v":1,"type":"hello"}"#,

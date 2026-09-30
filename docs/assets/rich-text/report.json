@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "stages": [
+    "two users: nested bullets, numbered lists, tasks, link and inline code",
+    "offline indent, overlapping bold/italic, task toggle, reconnect convergence",
+    "native gateway checkpoint, rich preview and forward restore retain formatting",
+    "reload preserves identical content, formatting and task state",
+    "same browser, cloned sessionStorage: distinct replicas and concurrent edits converge",
+    "stale worker shows explicit reload/upgrade path and disables editing"
+  ],
+  "durableOperations": 304,
+  "identicalRenderedContent": true,
+  "html": "<ul><li><p style=\"line-height: normal;\">Parent</p></li><li><p style=\"line-height: normal;\">Child</p></li><li><p style=\"line-height: normal;\">Nested sibling</p></li></ul><ol><li><p style=\"line-height: normal;\">Plan</p></li><li><p style=\"line-height: normal;\">Implement</p></li></ol><ul data-type=\"taskList\"><li data-checked=\"true\"><label contenteditable=\"false\"><input aria-label=\"Task item checkbox for Release checklist\" type=\"checkbox\"><span style=\"position: absolute; width: 1px; height: 1px; padding: 0px; margin: -1px; overflow: hidden; clip: rect(0px, 0px, 0px, 0px); white-space: nowrap; border: 0px;\">Task item checkbox for Release checklist</span></label><div><p style=\"line-height: normal;\">Release checklist</p></div></li><li data-checked=\"false\"><label contenteditable=\"false\"><input aria-label=\"Task item checkbox for Run tests\" type=\"checkbox\"><span style=\"position: absolute; width: 1px; height: 1px; padding: 0px; margin: -1px; overflow: hidden; clip: rect(0px, 0px, 0px, 0px); white-space: nowrap; border: 0px;\">Task item checkbox for Run tests</span></label><div><p style=\"line-height: normal;\">Run tests</p></div></li></ul><p style=\"line-height: normal;\"><a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://example.com/concord\">Concord docs</a></p><p style=\"line-height: normal;\"><code>npm test</code></p><p style=\"line-height: normal;\"><strong><em>Concurrent formatting</em></strong></p><p style=\"line-height: normal;\"> Alice tab Second tab</p>"
+}

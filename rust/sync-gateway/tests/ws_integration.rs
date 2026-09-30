@@ -293,7 +293,7 @@ async fn next_binary(ws: &mut Ws) -> Vec<u8> {
 }
 
 fn hello() -> String {
-    r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#.into()
+    r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#.into()
 }
 
 fn authenticate(token: &str) -> String {
@@ -312,6 +312,10 @@ async fn handshake(ws: &mut Ws, clerk_id: &str) -> String {
     send_text(ws, &hello()).await;
     let ack = next_control(ws).await;
     assert_eq!(ack["type"], "hello_ack");
+    assert_eq!(
+        ack["payload"]["capabilities"],
+        serde_json::json!(["rich-text-v2"])
+    );
     send_text(ws, &authenticate(&sign_token(clerk_id))).await;
     let auth = next_control(ws).await;
     assert_eq!(auth["type"], "authenticated", "token accepted: {auth}");
@@ -626,6 +630,21 @@ async fn malformed_frames_are_safe_errors() {
     send_text(&mut ws, r#"{"v":1,"type":"h4x0r","payload":{}}"#).await;
     let err = next_control(&mut ws).await;
     assert_eq!(err["payload"]["code"], "unknown_frame_type");
+
+    // A genuinely old client sends a valid v1 frame without the capability.
+    // Reject before authenticate/join; its original decoder can read the error.
+    let mut old = connect(&server).await;
+    send_text(
+        &mut old,
+        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#,
+    )
+    .await;
+    let upgrade = next_control(&mut old).await;
+    assert_eq!(upgrade["payload"]["code"], "unsupported_protocol_version");
+    assert!(upgrade["payload"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Update Concord to rich-text-v2"));
 
     // Unknown protocol version.
     let mut ws = connect(&server).await;

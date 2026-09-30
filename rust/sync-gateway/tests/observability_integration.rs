@@ -298,7 +298,7 @@ async fn next_control(ws: &mut Ws) -> serde_json::Value {
 }
 
 fn hello() -> String {
-    r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#.into()
+    r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#.into()
 }
 
 fn authenticate(token: &str) -> String {

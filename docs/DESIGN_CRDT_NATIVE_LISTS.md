@@ -1,3 +1,8 @@
+> Historical investigation, 2026-09-26. The original scope/status below is
+> preserved. Lists and safe client upgrades are now implemented under
+> [rich-text-v2](RICH_TEXT_COLLABORATION.md); the implementation uses a closed
+> registry and capability negotiation instead of accepting unknown values.
+
 # Design: CRDT-native lists (Feature 10 — INVESTIGATION ONLY)
 
 Status: **design written, C++ work NOT started** (per scope: no core changes

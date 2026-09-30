@@ -250,7 +250,7 @@ class MockSessionSocket {
 
 async function authenticateAndJoin(socket: MockSessionSocket): Promise<void> {
     socket.onopen?.();
-    socket.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"test"}}');
+    socket.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"test","capabilities":["rich-text-v2"]}}');
     await vi.waitFor(() => expect(socket.texts().some((frame) => frame.includes('"authenticate"'))).toBe(true));
     socket.serverSend('{"v":1,"type":"authenticated","payload":{"userId":"u1","clerkUserId":"cu1"}}');
     await vi.waitFor(() => expect(socket.texts().some((frame) => frame.includes('"join_document"'))).toBe(true));
@@ -463,7 +463,7 @@ describe("WorkerEnginePort over the real engine (D16)", () => {
         const port = new WorkerEnginePort({
             client: client as unknown as import("@/lib/crdt/worker/client").CrdtClient,
             store: store as unknown as PendingOpStore,
-            onRemoteApplied: () => remoteRenders.push(Date.now()),
+            onRemoteApplied: () => { remoteRenders.push(Date.now()); },
         });
 
         // A remote peer's op (real bytes from a second real engine).

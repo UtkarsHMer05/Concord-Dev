@@ -10,6 +10,8 @@
 
 namespace concord::crdt {
 
+void append_json_string(std::string& out, const std::string& value);
+
 // {"blocks":[{"type":"paragraph","attrs":{...},"runs":[{"t":"...","m":{...}}]}]}
 [[nodiscard]] std::string doc_to_json(const Doc& doc);
 

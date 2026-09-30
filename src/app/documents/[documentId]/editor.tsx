@@ -102,7 +102,7 @@ export const Editor = ({ crdtClient, documentId, userId, onCatchupBriefing, onSy
       // - CRDT mode: the worker owns persistence; a whole-document mirror
       //   save here would double-write.
       // - fallback mode: the Phase-1 PostgreSQL mirror is the owner.
-      if (bridgeMode !== 'crdt') {
+      if (bridgeMode === 'fallback') {
         content.saveContent(editor.getJSON())
       }
       // Local-first path: diff against the CRDT canonical state and emit
@@ -157,6 +157,10 @@ export const Editor = ({ crdtClient, documentId, userId, onCatchupBriefing, onSy
     ],
   })
 
+  useEffect(() => {
+    editor?.setEditable(canEditContent && bridgeMode !== "blocked" && bridgeMode !== "idle");
+  }, [editor, canEditContent, bridgeMode]);
+
   // Bridge lifecycle: construct derived from the editor instance (stable per
   // editor), then start inside the effect. The useMemo result also feeds the
   // sync-session hook without touching refs during render.
@@ -190,6 +194,7 @@ export const Editor = ({ crdtClient, documentId, userId, onCatchupBriefing, onSy
     setFlushEditorBridge(() => bridge.flushLocalChanges());
     void bridge.start();
     return () => {
+      bridge.dispose();
       bridgeRef.current = null;
       setFlushEditorBridge(null);
       setBridgeStatus({ mode: "idle" });

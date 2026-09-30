@@ -4,17 +4,20 @@
 // or return a structured error. Binary payloads (operations, snapshots) are
 // transferred as Uint8Array — transferable ArrayBuffers are used by the
 // client where the buffer is not needed afterwards.
+import type { StreamEntryJson } from "../adapter";
 
 export type WorkerRequest =
     | { id: number; kind: "init"; documentId: string; replicaId: string; storageId?: string }
     | { id: number; kind: "loadSnapshot"; snapshot: Uint8Array }
     | { id: number; kind: "applyRemote"; ops: Uint8Array[]; cursor?: string }
     | { id: number; kind: "seed"; ops: SeedOperation[] }
+    | { id: number; kind: "reconcile"; ops: SeedOperation[]; baseStream?: StreamEntryJson[] }
     | { id: number; kind: "localInsertText"; streamIndex: number; codepoint: number }
     | { id: number; kind: "localInsertDelimiter"; streamIndex: number; blockType: string }
     | { id: number; kind: "localDelete"; streamIndex: number }
     | { id: number; kind: "localSetAttr"; streamIndex: number; name: string; value: string | null }
     | { id: number; kind: "visibleJson" }
+    | { id: number; kind: "readView" }
     | { id: number; kind: "digest" }
     | { id: number; kind: "streamSize" }
     | { id: number; kind: "exportSnapshot" }
@@ -26,7 +29,7 @@ export type WorkerRequest =
     // identity stream, and atomic snapshot import over the same RPC channel.
     | { id: number; kind: "replicaInfo" }
     | { id: number; kind: "localOpsSince"; counter: string }
-    | { id: number; kind: "importSnapshot"; snapshot: Uint8Array }
+    | { id: number; kind: "importSnapshot"; snapshot: Uint8Array; preserveLocal?: boolean }
     | { id: number; kind: "getSyncCursor" }
     | { id: number; kind: "persistSyncCursor"; cursor: string };
 
@@ -58,12 +61,13 @@ export type WorkerResponse =
 export type WorkerNotification = { kind: "localOps"; ops: Uint8Array[] };
 
 export type WorkerResultPayload =
-    | { kind: "init"; ready: true }
+    | { kind: "init"; ready: true; capabilities?: string[] }
     | { kind: "loadSnapshot"; streamSize: number }
     | { kind: "applyRemote"; applied: number; duplicates: number; ops: Uint8Array[] }
     | { kind: "seed"; ops: Uint8Array[] }
-    | { kind: "localOps"; ops: Uint8Array[]; streamSize: number }
+    | { kind: "localOps"; ops: Uint8Array[]; streamSize: number; baseStream?: StreamEntryJson[] }
     | { kind: "visibleJson"; json: string }
+    | { kind: "readView"; json: string; stream: StreamEntryJson[] }
     | { kind: "digest"; digest: string }
     | { kind: "streamSize"; size: number }
     | { kind: "exportSnapshot"; snapshot: Uint8Array }

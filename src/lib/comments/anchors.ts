@@ -1,5 +1,5 @@
 import type { StreamEntryJson } from "@/lib/crdt/adapter";
-import type { PmNode } from "@/lib/crdt/pm-model";
+import { pmDocToBlocks, type PmNode } from "@/lib/crdt/pm-model";
 
 export interface CrdtAnchorPoint {
   itemId: string;
@@ -59,39 +59,41 @@ function textItemPositions(
   doc: PmNode,
   stream: StreamEntryJson[],
 ): TextItemPosition[] | null {
-  const blocks = doc.content ?? [];
+  if (!pmDocToBlocks(doc).support.supported) return null;
+  const blocks: Array<{ node: PmNode; start: number }> = [];
+  const size = (node: PmNode): number => node.type === "text" ? (node.text ?? "").length
+    : node.type === "hardBreak" ? 1 : 2 + (node.content ?? []).reduce((sum, child) => sum + size(child), 0);
+  const visit = (node: PmNode, start: number) => {
+    if (node.type === "paragraph" || node.type === "heading") blocks.push({ node, start });
+    else {
+      let cursor = node.type === "doc" ? 0 : start + 1;
+      for (const child of node.content ?? []) { visit(child, cursor); cursor += size(child); }
+    }
+  };
+  visit(doc, 0);
   const streamBlocks = liveTextByBlock(stream);
-  // The canonical view DROPS the root block when it has no live items (a
-  // fresh document's first paragraph), while the editor always renders at
-  // least one block. So the doc may have exactly one more block than the
-  // stream, and only when that leading block is empty — anything else is
-  // drift (verified against the C++ visibleJson for all empty-block shapes:
-  // leading root empties drop; delimiter-created empties are kept).
-  const skipped = blocks.length - streamBlocks.length;
-  if (skipped < 0 || skipped > 1) return null;
-  if (skipped === 1) {
-    const first = blocks[0];
-    if (!first || (first.type !== "paragraph" && first.type !== "heading")) return null;
-    if ((first.content ?? []).some((child) => (child.text ?? "").length > 0)) return null;
+  const extra = blocks.length - streamBlocks.length;
+  if (extra < 0 || extra > 1) return null;
+  // TipTap may append an empty paragraph after a terminal list/heading.
+  // The older implicit-root projection may instead prepend one.
+  let skipped = 0;
+  if (extra === 1) {
+    if (!(blocks.at(-1)?.node.content ?? []).length) blocks.pop();
+    else if (!(blocks[0]?.node.content ?? []).length) skipped = 1;
+    else return null;
   }
-
   const result: TextItemPosition[] = [];
-  let blockPos = 0;
-
   for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
-    const block = blocks[blockIndex];
-    if (block.type !== "paragraph" && block.type !== "heading") return null;
-
-    let position = blockPos + 1;
+    const { node, start } = blocks[blockIndex];
+    let position = start + 1;
     const expected: Array<{ scalar: string; from: number; to: number }> = [];
-    for (const child of block.content ?? []) {
-      if (child.type !== "text" || typeof child.text !== "string") return null;
-      for (const scalar of child.text) {
+    for (const child of node.content ?? []) {
+      if (child.type !== "text" && child.type !== "hardBreak") return null;
+      for (const scalar of child.type === "hardBreak" ? "\n" : child.text ?? "") {
         expected.push({ scalar, from: position, to: position + scalar.length });
         position += scalar.length;
       }
     }
-
     const entries = streamBlocks[blockIndex - skipped] ?? [];
     if (entries.length !== expected.length) return null;
     for (let i = 0; i < entries.length; i += 1) {
@@ -100,7 +102,6 @@ function textItemPositions(
       if (id === null || entry.s !== expected[i].scalar) return null;
       result.push({ id, ...expected[i] });
     }
-    blockPos = position + 1;
   }
   return result;
 }

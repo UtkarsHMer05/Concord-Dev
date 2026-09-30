@@ -575,12 +575,22 @@ async fn handle_text(
                 );
                 return if fatal { Err(FlowError::Close) } else { Ok(()) };
             }
+            if !hello
+                .capabilities
+                .iter()
+                .any(|capability| capability == "rich-text-v2")
+            {
+                send_error(conn, ProtocolError::UnsupportedProtocolVersion,
+                    "Update Concord to rich-text-v2, then reload this page. Keep this browser's site data to preserve offline edits.", frame.id);
+                return Err(FlowError::Close);
+            }
             conn.state = SessionState::HelloDone;
             send_control(
                 conn,
                 Frame::HelloAck(HelloAck {
                     protocol_version: crate::protocol::WIRE_VERSION,
                     connection_id: conn.id.to_string(),
+                    capabilities: vec!["rich-text-v2".into()],
                 }),
                 frame.id,
             );

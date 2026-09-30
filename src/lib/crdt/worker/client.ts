@@ -121,7 +121,19 @@ export class CrdtClient {
     // ------------------------------------------------------------------
 
     async init(documentId: string, replicaId: bigint, storageId?: string): Promise<void> {
-        await this.call({ kind: "init", documentId, replicaId: replicaId.toString(), storageId });
+        const result = await this.call({ kind: "init", documentId, replicaId: replicaId.toString(), storageId });
+        if (result.kind !== "init" || !result.capabilities?.includes("rich-text-v2")) {
+            throw { code: "UnsupportedVersion", message: "Concord's cached worker needs the rich-text-v2 update. Reload this page; keep this browser's site data to preserve offline edits." } satisfies CrdtWorkerError;
+        }
+    }
+
+    async reconcile(ops: SeedOperation[], baseStream?: StreamEntryJson[]): Promise<StreamEntryJson[] | undefined> {
+        const result = await this.call({ kind: "reconcile", ops, baseStream });
+        return (result as { baseStream?: StreamEntryJson[] }).baseStream;
+    }
+
+    async readView(): Promise<{ json: string; stream: StreamEntryJson[] }> {
+        return this.call({ kind: "readView" }) as Promise<{ json: string; stream: StreamEntryJson[] }>;
     }
 
     applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }> {
@@ -234,8 +246,8 @@ export class CrdtClient {
     }
 
     /** Atomic snapshot import (stale-client resync port contract). */
-    async importSnapshot(snapshot: Uint8Array): Promise<void> {
-        await this.call({ kind: "importSnapshot", snapshot });
+    async importSnapshot(snapshot: Uint8Array, preserveLocal = false): Promise<void> {
+        await this.call({ kind: "importSnapshot", snapshot, preserveLocal });
     }
 
     terminate(): void {

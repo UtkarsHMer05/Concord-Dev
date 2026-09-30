@@ -58,6 +58,7 @@ target_include_directories(concord-crdt PRIVATE
 # Browser/worker module; no filesystem; MODULARIZE for clean import;
 # exceptions are caught inside the ABI (never cross to JS).
 set(EXPORTED_FUNCTIONS
+  _concord_rich_text_version
   _concord_create
   _concord_destroy
   _concord_alloc

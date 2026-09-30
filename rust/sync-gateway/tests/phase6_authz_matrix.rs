@@ -276,7 +276,7 @@ async fn next_binary(ws: &mut Ws) -> Vec<u8> {
 async fn handshake(ws: &mut Ws, clerk_id: &str) {
     send_text(
         ws,
-        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#,
+        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#,
     )
     .await;
     assert_eq!(next_control(ws).await["type"], "hello_ack");

@@ -28,6 +28,7 @@ import {
   type SnapshotResyncRequired,
   FATAL_ERROR_CODES,
 } from "./protocol";
+import { RICH_TEXT_CAPABILITY } from "../crdt/pm-model";
 
 export type ConnectionStatus =
   | "disconnected"
@@ -179,7 +180,7 @@ export class SyncTransport {
     this.ws = ws;
 
     ws.onopen = () => {
-      this.send("hello", { clientProtocolVersion: 1 }, undefined);
+      this.send("hello", { clientProtocolVersion: 1, capabilities: [RICH_TEXT_CAPABILITY] }, undefined);
     };
     ws.onmessage = (event) => this.handleMessage(event.data);
     ws.onerror = () => {
@@ -292,6 +293,15 @@ export class SyncTransport {
   private handleControlFrame(frame: DecodedControlFrame): void {
     switch (frame.type) {
       case "hello_ack":
+        if (!(frame.payload as { capabilities?: string[] }).capabilities?.includes(RICH_TEXT_CAPABILITY)) {
+          const message = "The sync gateway needs the rich-text-v2 upgrade. Ask the workspace operator to update it, then reload. Offline edits remain on this device.";
+          this.options.events.onError("unsupported_protocol_version", message);
+          this.options.events.onFatal(message);
+          this.closedByUser = true;
+          this.teardownSocket();
+          this.setStatus("closed");
+          break;
+        }
         // Server accepted the protocol version — authenticate with a fresh
         // token (never a cached long-lived one).
         if (!this.authenticateInFlight) {
@@ -341,6 +351,7 @@ export class SyncTransport {
         const payload = frame.payload as { code: ErrorCode; message: string; requestId?: string };
         this.options.events.onError(payload.code, payload.message, payload.requestId);
         if (FATAL_ERROR_CODES.has(payload.code)) {
+          this.closedByUser = true;
           this.options.events.onFatal(`server rejected: ${payload.code}`);
           this.teardownSocket();
           this.setStatus("closed");

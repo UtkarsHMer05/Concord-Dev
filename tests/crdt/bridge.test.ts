@@ -142,6 +142,19 @@ class CoreBackedClient {
         return (r as { ops: Uint8Array[] }).ops;
     }
 
+    async reconcile(ops: SeedOperation[], baseStream?: StreamEntryJson[]): Promise<StreamEntryJson[] | undefined> {
+        const r = await this.core.handle({ id: this.nextId++, kind: "reconcile", ops, baseStream });
+        return (r as { baseStream?: StreamEntryJson[] }).baseStream;
+    }
+
+    async applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }> {
+        return this.core.handle({ id: this.nextId++, kind: "applyRemote", ops, cursor }) as Promise<{ applied: number; duplicates: number }>;
+    }
+
+    async readView(): Promise<{ json: string; stream: StreamEntryJson[] }> {
+        return this.core.handle({ id: this.nextId++, kind: "readView" }) as Promise<{ json: string; stream: StreamEntryJson[] }>;
+    }
+
     async visibleJson(): Promise<string> {
         const r = await this.core.handle({ id: this.nextId++, kind: "visibleJson" });
         return (r as { json: string }).json;
@@ -206,6 +219,57 @@ interface VisibleDoc {
 }
 
 describe("editor bridge seed path (final gate)", () => {
+    it("keeps a key typed while a remote render RPC is in flight", async () => {
+        const core = new CrdtWorkerCore({ documentId: DOC, replicaId: 7n, loadFactory, persistence: new MemoryPersistence() });
+        const client = new CoreBackedClient(core, DOC);
+        const editor = fakeEditor();
+        const bridge = new CrdtEditorBridge({ editor, client: client as unknown as CrdtClient, documentId: DOC, seedPmDoc: pmDocWithText("abc") });
+        await bridge.start();
+        const peer = new CrdtWorkerCore({ documentId: DOC, replicaId: 8n, loadFactory, persistence: new MemoryPersistence() });
+        await peer.handle({ id: 1, kind: "init", documentId: DOC, replicaId: "8" });
+        await peer.handle({ id: 2, kind: "applyRemote", ops: await client.exportOps() });
+        const remote = await peer.handle({ id: 3, kind: "localInsertText", streamIndex: 0, codepoint: 0x58 });
+        const realRead = client.readView.bind(client);
+        let release!: () => void;
+        let started!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        const reading = new Promise<void>((resolve) => { started = resolve; });
+        let once = true;
+        client.readView = async () => {
+            const result = await realRead();
+            if (once) { once = false; started(); await gate; }
+            return result;
+        };
+        const inbound = bridge.applyRemote((remote as { ops: Uint8Array[] }).ops);
+        await reading;
+        editor.current = pmDocWithText("abcd");
+        const local = bridge.onLocalTransaction(editor);
+        release();
+        await inbound; await local;
+        expect(JSON.parse(await client.visibleJson()).blocks[0].runs[0].t).toBe("Xabcd");
+        expect(pmDocToBlocks(editor.getJSON()).blocks[0].chars.map((char) => char.scalar).join("")).toBe("Xabcd");
+    });
+
+    it("does not persist projection normalization as a local edit", async () => {
+        const persistence = new MemoryPersistence();
+        const core = new CrdtWorkerCore({ documentId: DOC, replicaId: 7n, loadFactory, persistence });
+        const client = new CoreBackedClient(core, DOC);
+        await client.init(7n);
+        await client.localInsertDelimiter(0, "list-item");
+        await client.localSetAttr(0, "list", "bullet");
+        await client.localSetAttr(0, "depth", "2");
+        await client.localInsertText(1, 0x61);
+        const editor = fakeEditor();
+        const bridge = new CrdtEditorBridge({ editor, client: client as unknown as CrdtClient, documentId: DOC });
+        const original = await client.exportOps();
+        await bridge.start();
+        await bridge.onLocalTransaction(editor);
+        await bridge.renderRemote();
+        await bridge.onLocalTransaction(editor);
+        expect(await client.exportOps()).toHaveLength(original.length);
+        expect(JSON.parse(await client.visibleJson()).blocks[0].attrs.depth).toBe("2");
+    });
+
     it("keeps fresh blank replicas on one implicit block", async () => {
         const documentId = "bridge-blank-replica-doc";
         const persistenceA = new MemoryPersistence();

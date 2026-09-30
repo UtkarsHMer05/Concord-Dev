@@ -218,6 +218,22 @@ describe("SyncTransport (mock socket)", () => {
     MockWebSocket.instances.length = 0;
   });
 
+  it("stops before authentication when the gateway lacks rich-text-v2", () => {
+    const { events, errors } = baseEvents();
+    const getToken = vi.fn(async () => "unused");
+    const transport = new SyncTransport({ url: "ws://old-gateway", getToken, events });
+    transport.connect();
+    const ws = MockWebSocket.instances.at(-1)!;
+    ws.onopen?.();
+    expect(ws.lastText()).toContain('"capabilities":["rich-text-v2"]');
+    ws.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"old"}}');
+    expect(transport.currentStatus).toBe("closed");
+    expect(errors).toContain("unsupported_protocol_version");
+    expect(getToken).not.toHaveBeenCalled();
+    transport.reconnect();
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
 
   it("runs hello → authenticate → join and tracks status", async () => {
     const { events, statuses } = baseEvents();
@@ -232,7 +248,7 @@ describe("SyncTransport (mock socket)", () => {
     ws.onopen?.();
 
     // Server accepts hello.
-    ws.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"c1"}}');
+    ws.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"c1","capabilities":["rich-text-v2"]}}');
     await vi.waitFor(() => {
       expect(ws.lastText()).toContain('"authenticate"');
       expect(ws.lastText()).toContain("TEST-JWT");
@@ -261,7 +277,7 @@ describe("SyncTransport (mock socket)", () => {
     transport.connect();
     const ws = MockWebSocket.instances.at(-1)!;
     ws.onopen?.();
-    ws.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"c"}}');
+    ws.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"c","capabilities":["rich-text-v2"]}}');
     ws.serverSend('{"v":1,"type":"ping","payload":{"nonce":"n123"}}');
     expect(ws.lastText()).toContain('"pong"');
     expect(ws.lastText()).toContain("n123");

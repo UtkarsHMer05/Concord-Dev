@@ -100,9 +100,9 @@ function openOutbox(): Promise<DbStores> {
 export class PendingOpStore {
   private constructor(private readonly stores: DbStores, private readonly storageId: string) {}
 
-  static async open(documentId: string, userId?: string | null): Promise<PendingOpStore> {
+  static async open(documentId: string, userId?: string | null, storageId?: string): Promise<PendingOpStore> {
     const stores = await openOutbox();
-    return new PendingOpStore(stores, replicaStorageId(documentId, userId));
+    return new PendingOpStore(stores, storageId ?? replicaStorageId(documentId, userId));
   }
 
   static async hasLegacyUnacked(documentId: string): Promise<boolean> {

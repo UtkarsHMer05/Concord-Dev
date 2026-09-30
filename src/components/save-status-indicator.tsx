@@ -60,7 +60,8 @@ export function useOnline(): boolean {
 export const SaveStatusIndicator = () => {
   const { content } = useDocumentSession();
   const online = useOnline();
-  const locallyDurable = useBridgeStatusStore((s) => s.state.mode === "crdt");
+  const bridgeMode = useBridgeStatusStore((s) => s.state.mode);
+  const locallyDurable = bridgeMode === "crdt";
   const localOnly = useSyncStatusStore((s) => s.localOnly);
   const outbox = useSyncStatusStore((s) => s.outbox);
   const syncError = useSyncStatusStore((s) => s.error);
@@ -70,6 +71,11 @@ export const SaveStatusIndicator = () => {
     error: syncError,
   });
   const Icon = ICONS[view.state];
+
+  if (bridgeMode === "blocked") return <span role="status" className="inline-flex items-center gap-1 text-sm text-muted-foreground" title="Editing is paused until Concord is updated. Existing local replicas are preserved.">
+    <CloudAlertIcon className="size-4" aria-hidden="true" />
+    <span className="hidden sm:inline">Waiting for update</span>
+  </span>;
 
   return (
     <span

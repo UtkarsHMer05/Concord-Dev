@@ -151,7 +151,7 @@ async fn connect(addr: SocketAddr) -> Ws {
 
 async fn handshake(ws: &mut Ws, sub: &str) {
     ws.send(WsMessage::Text(
-        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#.into(),
+        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#.into(),
     ))
     .await
     .expect("hello");

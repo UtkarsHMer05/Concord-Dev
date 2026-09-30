@@ -2,7 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { FileText, History, Lightbulb, MessageSquareText, PackageOpen, GitBranch, Rewind, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ElementType, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ElementType, type FormEvent, type ReactNode } from "react";
 import type { Editor as TipTapEditor } from "@tiptap/react";
 
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { SuggestionsPanel } from "@/components/suggestions-panel";
 import { DraftsPanel } from "@/components/drafts-panel";
 import { anchorSelection, resolveAnchors as resolveAnchorSet, type CrdtRangeAnchor } from "@/lib/comments/anchors";
 import { loadBrowserCrdtFactory } from "@/lib/crdt/browser-factory";
-import { blocksToPmDoc, SUPPORTED_MARKS, type CanonicalBlock, type PmNode } from "@/lib/crdt/pm-model";
+import { blocksToPmDoc, validRichTextValue, type CanonicalBlock, type PmNode } from "@/lib/crdt/pm-model";
 import { exportMarkdown, importMarkdown } from "@/lib/markdown";
 import {
   exportConcordPack,
@@ -88,47 +88,63 @@ async function gatewayRequest<T>(
   return body as T;
 }
 
-function previewBlock(block: VisibleBlock, index: number) {
-  const heading = /^heading-([1-6])$/.exec(block.type);
-  const Tag: ElementType = heading ? (["h1", "h2", "h3", "h4", "h5", "h6"] as const)[Number(heading[1]) - 1] : "p";
-  const content = (block.runs ?? []).map((run, runIndex) => {
-    let node: ReactNode = run.t;
-    if (run.m?.bold === "1") node = <strong key={`b${runIndex}`}>{node}</strong>;
-    if (run.m?.italic === "1") node = <em key={`i${runIndex}`}>{node}</em>;
-    if (run.m?.underline === "1") node = <u key={`u${runIndex}`}>{node}</u>;
-    return <span key={runIndex}>{node}</span>;
-  });
-  return <Tag key={index} className={heading ? "my-3 text-lg font-semibold" : "my-2 whitespace-pre-wrap"}>{content.length ? content : <br />}</Tag>;
+function previewNode(node: PmNode, index: number): ReactNode {
+  const children = node.content?.map(previewNode);
+  if (node.type === "text") {
+    let text: ReactNode = node.text;
+    for (const mark of node.marks ?? []) {
+      if (mark.type === "bold") text = <strong>{text}</strong>;
+      if (mark.type === "italic") text = <em>{text}</em>;
+      if (mark.type === "underline") text = <u>{text}</u>;
+      if (mark.type === "strike") text = <s>{text}</s>;
+      if (mark.type === "code") text = <code>{text}</code>;
+      if (mark.type === "link") text = <a href={String(mark.attrs?.href)} target="_blank" rel="noopener noreferrer" className="underline">{text}</a>;
+      if (mark.type === "textStyle") text = <span style={mark.attrs as CSSProperties}>{text}</span>;
+      if (mark.type === "highlight") text = <mark style={{ backgroundColor: mark.attrs?.color as string | undefined }}>{text}</mark>;
+    }
+    return <span key={index}>{text}</span>;
+  }
+  if (node.type === "hardBreak") return <br key={index} />;
+  if (node.type === "bulletList") return <ul key={index} className="my-2 list-disc pl-6">{children}</ul>;
+  if (node.type === "orderedList") return <ol key={index} start={Number(node.attrs?.start ?? 1)} className="my-2 list-decimal pl-6">{children}</ol>;
+  if (node.type === "taskList") return <ul key={index} className="my-2 list-none pl-1">{children}</ul>;
+  if (node.type === "listItem") return <li key={index}>{children}</li>;
+  if (node.type === "taskItem") return <li key={index} className="flex items-start gap-2"><input type="checkbox" checked={node.attrs?.checked === true} disabled aria-label="Task status" className="mt-3" /><div>{children}</div></li>;
+  const Tag: ElementType = node.type === "heading" ? (["h1", "h2", "h3", "h4", "h5", "h6"] as const)[Number(node.attrs?.level ?? 1) - 1] : "p";
+  return <Tag key={index} className={node.type === "heading" ? "my-3 text-lg font-semibold" : "my-2 whitespace-pre-wrap"} style={{ textAlign: node.attrs?.textAlign, lineHeight: node.attrs?.lineHeight } as CSSProperties}>{children?.length ? children : <br />}</Tag>;
 }
 
 function documentPreview(content: unknown) {
-  if (typeof content !== "object" || content === null || !("blocks" in content) || !Array.isArray(content.blocks)) {
-    return <p className="text-sm text-muted-foreground">No visible content.</p>;
-  }
-  const blocks = content.blocks as VisibleBlock[];
-  if (blocks.length === 0) return <p className="text-sm text-muted-foreground">Empty document.</p>;
-  return <div className="prose prose-sm max-w-none">{blocks.map(previewBlock)}</div>;
+  const doc = asEditorDocument(content);
+  if (!doc) return <p className="text-sm text-muted-foreground">This content needs a newer Concord preview.</p>;
+  return <div className="prose prose-sm max-w-none">{doc.content?.map(previewNode)}</div>;
 }
 
 function asEditorDocument(content: unknown): PmNode | null {
   if (typeof content !== "object" || content === null || !("blocks" in content) || !Array.isArray(content.blocks)) return null;
+  const blockNames = ["type", "align", "lineHeight", "list", "depth", "checked", "listStart", "contentType"];
+  const markNames = ["bold", "italic", "underline", "strikethrough", "code", "link", "linkTarget", "linkRel", "color", "fontFamily", "fontSize", "highlight"];
+  const validAttrs = (attrs: unknown, names: string[]): attrs is Record<string, string> =>
+    typeof attrs === "object" && attrs !== null && !Array.isArray(attrs) && Object.entries(attrs).every(([key, value]) => names.includes(key) && typeof value === "string" && validRichTextValue(key, value));
   const blocks: CanonicalBlock[] = [];
   for (const value of content.blocks) {
     if (typeof value !== "object" || value === null) return null;
     const block = value as VisibleBlock;
-    if (block.type !== "paragraph" && !/^heading-[1-6]$/.test(block.type)) return null;
+    if (typeof block.type !== "string" || !validRichTextValue("type", block.type)) return null;
     const attrs = block.attrs ?? {};
-    if (Object.keys(attrs).some((key) => !["type", "align", "lineHeight"].includes(key))) return null;
+    if (!validAttrs(attrs, blockNames) || (attrs.type !== undefined && attrs.type !== block.type)) return null;
     const runs = block.runs ?? [];
+    if (!Array.isArray(runs)) return null;
     const chars: CanonicalBlock["chars"] = [];
     for (const run of runs) {
+      if (!run || typeof run.t !== "string") return null;
       const marks = run.m ?? {};
-      if (Object.keys(marks).some((key) => !SUPPORTED_MARKS.has(key))) return null;
+      if (!validAttrs(marks, markNames)) return null;
       for (const scalar of Array.from(run.t)) chars.push({ scalar, marks });
     }
     blocks.push({ type: block.type, attrs, chars });
   }
-  return blocksToPmDoc(blocks) as PmNode;
+  return blocksToPmDoc(blocks);
 }
 
 function HistoryPanel({ documentId, role, syncNow }: { documentId: string; role: DocumentDetailDto["effectiveRole"]; syncNow: () => void }) {
@@ -217,8 +233,8 @@ function HistoryPanel({ documentId, role, syncNow }: { documentId: string; role:
   };
 
   return (
-    <div className="grid h-full min-h-0 gap-4 md:grid-cols-[minmax(14rem,0.85fr)_minmax(0,1.4fr)]">
-      <section className="flex min-h-0 flex-col gap-3">
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
+      <section className="flex max-h-48 min-h-0 flex-col gap-3">
         {canCheckpoint && (
           <form onSubmit={(event) => void createCheckpoint(event)} className="flex gap-2">
             <Input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={200} placeholder="Checkpoint name" aria-label="Checkpoint name" />
@@ -578,8 +594,8 @@ function MarkdownPanel({
       const result = exportMarkdown(editor.getJSON() as PmNode);
       setMarkdown(result.markdown);
       const notes: string[] = [];
-      if (!result.lossless) notes.push("content outside the collaborative subset was skipped");
-      if (result.droppedAttributes > 0) notes.push(`${result.droppedAttributes} paragraph attribute(s) (alignment/line height) have no markdown equivalent and were dropped`);
+      if (!result.lossless) notes.push("content outside this Markdown format was simplified or skipped");
+      if (result.droppedAttributes > 0) notes.push(`${result.droppedAttributes} structure or style attribute(s) have no equivalent in this Markdown format and were dropped`);
       setNotice(notes.length ? `Exported. Note: ${notes.join("; ")}.` : `Exported ${result.markdown.length.toLocaleString()} characters (lossless round trip).`);
       const blob = new Blob([result.markdown], { type: "text/markdown" });
       const href = URL.createObjectURL(blob);
@@ -624,7 +640,7 @@ function MarkdownPanel({
         className="min-h-0 flex-1 resize-none rounded-md border bg-background p-3 font-mono text-xs leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
       <p className="shrink-0 text-xs text-muted-foreground">
-        Supported subset: paragraphs, headings 1–6, bold, italic, strikethrough, underline, backslash escapes. Tables, images, lists, and colors are outside the collaborative model and are never silently dropped — exports report them, imports keep them literal.
+        Markdown supports paragraphs, headings 1–6, bold, italic, strikethrough, underline, and backslash escapes. Collaborative lists, links, inline code, and colors exceed this Markdown format: exports report formatting loss; imports keep unsupported syntax literal.
       </p>
     </div>
   );

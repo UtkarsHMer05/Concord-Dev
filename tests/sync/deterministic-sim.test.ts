@@ -357,7 +357,7 @@ class ScriptedGatewaySocket {
     connect(): void {
         setTimeout(() => {
             this.onopen?.();
-            this.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"sim"}}');
+            this.serverSend('{"v":1,"type":"hello_ack","payload":{"protocolVersion":1,"connectionId":"sim","capabilities":["rich-text-v2"]}}');
         }, 5);
     }
 

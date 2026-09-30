@@ -1318,3 +1318,29 @@ retained and will not be removed.
   Cluster is NOT implemented and therefore NOT claimed (the durable
   truth is PostgreSQL either way; the failure model already covers
   single-node loss of both).
+
+
+## DEC-051 - Rich-text v2: stable text identities, flat list registers, explicit client capability
+
+- **Status:** Implemented, 2026-09-30 (portfolio proposal feature #1).
+- **Decision:** Reuse existing per-item LWW attributes and v1 operations/snapshots.
+  Lists flatten into `list-item` / `list-continuation` delimiter blocks with
+  bounded `list`, `depth`, `checked`, `listStart`, and `contentType` values.
+  Pure formatting and list-structure changes preserve text item identities.
+  Local reconciliation is one durable worker batch; edits during remote
+  rendering rebase onto item IDs. Atomic view reads prevent stale JSON from
+  overwriting a keystroke. Web Locks isolate concurrent tab writers and their
+  durable namespaces while retaining the existing primary account cache.
+- **Compatibility:** Require `rich-text-v2` in hello/ack before authentication
+  or document fanout. Check worker capabilities and WASM registry version
+  before opening the editing path. Preserve site data and provide an explicit
+  update/reload message. Deploy the gateway, native worker, web, JS worker,
+  and WASM together; reload all open tabs.
+- **Alternatives:** Unknown attributes accepted as opaque values would weaken
+  the existing fail-closed validation contract and would not teach an old
+  binary how to apply new values. A nested CRDT or new binary protocol adds
+  machinery unnecessary for bounded flat-list projection.
+- **Semantics and limits:** [RICH_TEXT_COLLABORATION.md](RICH_TEXT_COLLABORATION.md).
+  Per-character formatting preserves independent registers; it does not
+  implement Peritext span inheritance for unseen concurrent inserts.
+- **Verification:** [Current implementation report](audits/RICH_TEXT_COLLABORATION_REPORT.md).

@@ -264,7 +264,7 @@ async fn next_control(ws: &mut Ws) -> serde_json::Value {
 async fn handshake(ws: &mut Ws, clerk_id: &str) {
     send_text(
         ws,
-        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#,
+        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#,
     )
     .await;
     let ack = next_control(ws).await;

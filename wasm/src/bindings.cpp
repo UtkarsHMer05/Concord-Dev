@@ -72,6 +72,8 @@ struct OutBuffer {
 
 extern "C" {
 
+EMSCRIPTEN_KEEPALIVE std::int32_t concord_rich_text_version() { return 2; }
+
 // ---- Lifecycle -------------------------------------------------------------
 
 EMSCRIPTEN_KEEPALIVE void* concord_create(std::uint64_t replica_id) {
@@ -283,17 +285,8 @@ std::int32_t concord_stream_json(void* handle, std::uint8_t* out, std::int32_t c
             if (entry.kind == concord::crdt::ItemKind::Text) {
                 concord::crdt::append_utf8(scalar, entry.scalar);
             }
-            json += ",\"s\":\"";
-            for (const char ch : scalar) {
-                if (static_cast<unsigned char>(ch) < 0x20 || ch == '"' || ch == '\\') {
-                    char escape[8];
-                    std::snprintf(escape, sizeof(escape), "\\u%04x", ch);
-                    json += escape;
-                } else {
-                    json += ch;
-                }
-            }
-            json += "\"";
+            json += ",\"s\":";
+            concord::crdt::append_json_string(json, scalar);
             json += ",\"a\":{";
             bool first = true;
             for (const auto& [name, value] : entry.attrs) {
@@ -301,11 +294,9 @@ std::int32_t concord_stream_json(void* handle, std::uint8_t* out, std::int32_t c
                     json += ",";
                 }
                 first = false;
-                json += "\"";
-                json += name;
-                json += "\":\"";
-                json += value;
-                json += "\"";
+                concord::crdt::append_json_string(json, name);
+                json += ":";
+                concord::crdt::append_json_string(json, value);
             }
             json += "}}";
         }

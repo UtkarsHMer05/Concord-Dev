@@ -14,6 +14,8 @@ import { ConcordEngine, CrdtError, SUPPORTED_PROTOCOL_VERSION } from "../runtime
 import type { LoadConcordCrdtFactory } from "../wasm-types";
 import type { PersistenceAdapter } from "./idb";
 import type { WorkerRequest, WorkerResultPayload } from "./protocol";
+import { RICH_TEXT_CAPABILITY } from "../pm-model";
+import type { StreamEntryJson } from "../adapter";
 
 /**
  * Reads (replicaId, counter, lamport) from a serialized operation frame
@@ -110,14 +112,14 @@ export class CrdtWorkerCore {
      * would re-use identities (silent no-op duplicates — a real M037 bug the
      * restoration tests caught).
      */
-    private replayAndRestoreAllocation(ops: Uint8Array[]): void {
-        if (this.engine === null || ops.length === 0) {
+    private replayAndRestoreAllocation(ops: Uint8Array[], engine = this.engine): void {
+        if (engine === null || ops.length === 0) {
             return;
         }
         let maxOwnCounter = 0n;
         let maxLamport = 0n;
         for (const op of ops) {
-            this.engine.applyRemote(op);
+            engine.applyRemote(op);
             const id = readOpIdentity(op);
             if (id !== null) {
                 if (id.replicaId === this.config.replicaId) {
@@ -126,7 +128,7 @@ export class CrdtWorkerCore {
                 if (id.lamport > maxLamport) maxLamport = id.lamport;
             }
         }
-        this.engine.restoreAllocationState(maxOwnCounter + 1n, maxLamport + 1n);
+        engine.restoreAllocationState(maxOwnCounter + 1n, maxLamport + 1n);
     }
 
     /** Discard uncommitted engine state if the durable append fails. */
@@ -158,7 +160,7 @@ export class CrdtWorkerCore {
                     throw new CrdtError("InvalidArgument", "worker identity changed after initialization");
                 }
                 await this.ensureEngine();
-                return { kind: "init", ready: true };
+                return { kind: "init", ready: true, capabilities: [RICH_TEXT_CAPABILITY] };
             }
 
             case "loadSnapshot": {
@@ -211,43 +213,72 @@ export class CrdtWorkerCore {
                 return { kind: "applyRemote", applied, duplicates, ops: durable };
             }
 
-            case "seed": {
+            case "seed":
+            case "reconcile": {
                 const engine = await this.ensureEngine();
                 if (request.ops.length === 0) {
-                    return { kind: "seed", ops: [] };
+                    return request.kind === "seed" ? { kind: "seed", ops: [] } : { kind: "localOps", ops: [], streamSize: engine.streamSize() };
                 }
-                const seedEngine = await ConcordEngine.create(
+                const seedEngine = request.kind === "seed" ? await ConcordEngine.create(
                     this.seedReplicaId(),
                     this.config.loadFactory,
-                );
+                ) : engine;
                 const generated: Uint8Array[] = [];
+                const baseStream = request.kind === "reconcile" && request.baseStream ? structuredClone(request.baseStream) : undefined;
+                const currentStream: StreamEntryJson[] = baseStream ? JSON.parse(engine.streamJson()) : [];
                 try {
                     for (const operation of request.ops) {
+                        // Rebase a view's indices onto stable item identities.
+                        // A peer may have inserted text while the UI was typing.
+                        // ponytail: linear lookup per op; index by ID if measured large-paste latency warrants it.
+                        const target = baseStream?.[operation.streamIndex];
+                        const streamIndex = baseStream ? target ? currentStream.findIndex((entry) => entry.r === target.r && entry.c === target.c) : currentStream.length : operation.streamIndex;
+                        if (streamIndex < 0 || (baseStream && !target && !operation.kind.startsWith("insert"))) throw new CrdtError("StateCorruption", "editor view references an unavailable item");
+                        const generatedBefore = generated.length;
                         switch (operation.kind) {
                             case "insertText":
-                                generated.push(seedEngine.localInsertText(operation.streamIndex, operation.codepoint ?? 0x20));
+                                generated.push(seedEngine.localInsertText(streamIndex, operation.codepoint ?? 0x20));
                                 break;
                             case "insertDelimiter":
-                                generated.push(seedEngine.localInsertDelimiter(operation.streamIndex, operation.blockType ?? "paragraph"));
+                                generated.push(seedEngine.localInsertDelimiter(streamIndex, operation.blockType ?? "paragraph"));
                                 break;
                             case "delete": {
-                                const op = seedEngine.localDelete(operation.streamIndex);
+                                const op = seedEngine.localDelete(streamIndex);
                                 if (op !== null) generated.push(op);
                                 break;
                             }
                             case "setAttr":
-                                generated.push(seedEngine.localSetAttr(operation.streamIndex, operation.name ?? "", operation.value ?? null));
+                                generated.push(seedEngine.localSetAttr(streamIndex, operation.name ?? "", operation.value ?? null));
                                 break;
+                        }
+                        if (baseStream) {
+                            if (operation.kind.startsWith("insert")) {
+                                const id = readOpIdentity(generated[generatedBefore])!;
+                                const entry: StreamEntryJson = { r: String(id.replicaId), c: String(id.counter), k: operation.kind === "insertText" ? "text" : "delim", t: false,
+                                    s: operation.kind === "insertText" ? String.fromCodePoint(operation.codepoint ?? 0x20) : "", a: operation.kind === "insertText" ? {} : { type: operation.blockType ?? "paragraph" } };
+                                baseStream.splice(operation.streamIndex, 0, entry);
+                                currentStream.splice(streamIndex, 0, entry);
+                            } else if (operation.kind === "delete") target!.t = true;
+                            else if (operation.value == null) delete target!.a[operation.name!];
+                            else target!.a[operation.name!] = operation.value;
                         }
                     }
                     const durable: Uint8Array[] = [];
-                    for (const op of generated) {
-                        if (engine.applyRemote(op) === "applied") durable.push(op);
-                    }
+                    if (request.kind === "reconcile") durable.push(...generated);
+                    else for (const op of generated) if (engine.applyRemote(op) === "applied") durable.push(op);
                     await this.appendOrReset(durable);
-                    return { kind: "seed", ops: generated };
+                    return request.kind === "seed" ? { kind: "seed", ops: generated } : { kind: "localOps", ops: generated, streamSize: engine.streamSize(), baseStream };
+                } catch (error) {
+                    // A rejected operation must also discard earlier mutations
+                    // in this batch: none of them reached the durable log.
+                    if (this.engine === engine) {
+                        engine.free();
+                        this.engine = null;
+                        this.starting = null;
+                    }
+                    throw error;
                 } finally {
-                    seedEngine.free();
+                    if (seedEngine !== engine) seedEngine.free();
                 }
             }
 
@@ -285,6 +316,11 @@ export class CrdtWorkerCore {
             case "visibleJson": {
                 const engine = await this.ensureEngine();
                 return { kind: "visibleJson", json: engine.visibleJson() };
+            }
+
+            case "readView": {
+                const engine = await this.ensureEngine();
+                return { kind: "readView", json: engine.visibleJson(), stream: JSON.parse(engine.streamJson()) as StreamEntryJson[] };
             }
 
             case "digest": {
@@ -382,6 +418,10 @@ export class CrdtWorkerCore {
                     this.config.loadFactory,
                 );
                 try {
+                    if (request.preserveLocal) {
+                        const local = await this.config.persistence.loadLocalState(this.storageId);
+                        this.replayAndRestoreAllocation(local.ops, restored);
+                    }
                     await this.config.persistence.saveSnapshot(this.storageId, request.snapshot);
                 } catch (error) {
                     restored.free();

@@ -81,6 +81,8 @@ pub enum Frame {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Hello {
     pub client_protocol_version: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
 }
 
 /// s→c: accepted version + unique connection id.
@@ -89,6 +91,8 @@ pub struct Hello {
 pub struct HelloAck {
     pub protocol_version: u32,
     pub connection_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
 }
 
 /// c→s: Clerk session JWT (never in a URL query string; PROTOCOL §9.5).

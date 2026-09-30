@@ -190,7 +190,7 @@ async fn next_control(ws: &mut Ws) -> serde_json::Value {
 async fn handshake_and_join(ws: &mut Ws, clerk: &str, doc: &str) {
     send(
         ws,
-        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#.into(),
+        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#.into(),
     )
     .await;
     let _ = next_control(ws).await; // hello_ack
@@ -497,7 +497,7 @@ async fn scenario_c_org_membership_removal_denies_writes_on_both_gateways() {
     let joined_a = {
         send(
             &mut a,
-            r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#.into(),
+            r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#.into(),
         )
         .await;
         let _ = next_control(&mut a).await;

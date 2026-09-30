@@ -16,6 +16,10 @@ import {
   BoldIcon,
   ItalicIcon,
   UnderlineIcon,
+  StrikethroughIcon,
+  CodeIcon,
+  IndentIncreaseIcon,
+  IndentDecreaseIcon,
   Undo2Icon,
   Redo2Icon,
   PrinterIcon,
@@ -61,6 +65,7 @@ import {
 import { useEditorStore } from "@/store/use-editor-store";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { MAX_LIST_DEPTH } from "@/lib/crdt/pm-model";
 
 /* ------------------------------------------------------------------------- */
 /* Spell-check preference                                                     */
@@ -210,16 +215,16 @@ const OptionListMenu = ({
 }) => {
   const TriggerIcon = triggerIcon;
   const rows = options.map(({ key, label, icon: RowIcon, style, selected, onSelect }) => (
-    <button
+    <DropdownMenuItem
       key={key}
       style={style}
-      onClick={onSelect}
-      aria-pressed={selected ? true : undefined}
+      onSelect={onSelect}
+      aria-current={selected ? true : undefined}
       className={cn(MENU_ROW_CLASSES, selected && CONTROL_ACTIVE_CLASSES)}
     >
       {RowIcon && <RowIcon className="size-4" />}
       <span className="text-sm">{label}</span>
-    </button>
+    </DropdownMenuItem>
   ));
 
   return (
@@ -234,7 +239,9 @@ const OptionListMenu = ({
         )}
       </PickerTrigger>
       {/* Rows are built above so the trigger markup stays scannable. */}
-      <DropdownMenuContent className="p-1 flex flex-col gap-y-1">{rows}</DropdownMenuContent>
+      <DropdownMenuContent className="p-1 flex flex-col gap-y-1" onCloseAutoFocus={(event) => {
+        event.preventDefault();
+      }}>{rows}</DropdownMenuContent>
     </DropdownMenu>
   );
 };
@@ -492,22 +499,28 @@ const TextColorPicker = () => {
 const LinkEditor = () => {
   const { editor } = useEditorStore();
   const [href, setHref] = useState("");
+  const [open, setOpen] = useState(false);
 
   const applyLink = (target: string) => {
     editor?.chain().focus().extendMarkRange("link").setLink({ href: target }).run();
     setHref("");
+    setOpen(false);
   };
 
   return (
     <DropdownMenu
+      open={open}
       onOpenChange={(open) => {
+        setOpen(open);
         if (open) setHref(editor?.getAttributes("link").href || "");
       }}
     >
       <PickerTrigger label="Insert link">
         <Link2Icon className="size-4" />
       </PickerTrigger>
-      <DropdownMenuContent className="p-2.5 flex items-center gap-x-2">
+      <DropdownMenuContent className="p-2.5 flex items-center gap-x-2" onCloseAutoFocus={(event) => {
+        event.preventDefault();
+      }}>
         <label htmlFor="link-url-input" className="sr-only">
           Link URL
         </label>
@@ -644,6 +657,27 @@ const ListPicker = () => {
           selected: !!editor?.isActive("orderedList"),
           onSelect: () => editor?.chain().focus().toggleOrderedList().run(),
         },
+        {
+          key: "task", label: "Task List", icon: ListTodoIcon,
+          selected: !!editor?.isActive("taskList"),
+          onSelect: () => editor?.chain().focus().toggleTaskList().run(),
+        },
+        {
+          key: "indent", label: "Indent list item", icon: IndentIncreaseIcon,
+          selected: false,
+          onSelect: () => {
+            if (!editor) return;
+            const { $from } = editor.state.selection;
+            let depth = 0;
+            for (let i = 0; i <= $from.depth; i += 1) if (["bulletList", "orderedList", "taskList"].includes($from.node(i).type.name)) depth += 1;
+            if (depth <= MAX_LIST_DEPTH) editor.chain().focus().sinkListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run();
+          },
+        },
+        {
+          key: "outdent", label: "Outdent list item", icon: IndentDecreaseIcon,
+          selected: false,
+          onSelect: () => editor?.chain().focus().liftListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run(),
+        },
       ]}
     />
   );
@@ -759,6 +793,16 @@ export const Toolbar = () => {
       icon: UnderlineIcon,
       engaged: editor?.isActive("underline"),
       run: () => editor?.chain().focus().toggleUnderline().run(),
+    },
+    {
+      label: "Strikethrough", icon: StrikethroughIcon,
+      engaged: editor?.isActive("strike"),
+      run: () => editor?.chain().focus().toggleStrike().run(),
+    },
+    {
+      label: "Inline code", icon: CodeIcon,
+      engaged: editor?.isActive("code"),
+      run: () => editor?.chain().focus().toggleCode().run(),
     },
   ];
 

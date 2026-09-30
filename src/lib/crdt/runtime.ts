@@ -13,6 +13,12 @@ import type { LoadConcordCrdtFactory, ConcordModule } from "./wasm-types";
 /** Protocol version the wrapper is compiled against (PROTOCOL §1). */
 export const SUPPORTED_PROTOCOL_VERSION = 1;
 
+function requireRichTextEngine(module: ConcordModule): void {
+    if (module._concord_rich_text_version?.() !== 2) {
+        throw new CrdtError("UnsupportedVersion", "Concord's cached engine needs an update. Reload this page to load rich-text-v2. Keep this browser's site data to preserve offline edits.");
+    }
+}
+
 export type CrdtErrorCode =
     | "UnsupportedVersion"
     | "UnknownOpType"
@@ -109,6 +115,7 @@ export class ConcordEngine {
         loadFactory: LoadConcordCrdtFactory,
     ): Promise<ConcordEngine> {
         const loaded = await loadFactory();
+        requireRichTextEngine(loaded);
         const handle = loaded._concord_create(replicaId);
         if (handle === 0) {
             throw new CrdtError("Unknown", "engine creation failed");
@@ -123,6 +130,7 @@ export class ConcordEngine {
         loadFactory: LoadConcordCrdtFactory,
     ): Promise<ConcordEngine> {
         const loaded = await loadFactory();
+        requireRichTextEngine(loaded);
         const pointer = loaded._concord_alloc(snapshot.length);
         loaded.HEAPU8.set(snapshot, pointer);
         const handle = loaded._concord_create_from_snapshot(replicaId, pointer, snapshot.length);

@@ -37,7 +37,7 @@ describe("markdown export (Feature 9)", () => {
         ],
       },
       { type: "paragraph", content: [{ type: "text", text: "under", marks: [{ type: "underline" }] }] },
-      { type: "paragraph", content: [{ type: "text", text: "struck", marks: [{ type: "strikethrough" }] }] },
+      { type: "paragraph", content: [{ type: "text", text: "struck", marks: [{ type: "strike" }] }] },
       { type: "paragraph", content: [{ type: "text", text: "literal *not* `markup`" }] },
     );
     const result = exportMarkdown(doc);
@@ -88,7 +88,7 @@ describe("markdown import (Feature 9)", () => {
       { type: "text", text: "italic", marks: [{ type: "italic" }] },
     ]);
     const struck = doc.content?.[3]?.content ?? [];
-    expect(struck).toContainEqual({ type: "text", text: "struck", marks: [{ type: "strikethrough" }] });
+    expect(struck).toContainEqual({ type: "text", text: "struck", marks: [{ type: "strike" }] });
     expect(struck).toContainEqual({ type: "text", text: "under", marks: [{ type: "underline" }] });
   });
 

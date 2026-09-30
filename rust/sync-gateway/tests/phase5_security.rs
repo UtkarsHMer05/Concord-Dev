@@ -368,7 +368,7 @@ async fn sec5_1_fetch_snapshot_spam_is_throttled() {
     // Handshake: hello → authenticate → join.
     send_text(
         &mut ws,
-        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#,
+        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#,
     )
     .await;
     expect_text(&mut ws, "hello_ack").await;
@@ -663,7 +663,7 @@ async fn sec5_clean_cross_document_fetch_refused_uniformly() {
         .expect("connect");
     send_text(
         &mut ws,
-        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#,
+        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#,
     )
     .await;
     expect_text(&mut ws, "hello_ack").await;

@@ -186,4 +186,15 @@ describe("golden fixture parity (Rust ⇄ TypeScript)", () => {
     expect(() => decodeDataFrame(new Uint8Array([9, 0x20]))).toThrow(/unsupported/i);
     expect(() => decodeDataFrame(new Uint8Array([1, 0x7f]))).toThrow(/unknown binary kind/);
   });
+
+  it("preserves a full u64 restore/fanout batch ID without rounding", () => {
+    const batchId = "18446744073709551615";
+    const encoded = encodeClientOps({ batchId, ops: [new Uint8Array([1, 2, 3])] });
+    const decoded = decodeDataFrame(encoded);
+    expect(decoded).toEqual({ kind: "client_ops", frame: { batchId, ops: [new Uint8Array([1, 2, 3])] } });
+    expect(encodeClientOps(decoded.frame as { batchId: string; ops: Uint8Array[] })).toEqual(encoded);
+    for (const invalid of [Number.MAX_SAFE_INTEGER + 1, -1, "18446744073709551616", "01"]) {
+      expect(() => encodeClientOps({ batchId: invalid, ops: [] })).toThrow(ProtocolDecodeError);
+    }
+  });
 });

@@ -337,7 +337,7 @@ async fn stale_client_resyncs_via_snapshot_and_converges() {
     eprintln!("STEP: connected");
     send_text(
         &mut ws,
-        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#,
+        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#,
     )
     .await;
     eprintln!("STEP: hello sent");

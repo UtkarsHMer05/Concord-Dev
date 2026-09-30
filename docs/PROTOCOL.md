@@ -32,10 +32,20 @@ Correctness never consults wall-clock time.
 The document is a single ordered sequence of **items**. Each item is one of:
 
 - **Text item** — one Unicode scalar value plus a mark set
-  (`bold`, `italic`, `underline`, `strikethrough`: boolean registers).
+  (`bold`, `italic`, `underline`, `strikethrough`, `code`: boolean registers;
+  `link`, `linkTarget`, `linkRel`, `color`, `fontFamily`, `fontSize`, and
+  `highlight`: bounded string registers).
 - **Block-delimiter item** — starts a new block; carries block attributes
-  (`type`: `paragraph` | `heading-1` … `heading-6`; `align`: left/center/right/justify;
-  `lineHeight`: `normal` | `1` | `1.15` | `1.5` | `2` — the fixed product set).
+  (`type`: `paragraph` | `heading-1` … `heading-6` | `list-item` |
+  `list-continuation`; `align`: left/center/right/justify; `lineHeight`:
+  `normal` | `1` | `1.15` | `1.5` | `2`; `list`: bullet/ordered/task;
+  `depth`: 0..8; `checked`: yes/no; `listStart`: 1..999999;
+  `contentType`: paragraph/heading-1..6).
+
+The `rich-text-v2` capability gates this registry. Unknown attributes still
+fail closed. Lists use delimiter registers and deterministic projection;
+[Rich-text collaboration](RICH_TEXT_COLLABORATION.md) specifies the conflict
+rules, supported values, and client upgrade requirements.
 
 Derived structure:
 
@@ -191,6 +201,13 @@ matching reply so the client can correlate without maintaining socket state
 per frame type. Unknown `type` → `error` frame with `unknown_frame_type`.
 Unknown `v` → behavior defined in §9.12.
 
+The current gateway requires `rich-text-v2` in `hello` and includes it in
+`hello_ack`. A missing capability produces the v1-decodable
+`unsupported_protocol_version` error with an explicit update/reload message
+before authentication, document join, or fanout. New clients likewise refuse
+a gateway without the capability before sending a token. Wire, operation,
+and snapshot versions remain 1; this is an additive registry capability.
+
 ### 9.3 Binary frame layout
 
 All integers big-endian. `kind` byte selects the binary frame type.
@@ -210,8 +227,8 @@ sync_batch:  [0x01] [0x21] [next_cursor u64] [has_more u8] [count u16] { [op_len
 
 | Frame | Direction | Payload |
 |---|---|---|
-| `hello` | c→s | `{ clientProtocolVersion: u32 }` |
-| `hello_ack` | s→c | `{ protocolVersion: u32, connectionId: string }` |
+| `hello` | c→s | `{ clientProtocolVersion: u32, capabilities?: [string] }` |
+| `hello_ack` | s→c | `{ protocolVersion: u32, connectionId: string, capabilities?: [string] }` |
 | `authenticate` | c→s | `{ token: string }` (Clerk session JWT) |
 | `authenticated` | s→c | `{ userId: uuid, clerkUserId: string, orgId: uuid? }` |
 | `join_document` | c→s | `{ documentId: uuid, stateSummary: [{ replicaId: string, sequence: string }] }` (u64 as decimal strings) |

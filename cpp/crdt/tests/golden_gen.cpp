@@ -35,16 +35,6 @@ std::string to_hex(const std::string& bytes) {
     return out;
 }
 
-void append_json_string(std::string& out, const std::string& value) {
-    out += '"';
-    for (const char ch : value) {
-        if (ch == '"' || ch == '\\') {
-            out += '\\';
-        }
-        out += ch;
-    }
-    out += '"';
-}
 
 }  // namespace
 

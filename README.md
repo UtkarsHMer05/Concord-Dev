@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/License-MIT-black" alt="License: MIT" />
 </p>
 
-> Verification boundary — 2026-09-26: TypeScript typecheck and ESLint clean;
+> Prior verification boundary — 2026-09-26: TypeScript typecheck and ESLint clean;
 > 288 web unit tests (31 files, one env-gated perf gate skipped by default);
 > 79 PostgreSQL tests (9 files); the production build; WASM smoke; native
 > Release CTest; and the Rust gateway library suite (99 passed) with
@@ -28,10 +28,94 @@
 > journey (history/restore, anchored comments, drafts, Concordpack verify,
 > time-travel replay, and the server-receipt check). Firefox and WebKit smoke
 > each passed 1/1. These runs used the local Docker services, the real Rust
-> gateway, and disposable Clerk test users; every screenshot below is captured
-> live from that harness (scripts/readme/capture-screenshots.mjs). No hosted
+> gateway, and disposable Clerk test users; the earlier feature-tour screenshots
+> were captured live from that harness (scripts/readme/capture-screenshots.mjs). No hosted
 > deployment or remote CI result is claimed; release and container-scan
 > evidence dated 2026-09-14 remains historical.
+
+## Rich-text collaboration update (2026-09-30)
+
+**Nested lists, tasks, links and formatting now collaborate through the same
+durable CRDT path as text.** Users can edit offline, reconnect and reload
+with matching content and formatting. Formatting and list changes update
+registers on existing item IDs, preserving the text identities used by
+comments, presence and selection.
+
+| Capability | What works |
+|---|---|
+| Nested lists | Bullet, numbered and task lists; mixed nesting; indent/outdent; ordered starts; continuation paragraphs; depths 0–8 |
+| Task state | Checkbox changes persist and synchronize; concurrent changes use deterministic register ordering |
+| Inline formatting | Bold, italic, underline, strike, inline code, links, color, font family, font size and highlight |
+| Concurrent edits | Independent formatting marks compose on overlapping text; surviving children stay visible when a parent is deleted |
+| Offline and multiple tabs | IndexedDB batch durability, preservation of local edits during snapshot resync, and separate writer identities/cache/outbox for simultaneous tabs |
+| Safe upgrades | `rich-text-v2` hello/ack negotiation, stale worker/WASM checks, an explicit reload action and preserved offline data |
+| Review tools | Rich checkpoint previews and forward restore retain list structure, task state, links, code and formatting |
+
+The editor below was captured after a second authenticated user received
+the nested lists, tasks, link and inline code through the real gateway.
+
+![Concord editor with a nested bullet item, numbered list, task checkboxes, link and inline code](docs/assets/rich-text/nested.png)
+
+After both users edited offline, overlapping bold and italic changes and a
+task toggle converged on reconnect. The history preview retained that rich
+content, and restoring the checkpoint synchronized it to both users.
+
+![Rich checkpoint preview showing numbered items, checked tasks, a link, inline code and overlapping bold and italic formatting](docs/assets/rich-text/history.png)
+
+An intentionally stale worker receives an explicit update screen. Editing
+is paused and the save indicator reads **Waiting for update**; existing
+local data stays available for the updated engine.
+
+![Concord stale-worker screen with Waiting for update, preserved-offline-edits message and Reload Concord action](docs/assets/rich-text/upgrade.png)
+
+These images come from [`scripts/e2e/rich-text.mjs`](scripts/e2e/rich-text.mjs),
+which drives keyboard, toolbar, menu, checkbox and history interactions in
+headed Chromium. Its six acceptance stages cover two users, offline edits
+and reconnect, checkpoint/restore, reload, a duplicated same-account tab,
+and stale-worker handling. The successful run persisted **304 operations**
+in PostgreSQL and asserted identical rendered content and no fatal console
+errors in the two normal editor sessions. The upgrade screenshot deliberately
+injects an old worker; its Next.js development issue badge reflects that test.
+
+See the [machine-readable result](docs/assets/rich-text/report.json),
+[Alice's final editor](docs/assets/rich-text/alice.png),
+[Bob's matching editor](docs/assets/rich-text/bob.png) and
+[offline editing state](docs/assets/rich-text/offline.png).
+
+### Verification for the rich-text implementation
+
+| Gate | Result recorded on 2026-09-30 |
+|---|---|
+| Web unit tests | **303 passed**, 1 opt-in performance test skipped |
+| PostgreSQL tests | **79/79 passed** |
+| Live transport tests | **21/21 passed** |
+| Existing authenticated Chromium regressions | **15/15 passed** |
+| Rich-text browser acceptance | **6/6 stages passed**, 304 operations persisted |
+| Native Release CTest / WASM smoke | **3/3** / **12/12 passed** |
+| Rust library / WebSocket integration | **99 passed**, 1 fixture-generation test ignored / **17/17 passed** |
+| Build and source checks | Production build, TypeScript, ESLint, Rust release build, fmt, all-target Clippy and diff checks passed |
+
+These are local results with the real Rust/native/WASM path, local Docker
+services and disposable Clerk development identities. No hosted deployment
+or remote CI result is claimed. The [full report](docs/audits/RICH_TEXT_COLLABORATION_REPORT.md)
+also records the incomplete optional broker-chaos run and verification limits.
+
+```bash
+npm run test:rich-text:browser -- --headed
+```
+
+The runner uses the existing isolated `concord_e2e` harness; setup prerequisites
+and teardown behavior are documented in the [rich-text specification](docs/RICH_TEXT_COLLABORATION.md#reproduce-the-checks).
+
+The collaborative model uses per-character formatting registers: a mark
+does not automatically extend to a peer's unseen concurrent insertion.
+Tables, images, blockquotes and code blocks remain in **Full document mode**,
+and Markdown export reports content outside its narrower round-trip subset.
+Gateway, native worker, web, JS worker and WASM artifacts need a coordinated
+deployment; older tabs reload while retaining site data.
+
+The dated verification paragraph above and earlier feature tour below describe
+the previous release.
 
 ## The short version
 
@@ -56,9 +140,9 @@ replication, durability, recovery, and verification work underneath it.
 
 ![Concord editor with the canonical logo in the application header](docs/assets/readme/hero-editor.png)
 
-## The ten feature systems (captured live)
+## Earlier feature tour (captured live, 2026-09-26)
 
-Every screenshot below was captured from the real application by
+The screenshots in this earlier tour were captured from the real application by
 [`scripts/readme/capture-screenshots.mjs`](scripts/readme/capture-screenshots.mjs):
 clean disposable database, real Rust gateway, real Next.js app, real Clerk
 test users, and the real WASM CRDT worker. The tour also fails the run on any
@@ -124,13 +208,14 @@ never rewritten.
 
 ![History tab with a saved checkpoint, digest, and read-only preview](docs/assets/readme/feature-history.png)
 
-### 7 · Markdown export/import — lossless for the collaborative subset
+### 7 · Markdown export/import — a defined round-trip subset
 
 Export the live document to Concord-flavored markdown (headings, bold,
 italic, strikethrough, underline, backslash escapes; CommonMark flanking
 rules) and import it back as normal CRDT edits. The round trip is a stable
-fixed point, and anything outside the collaborative model is reported, never
-silently dropped.
+fixed point for this Markdown subset. Rich collaborative content such as
+lists, tasks, links, inline code and text styles is outside that export subset
+and produces an explicit loss warning.
 
 ![Markdown tab with exported content and the lossless round-trip status](docs/assets/readme/feature-markdown.png)
 
@@ -160,8 +245,9 @@ prefix / convergence invariants (`tests/convergence_invariants.rs`); a
 deterministic session simulator replays seeded drop/reorder/reconnect
 schedules against the real engine and model gateway with mutation-verified
 invariants (`tests/sync/deterministic-sim.test.ts`); history receipts above;
-and a 100k-op performance gate. A design for CRDT-native lists is documented
-in [docs/DESIGN_CRDT_NATIVE_LISTS.md](docs/DESIGN_CRDT_NATIVE_LISTS.md).
+and a 100k-op performance gate. CRDT-native lists are implemented; the
+[rich-text specification](docs/RICH_TEXT_COLLABORATION.md) supersedes the
+[historical design](docs/DESIGN_CRDT_NATIVE_LISTS.md).
 
 <table>
   <tr>
@@ -179,15 +265,17 @@ The second collaboration context is captured separately in
 [social-preview.png](docs/assets/readme/social-preview.png) is included for
 the repository owner to upload in GitHub's Social preview settings.
 
-## Benchmarks (100k-op document, browser-served WASM binary)
+## Historical benchmarks (100k-op document, before rich-text update)
 
 Measured by [`scripts/bench/big-doc-bench.mjs`](scripts/bench/big-doc-bench.mjs)
-(Node-instrumented runs of the exact WASM binary the browser serves; the app
-executes engine ops in a Web Worker). Every run asserts digest parity: all
-folds agree and snapshot import reproduces the folded digest exactly.
+(Node-instrumented runs of the browser-served WASM binary at that revision;
+the app executes engine ops in a Web Worker). These measurements predate the
+rich-text update and have not been rerun against the new binary. Every run
+asserts digest parity: all folds agree and snapshot import reproduces the
+folded digest exactly.
 `--write-baseline` records the JSON under `.agent/bench/baselines/`, and an
 env-gated vitest gate (`CONCORD_PERF_GATE=1`) fails CI on asymptotic
-regressions — the current bounds carry ~750× fold headroom.
+regressions — the recorded bounds carried ~750× fold headroom.
 
 | Operation (100,000-op document) | p50 | p95 | Notes |
 |---|---|---|---|
@@ -196,7 +284,7 @@ regressions — the current bounds carry ~750× fold headroom.
 | Import snapshot (restore/resync path) | **36.7 ms** | 42.5 ms | O(snapshot), not O(ops) |
 | Canonical digest read | 298.9 ms | 306.2 ms | SHA-256 over canonical state |
 
-## Verification matrix (2026-09-26)
+## Prior verification matrix (2026-09-26)
 
 | Gate | Result |
 |---|---|
@@ -448,8 +536,9 @@ ordering authority and not the durable store.
 
 ### Honest degradation
 
-The collaborative CRDT subset currently covers text, headings, and basic
-formatting. Unsupported content falls back to whole-document persistence and
+The collaborative CRDT subset covers text, headings, nested lists, tasks,
+links, inline code, and supported text styles. Tables, images, blockquotes,
+and code blocks fall back to whole-document persistence, and
 the UI reports the mode instead of pretending that realtime convergence is
 available. Offline edits show “saved locally” while they wait for reconnect.
 

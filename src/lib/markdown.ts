@@ -77,6 +77,8 @@ export function exportMarkdown(doc: PmNode): MarkdownExportResult {
 
   for (const block of blocks) {
     droppedAttributes += Object.keys(block.attrs).filter((key) => key !== "type").length;
+    if (block.type === "list-item" || block.type === "list-continuation") droppedAttributes += 1;
+    droppedAttributes += block.chars.reduce((n, ch) => n + Object.keys(ch.marks).filter((name) => !["bold", "italic", "underline", "strikethrough"].includes(name)).length, 0);
     const heading = /^heading-([1-6])$/.exec(block.type);
     const prefix = heading ? "#".repeat(Number(heading[1])) + " " : "";
     // Group same-marked chars into runs (blocksToPmDoc's grouping shape).
@@ -104,7 +106,7 @@ export function exportMarkdown(doc: PmNode): MarkdownExportResult {
     markdown: lines.join("\n"),
     skippedBlocks: 0, // pmDocToBlocks drops unsupported nodes; counted via support below
     droppedAttributes,
-    lossless: support.supported,
+    lossless: support.supported && droppedAttributes === 0,
   };
 }
 

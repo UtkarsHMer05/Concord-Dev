@@ -8,7 +8,7 @@ namespace concord::crdt {
 namespace {
 void append_json_escaped(std::string& out, const std::string& text) {
     for (const char ch : text) {
-        if (static_cast<unsigned char>(ch) < 0x20) {
+        if (static_cast<unsigned char>(ch) < 0x20 || ch == '"' || ch == '\\') {
             char escape[8];
             std::snprintf(escape, sizeof(escape), "\\u%04x", ch);
             out += escape;
@@ -18,12 +18,13 @@ void append_json_escaped(std::string& out, const std::string& text) {
     }
 }
 
+}  // namespace
+
 void append_json_string(std::string& out, const std::string& value) {
     out += '"';
     append_json_escaped(out, value);
     out += '"';
 }
-}  // namespace
 
 std::string doc_to_json(const Doc& doc) {
     const auto blocks = doc.visible_document();

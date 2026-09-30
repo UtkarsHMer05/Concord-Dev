@@ -11,7 +11,7 @@
  *   will sync (never claims "connected" without a live session);
  * - CRDT + no gateway configured: local-only replica (no session attempt);
  * - Fallback mode: content outside the collaborative subset (tables,
- *   images, lists, colors…) switched this session to the whole-document
+ *   images, blockquotes, code blocks…) switched this session to the whole-document
  *   save path. A LOUD, honest signal — M041 and docs/PRD.md §25a.C.1.
  */
 
@@ -28,6 +28,15 @@ export const CollaborativeModeIndicator = () => {
 
   if (state.mode === "idle") {
     return null;
+  }
+
+  const upgrade = state.mode === "blocked" ? state.reason : syncError?.includes("rich-text-v2") ? syncError : null;
+  if (upgrade) {
+    return <span role="alert" className="inline-flex flex-wrap items-center gap-2 text-xs text-rose-700" title={upgrade}>
+      <span>Update required. Offline edits are preserved.</span>
+      <button className="underline underline-offset-2 focus-visible:outline-2" onClick={() => window.location.reload()}>Reload Concord</button>
+      <span className="sr-only">{upgrade}</span>
+    </span>;
   }
 
   if (state.mode === "crdt") {
@@ -51,7 +60,7 @@ export const CollaborativeModeIndicator = () => {
         title={
           view
           ? `${attention ?? view.description} (Changes are saved to a durable local replica first.)`
-            : "Changes are saved to a durable local replica first. This document stays within the collaborative content model (text, headings, basic formatting). Realtime sync is not configured, so edits stay on this device until it is."
+            : "Changes are saved to a durable local replica first. Text, headings, nested lists, tasks, links, code, and formatting collaborate. Realtime sync is not configured, so edits stay on this device until it is."
         }
       >
         <span className={`size-1.5 rounded-full ${dot}`} aria-hidden="true" />
@@ -72,7 +81,7 @@ export const CollaborativeModeIndicator = () => {
     <span
       className={`inline-flex items-center gap-1.5 text-xs ${attention ? "text-rose-700" : "text-amber-700"}`}
       role="status"
-      title={`${attention ? `${attention} ` : ""}This document contains content (for example tables, images, lists, or colors) that is not part of the collaborative model yet. It is saved as a whole document instead of collaborative changes, and multi-user realtime editing is not available for it.`}
+      title={`${attention ? `${attention} ` : ""}This document contains unsupported content (for example tables, images, or code blocks). It is saved as a whole document instead of collaborative changes, and multi-user realtime editing is not available for it. ${state.mode === "fallback" ? state.reason : ""}`}
     >
       <span className={`size-1.5 rounded-full ${attention ? "bg-rose-600" : "bg-amber-600"}`} aria-hidden="true" />
       <span className="hidden sm:inline">
@@ -81,7 +90,7 @@ export const CollaborativeModeIndicator = () => {
       <span className="sr-only">
         {attention ? `${compatibilityWarning ? "Local data warning" : "Sync error"}: ${attention}. ` : ""}
         This document contains content outside the collaborative model, such as
-        tables, images, lists, or colors. It is saved as a whole document
+        tables, images, or code blocks. It is saved as a whole document
         instead of collaborative changes; save status is shown separately.
       </span>
     </span>

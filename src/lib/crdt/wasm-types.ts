@@ -4,6 +4,7 @@
 export type LoadConcordCrdtFactory = () => Promise<ConcordModule>;
 
 export interface ConcordModule {
+    _concord_rich_text_version(): number;
     HEAPU8: Uint8Array;
 
     _concord_create(replicaId: bigint): number;

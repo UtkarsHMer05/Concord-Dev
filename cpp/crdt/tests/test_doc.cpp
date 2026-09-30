@@ -142,3 +142,28 @@ CONCORD_TEST(text_mark_registers) {
     CHECK_THROW(doc.local_set_attr(0, "type", std::string{"heading-1"}), CrdtError);
     CHECK_THROW(doc.local_set_attr(0, "bold", std::string{"yes"}), CrdtError); // bad value
 }
+
+CONCORD_TEST(rich_text_registry_snapshot_and_concurrent_registers) {
+    Doc a(ReplicaId{100});
+    (void)a.local_insert_delimiter(0, "list-item");
+    (void)a.local_set_attr(0, "list", std::string{"task"});
+    (void)a.local_set_attr(0, "depth", std::string{"1"});
+    (void)a.local_set_attr(0, "checked", std::string{"no"});
+    (void)a.local_insert_text(1, U'"');
+    (void)a.local_set_attr(1, "link", std::string{"https://example.com/?q=\"x\""});
+    (void)a.local_set_attr(1, "code", std::string{"1"});
+    (void)a.local_set_attr(1, "fontFamily", std::string{"\"Courier New\", monospace"});
+    (void)a.local_set_attr(1, "fontSize", std::string{"18px"});
+    (void)a.local_set_attr(1, "color", std::string{"rgb(255, 0, 0)"});
+    Doc b = Doc::import_snapshot(ReplicaId{200}, a.export_snapshot());
+    CHECK(a.canonical_digest() == b.canonical_digest());
+    const auto aa = a.local_set_attr(0, "checked", std::string{"yes"});
+    const auto ba = b.local_set_attr(0, "checked", std::string{"no"});
+    a.apply_remote(ba); b.apply_remote(aa);
+    CHECK(a.canonical_digest() == b.canonical_digest());
+    CHECK(a.stream_entry(0).attrs.at("checked") == "no");
+    CHECK_THROW(a.local_set_attr(1, "link", std::string{"javascript:alert(1)"}), CrdtError);
+    CHECK_THROW(a.local_set_attr(0, "depth", std::string{"9"}), CrdtError);
+    CHECK_THROW(a.local_set_attr(1, "color", std::string{"red;position:fixed"}), CrdtError);
+    CHECK_THROW(a.local_set_attr(1, "fontSize", std::string{"401px"}), CrdtError);
+}

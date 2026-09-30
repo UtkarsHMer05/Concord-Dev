@@ -610,7 +610,7 @@ pub async fn next_binary(ws: &mut Ws) -> Result<Vec<u8>, String> {
 pub async fn handshake_and_join(ws: &mut Ws, clerk: &str, doc: &str) {
     send_text(
         ws,
-        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#.into(),
+        r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#.into(),
     )
     .await;
     let _ = next_control(ws).await; // hello_ack

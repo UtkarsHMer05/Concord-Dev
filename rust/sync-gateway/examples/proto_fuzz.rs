@@ -157,7 +157,7 @@ fn broker_event_bytes(ops: &[Vec<u8>]) -> Vec<u8> {
 
 fn control_seeds() -> Vec<Vec<u8>> {
     vec![
-        br#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#.to_vec(),
+        br#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#.to_vec(),
         br#"{"v":1,"id":"c-7","type":"authenticate","payload":{"token":"eyJhbGciOiJFUzI1NiJ9.x.y"}}"#.to_vec(),
         format!(
             r#"{{"v":1,"type":"join_document","payload":{{"documentId":"{}","stateSummary":[{{"replicaId":"7","sequence":"9"}}]}}}}"#,
@@ -168,7 +168,7 @@ fn control_seeds() -> Vec<Vec<u8>> {
         br#"{"v":1,"type":"ping","payload":{"nonce":"42"}}"#.to_vec(),
         br#"{"v":2,"type":"hello","payload":{"clientProtocolVersion":2}}"#.to_vec(),
         br#"{"v":1,"type":"unknown_type","payload":{}}"#.to_vec(),
-        br#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1},"extra":true}"#.to_vec(),
+        br#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]},"extra":true}"#.to_vec(),
         br#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":"one"}}"#.to_vec(),
         br#"{"v":1,"type":"hello","payload":null}"#.to_vec(),
         br#"not json at all"#.to_vec(),

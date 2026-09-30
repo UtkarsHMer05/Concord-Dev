@@ -412,7 +412,7 @@ async fn main() {
 
             // hello + auth + join (direct sends — no boxed helpers)
             let _ = writer
-                .send(WsMessage::Text(r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1}}"#.into()))
+                .send(WsMessage::Text(r#"{"v":1,"type":"hello","payload":{"clientProtocolVersion":1,"capabilities":["rich-text-v2"]}}"#.into()))
                 .await;
             let _ = reader.next().await;
             let t = token(&clerk);

@@ -67,9 +67,9 @@ function buildLiveIndex(stream: StreamEntryJson[]): LiveIndex {
         streamToLive.push(liveToStream.length);
         liveToStream.push(i);
         if (entry.k === "delim") {
-            if (blockIdx === 0 && i === 0) {
+            if (liveToStream.length === 1) {
                 // A leading delimiter IS block 0's delimiter (no ghost block).
-                blockStarts[0] = 0;
+                blockStarts[0] = i;
             } else {
                 blockIdx += 1;
                 blockStarts[blockIdx] = i;
@@ -92,6 +92,7 @@ function blockAttrAnchor(live: LiveIndex, blockIdx: number): number {
 function firstLiveOfBlock(live: LiveIndex, blockIdx: number): number {
     // Stream index (tombstone-inclusive space) of the block's first live item.
     const start = live.blockStarts[blockIdx];
+    if (start === undefined && blockIdx > 0) return live.streamToLive.length;
     if (start === null || start === undefined) {
         return 0;
     }
@@ -154,8 +155,10 @@ export function reconcile(
     const live = buildLiveIndex(stream);
     const ctx: BatchCtx = { shift: 0 };
 
+    // Match unchanged text across inserts/deletes. Changing list type, depth,
+    // or formatting must not replace the text's stable identities.
     const blockEq = (a: CanonicalBlock, b: CanonicalBlock) =>
-        a.type === b.type && a.attrs["type"] === b.attrs["type"];
+        a.chars.length === b.chars.length && a.chars.every((ch, i) => ch.scalar === b.chars[i].scalar);
     let prefix = 0;
     while (prefix < before.length && prefix < after.length && blockEq(before[prefix], after[prefix])) {
         prefix += 1;
@@ -171,12 +174,18 @@ export function reconcile(
 
     // 1. Prefix-matched blocks: reconcile chars + attrs.
     for (let b = 0; b < prefix; ++b) {
-        reconcileBlockChars(ops, live, before[b], after[b], b, ctx);
         reconcileBlockAttrs(ops, live, before[b], after[b], b, ctx);
+        reconcileBlockChars(ops, live, before[b], after[b], b, ctx);
+    }
+
+    const paired = Math.min(before.length - prefix - suffix, after.length - prefix - suffix);
+    for (let b = prefix; b < prefix + paired; b += 1) {
+        reconcileBlockAttrs(ops, live, before[b], after[b], b, ctx);
+        reconcileBlockChars(ops, live, before[b], after[b], b, ctx);
     }
 
     // 2. Removed middle blocks: delete their items (reverse stream order).
-    for (let b = before.length - 1 - suffix; b >= prefix; --b) {
+    for (let b = before.length - 1 - suffix; b >= prefix + paired; --b) {
         const start = live.blockStarts[b];
         const end = endOfBlock(live, b);
         const from = start === null || start === undefined ? 0 : start;
@@ -192,7 +201,7 @@ export function reconcile(
     //    region (or at the stream end when no suffix remains). Consecutive
     //    added blocks chain off the running cursor so they keep their order.
     let insertCursor: number | null = null;
-    for (let b = prefix; b < after.length - suffix; ++b) {
+    for (let b = prefix + paired; b < after.length - suffix; ++b) {
         if (insertCursor === null) {
             insertCursor =
                 suffix > 0
@@ -206,8 +215,8 @@ export function reconcile(
     for (let s = 0; s < suffix; ++s) {
         const beforeIdx = before.length - suffix + s;
         const afterIdx = after.length - suffix + s;
-        reconcileBlockChars(ops, live, before[beforeIdx], after[afterIdx], beforeIdx, ctx);
         reconcileBlockAttrs(ops, live, before[beforeIdx], after[afterIdx], beforeIdx, ctx);
+        reconcileBlockChars(ops, live, before[beforeIdx], after[afterIdx], beforeIdx, ctx);
     }
 
     return ops;
@@ -221,18 +230,25 @@ function reconcileBlockAttrs(
     blockIdx: number,
     ctx: BatchCtx,
 ): void {
-    for (const name of new Set([...Object.keys(beforeBlock.attrs), ...Object.keys(afterBlock.attrs)])) {
-        if (name === "type") {
-            continue;
-        }
-        if (beforeBlock.attrs[name] !== afterBlock.attrs[name]) {
+    const names = new Set(["type", ...Object.keys(beforeBlock.attrs), ...Object.keys(afterBlock.attrs)]);
+    const changed = [...names].filter((name) => (name === "type" ? beforeBlock.type : beforeBlock.attrs[name]) !==
+        (name === "type" ? afterBlock.type : afterBlock.attrs[name]));
+    const anchor = blockAttrAnchor(live, blockIdx) + ctx.shift;
+    const newTrailingText = blockIdx > 0 && live.blockStarts[blockIdx] === undefined &&
+        beforeBlock.chars.map((ch) => ch.scalar).join("") !== afterBlock.chars.map((ch) => ch.scalar).join("");
+    if ((changed.length || newTrailingText) && live.blockStarts[blockIdx] == null) {
+        // The implicit paragraph has no delimiter. Materialize one before
+        // setting block attributes, keeping all existing text identities.
+        ops.push({ kind: "insertDelimiter", streamIndex: anchor, blockType: afterBlock.type });
+        ctx.shift += 1;
+    }
+    for (const name of changed) {
             ops.push({
                 kind: "setAttr",
-                streamIndex: blockAttrAnchor(live, blockIdx) + ctx.shift,
+                streamIndex: anchor,
                 name,
-                value: afterBlock.attrs[name] ?? null,
+                value: name === "type" ? afterBlock.type : afterBlock.attrs[name] ?? null,
             });
-        }
     }
 }
 
@@ -247,22 +263,32 @@ function reconcileBlockChars(
     const bc = beforeBlock.chars;
     const ac = afterBlock.chars;
 
-    // Common prefix/suffix over (scalar, marks).
+    // Only changed text is deleted. Formatting writes registers on existing
+    // IDs, so concurrent overlapping marks compose rather than duplicating text.
     let p = 0;
-    while (p < bc.length && p < ac.length && charsEqual(bc[p], ac[p])) {
+    while (p < bc.length && p < ac.length && bc[p].scalar === ac[p].scalar) {
         ++p;
     }
     let s = 0;
     while (
         s < bc.length - p &&
         s < ac.length - p &&
-        charsEqual(bc[bc.length - 1 - s], ac[ac.length - 1 - s])
+        bc[bc.length - 1 - s].scalar === ac[ac.length - 1 - s].scalar
     ) {
         ++s;
     }
 
     // Exact visible→stream mapping for this block's chars (tombstone-safe).
     const liveIndices = blockLiveStreamIndices(live, blockIdx);
+    const writeMarks = (beforeIndex: number, afterIndex: number) => {
+        for (const name of new Set([...Object.keys(bc[beforeIndex].marks), ...Object.keys(ac[afterIndex].marks)])) {
+            if (bc[beforeIndex].marks[name] !== ac[afterIndex].marks[name]) {
+                ops.push({ kind: "setAttr", streamIndex: liveIndices[beforeIndex] + ctx.shift,
+                    name, value: ac[afterIndex].marks[name] ?? null });
+            }
+        }
+    };
+    for (let c = 0; c < p; c += 1) writeMarks(c, c);
     const start = live.blockStarts[blockIdx];
     const hasLiveDelimiter =
         start !== null &&
@@ -306,6 +332,7 @@ function reconcileBlockChars(
         cursor += 1;
         ctx.shift += 1;
     }
+    for (let c = 0; c < s; c += 1) writeMarks(bc.length - s + c, ac.length - s + c);
 }
 
 function insertWholeBlock(
@@ -321,7 +348,7 @@ function insertWholeBlock(
     ops.push({
         kind: "insertDelimiter",
         streamIndex: cursor,
-        blockType: block.attrs["type"] ?? "paragraph",
+        blockType: block.type,
     });
     ctx.shift += 1;
     let charCursor = cursor + 1;
@@ -350,22 +377,6 @@ function endOfBlock(live: LiveIndex, blockIdx: number): number | null {
     return next === undefined ? null : next;
 }
 
-function charsEqual(
-    a: { scalar: string; marks: Record<string, string> },
-    b: { scalar: string; marks: Record<string, string> },
-): boolean {
-    return a.scalar === b.scalar && sameMarks(a.marks, b.marks);
-}
-
-function sameMarks(a: Record<string, string>, b: Record<string, string>): boolean {
-    const ka = Object.keys(a);
-    const kb = Object.keys(b);
-    if (ka.length !== kb.length) {
-        return false;
-    }
-    return ka.every((key) => a[key] === b[key]);
-}
-
 /** Applies reconcile ops to the engine in order. */
 export function applyReconcileOpsSync(engine: ConcordEngine, ops: ReconcileOp[]): Uint8Array[] {
     const serialized: Uint8Array[] = [];
@@ -380,7 +391,7 @@ export function applyReconcileOpsSync(engine: ConcordEngine, ops: ReconcileOp[])
                 );
                 break;
             case "delete":
-                engine.localDelete(op.streamIndex);
+                { const deleted = engine.localDelete(op.streamIndex); if (deleted) serialized.push(deleted); }
                 break;
             case "setAttr":
                 serialized.push(

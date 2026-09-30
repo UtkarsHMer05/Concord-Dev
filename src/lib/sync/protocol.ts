@@ -57,11 +57,13 @@ export type Role = "owner" | "editor" | "commenter" | "viewer";
 
 export interface Hello {
   clientProtocolVersion: number;
+  capabilities?: string[];
 }
 
 export interface HelloAck {
   protocolVersion: number;
   connectionId: string;
+  capabilities?: string[];
 }
 
 export interface Authenticate {
@@ -255,8 +257,8 @@ export class ProtocolDecodeError extends Error {
 
 /** Shape validators per frame type (strict: unknown keys rejected). */
 const PAYLOAD_VALIDATORS: Record<ControlFrameType, (p: unknown) => string | null> = {
-  hello: isStrict({ clientProtocolVersion: isUint }),
-  hello_ack: isStrict({ protocolVersion: isUint, connectionId: isString }),
+  hello: isStrict({ clientProtocolVersion: isUint, capabilities: optional(arrayOf(isString)) }),
+  hello_ack: isStrict({ protocolVersion: isUint, connectionId: isString, capabilities: optional(arrayOf(isString)) }),
   authenticate: isStrict({ token: isString }),
   authenticated: isStrict({ userId: isString, clerkUserId: isString, orgId: optional(isString) }),
   join_document: isStrict({
@@ -391,7 +393,7 @@ export function encodeControlFrame(frame: {
 // ---------------------------------------------------------------------------
 
 export interface ClientOpsFrame {
-  batchId: number;
+  batchId: number | string;
   ops: Uint8Array[];
 }
 
@@ -430,10 +432,7 @@ export function decodeDataFrame(
     if (payloadBytes > MAX_BATCH_PAYLOAD_BYTES) {
       throw new ProtocolDecodeError("batch payload exceeds cap", "bad_binary_body");
     }
-    if (batchId > Number.MAX_SAFE_INTEGER) {
-      throw new ProtocolDecodeError("batch id exceeds safe integer", "bad_binary_body");
-    }
-    return { kind: "client_ops", frame: { batchId: Number(batchId), ops } };
+    return { kind: "client_ops", frame: { batchId: batchId > Number.MAX_SAFE_INTEGER ? batchId.toString() : Number(batchId), ops } };
   }
   if (kind === BATCH_KIND_SYNC) {
     if (bytes.length < 13) {
@@ -492,6 +491,11 @@ function readOps(
 
 /** Encode a client_ops binary frame. */
 export function encodeClientOps(frame: ClientOpsFrame): Uint8Array {
+  if (typeof frame.batchId === "number" ? !Number.isSafeInteger(frame.batchId) || frame.batchId < 0 : !/^(0|[1-9]\d*)$/.test(frame.batchId)) {
+    throw new ProtocolDecodeError("invalid batch id", "bad_binary_body");
+  }
+  const batchId = BigInt(frame.batchId);
+  if (batchId > 0xffff_ffff_ffff_ffffn) throw new ProtocolDecodeError("batch id exceeds u64", "bad_binary_body");
   if (frame.ops.length > MAX_BATCH_OPS) {
     throw new ProtocolDecodeError(`batch has ${frame.ops.length} ops`, "bad_binary_body");
   }
@@ -503,7 +507,7 @@ export function encodeClientOps(frame: ClientOpsFrame): Uint8Array {
   const view = new DataView(out.buffer);
   out[0] = WIRE_VERSION;
   out[1] = BATCH_KIND_CLIENT_OPS;
-  view.setBigUint64(2, BigInt(frame.batchId), false);
+  view.setBigUint64(2, batchId, false);
   view.setUint16(10, frame.ops.length, false);
   let offset = 12;
   for (const op of frame.ops) {

@@ -20,6 +20,7 @@ fn control_round_trip_every_frame_type() {
             id: Some("c-1".into()),
             frame: Frame::Hello(Hello {
                 client_protocol_version: 1,
+                capabilities: vec![],
             }),
         },
         ControlFrame {
@@ -27,6 +28,7 @@ fn control_round_trip_every_frame_type() {
             frame: Frame::HelloAck(HelloAck {
                 protocol_version: 1,
                 connection_id: "conn-42".into(),
+                capabilities: vec![],
             }),
         },
         ControlFrame {
@@ -117,6 +119,7 @@ fn control_encode_is_the_documented_shape() {
         id: Some("r1".into()),
         frame: Frame::Hello(Hello {
             client_protocol_version: 1,
+            capabilities: vec![],
         }),
     }
     .encode();

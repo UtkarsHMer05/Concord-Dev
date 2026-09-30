@@ -74,6 +74,7 @@ async function loadFactory(): Promise<ConcordModule> {
 }
 
 let core: CrdtWorkerCore | null = null;
+let requestTail = Promise.resolve();
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     const request = event.data;
@@ -81,7 +82,9 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
         self.postMessage(response);
     };
 
-    void (async () => {
+    // A whole reconciliation is one durable batch. No RPC may interleave
+    // with its stream indices or observe an uncommitted engine mutation.
+    requestTail = requestTail.then(async () => {
         try {
             if (core === null) {
                 // The first request must be "init" carrying the document and
@@ -116,5 +119,5 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
                         : { code: "Unknown", message: "worker failure" },
             });
         }
-    })();
+    });
 };

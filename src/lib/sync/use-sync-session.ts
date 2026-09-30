@@ -146,7 +146,7 @@ export function useSyncSession({ documentId, crdtClient, bridge, onCatchupBriefi
                 return;
             }
             setLocalOnly(false);
-            const opened = await PendingOpStore.open(documentId, userId);
+            const opened = await PendingOpStore.open(documentId, userId, bridge.getStorageId());
             if (cancelled) {
                 opened.close();
                 return;
@@ -157,8 +157,9 @@ export function useSyncSession({ documentId, crdtClient, bridge, onCatchupBriefi
             const engine = new WorkerEnginePort({
                 client: crdtClient,
                 store: opened,
+                applyRemote: (ops, cursor) => bridge.applyRemote(ops, cursor),
                 onRemoteApplied: () => {
-                    void bridge.renderRemote();
+                    return bridge.renderRemote();
                 },
             });
             session = new SyncSession({

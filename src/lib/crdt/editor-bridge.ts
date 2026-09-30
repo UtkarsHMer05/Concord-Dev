@@ -12,7 +12,7 @@
 //   worker; the bridge re-renders the editor via setContent with
 //   emitUpdate=false so remote updates never re-enter the op pipeline
 //   (feedback-loop prevention — M038).
-// - Unsupported content (images, tables, lists, …) disables the CRDT path
+// - Unsupported content (images, tables, code blocks, …) disables the CRDT path
 //   for the session and falls back to the Phase 1 persistence — never
 //   silently corrupted (M041).
 "use client";
@@ -23,6 +23,7 @@ import { blocksToPmDoc, pmDocToBlocks, type CanonicalBlock, type PmNode } from "
 import { reconcile, type ReconcileOp, type StreamEntryJson } from "./adapter";
 import type { CrdtClient } from "./worker/client";
 import { replicaStorageId } from "./worker/idb";
+import { anchorSelection, resolveAnchor } from "../comments/anchors";
 
 /**
  * P7-M033: per-render-pass RPC budget (ms). A visibleJson on a converged
@@ -35,6 +36,7 @@ const RENDER_RPC_TIMEOUT_MS = 5_000;
 export type BridgeState =
     | { mode: "idle" }
     | { mode: "crdt"; lastBlocks: CanonicalBlock[] }
+    | { mode: "blocked"; reason: string }
     | { mode: "fallback"; reason: string };
 
 export interface BridgeInit {
@@ -84,7 +86,48 @@ export function replicaIdForDocument(documentId: string, userId?: string | null)
     return value;
 }
 
+export interface ReplicaLease { replicaId: bigint; storageId: string; release: () => void }
+
+/** One writer per persisted replica. A second/duplicated tab gets its own
+ * durable namespace; reload reclaims that tab's identity and offline log. */
+export async function acquireReplica(documentId: string, userId?: string | null): Promise<ReplicaLease> {
+    const primary = replicaIdForDocument(documentId, userId);
+    const base = replicaStorageId(documentId, userId);
+    const tabKey = `concord.tab-replica.${base}`;
+    let candidate = primary;
+    try { candidate = BigInt(globalThis.sessionStorage?.getItem(tabKey) ?? primary); } catch { /* no stored tab */ }
+    const locks = globalThis.navigator?.locks;
+    if (!locks) {
+        // Non-browser bridge harnesses do not have the Web Locks API.
+        if (typeof window !== "undefined") throw { code: "UnsupportedVersion", message: "This browser needs Web Locks for safe multi-tab editing. Update your browser and reopen Concord; local data was preserved." };
+        return { replicaId: primary, storageId: base, release: () => {} };
+    }
+    for (;;) {
+        const id = candidate;
+        const lease = await new Promise<ReplicaLease | null>((resolve, reject) => {
+            void locks.request(`concord.replica-writer.${base}.${id}`, { ifAvailable: true }, async (lock) => {
+                if (!lock) { resolve(null); return; }
+                let release!: () => void;
+                const held = new Promise<void>((done) => { release = done; });
+                resolve({ replicaId: id, storageId: id === primary ? base : `${base}:replica:${id}`, release });
+                await held;
+            }).catch(reject);
+        });
+        if (lease) {
+            try { globalThis.sessionStorage?.setItem(tabKey, id.toString()); } catch { /* the live lease still protects this writer */ }
+            return lease;
+        }
+        const bytes = crypto.getRandomValues(new Uint8Array(8));
+        bytes[0] |= 0x80;
+        candidate = new DataView(bytes.buffer).getBigUint64(0);
+    }
+}
+
 export class CrdtEditorBridge {
+    private lease: ReplicaLease | null = null;
+    private startGeneration = 0;
+    private mutationTail: Promise<unknown> = Promise.resolve();
+    private viewStream: StreamEntryJson[] = [];
     private state: BridgeState = { mode: "idle" };
     private reconciling = false;
     /**
@@ -135,6 +178,16 @@ export class CrdtEditorBridge {
         return this.state;
     }
 
+    getStorageId(): string {
+        return this.lease?.storageId ?? replicaStorageId(this.init.documentId, this.init.userId);
+    }
+
+    dispose(): void {
+        this.startGeneration += 1;
+        this.lease?.release();
+        this.lease = null;
+    }
+
     /** Engine visible-JSON (runs) → adapter canonical blocks (chars). */
     private static toCanonicalBlocks(json: string): CanonicalBlock[] {
         const raw = (JSON.parse(json) as {
@@ -163,7 +216,9 @@ export class CrdtEditorBridge {
         // Serialize: no transaction may reconcile while the seed/restore is
         // mid-flight (concurrent start + typing produced out-of-range stream
         // indices in the double-mounted dev mode - the bug this guards).
-        const run = this.runStart(editor, client, documentId, seedPmDoc, userId);
+        const generation = ++this.startGeneration;
+        const previous = this.startPromise ?? Promise.resolve();
+        const run = previous.then(() => this.runStart(editor, client, documentId, seedPmDoc, userId, generation));
         this.startPromise = run;
         await run;
         return this.state;
@@ -175,18 +230,25 @@ export class CrdtEditorBridge {
         documentId: string,
         seedPmDoc?: PmNode | null,
         userId?: string | null,
+        generation = this.startGeneration,
     ): Promise<void> {
         try {
+            const lease = await acquireReplica(documentId, userId);
+            if (generation !== this.startGeneration) { lease.release(); return; }
+            this.lease = lease;
             await client.init(
                 documentId,
-                replicaIdForDocument(documentId, userId),
-                replicaStorageId(documentId, userId),
+                this.lease.replicaId,
+                this.lease.storageId,
             );
+            if (generation !== this.startGeneration) return;
             const crdtBlocks = CrdtEditorBridge.toCanonicalBlocks(
                 await client.visibleJson(),
             );
-            const crdtIsEmpty =
-                crdtBlocks.length <= 1 && (crdtBlocks[0]?.chars.length ?? 0) === 0;
+            // An empty task/list/heading, or a deliberately deleted document,
+            // still has durable structure. Only a pristine stream is unseeded.
+            this.viewStream = await client.exportStream();
+            const crdtIsEmpty = this.viewStream.length === 0;
 
             let seedBlocks: CanonicalBlock[];
             let seedIsNew = false;
@@ -221,7 +283,7 @@ export class CrdtEditorBridge {
             editor.commands.setContent(blocksToPmDoc(seedBlocks), {
                 emitUpdate: false,
             });
-            this.state = { mode: "crdt", lastBlocks: seedBlocks };
+            this.state = { mode: "crdt", lastBlocks: pmDocToBlocks(editor.getJSON() as PmNode).blocks };
 
             if (seedIsNew) {
                 // First open: emit the seed content into the durable CRDT
@@ -241,7 +303,8 @@ export class CrdtEditorBridge {
                 if (ops.length > 0) {
                     await this.init.client.seed(ops);
                 }
-                this.state = { mode: "crdt", lastBlocks: seedBlocks };
+                this.viewStream = await client.exportStream();
+                this.state = { mode: "crdt", lastBlocks: pmDocToBlocks(editor.getJSON() as PmNode).blocks };
             }
             this.init.onStatusChange?.(this.state);
         } catch (error) {
@@ -259,7 +322,7 @@ export class CrdtEditorBridge {
             };
             console.error("[concord-crdt] bridge start failed:", describe(error));
             this.state = {
-                mode: "fallback",
+                mode: typeof error === "object" && error !== null && "code" in error && error.code === "UnsupportedVersion" ? "blocked" : "fallback",
                 reason: describe(error) || "worker init failed",
             };
             this.init.onStatusChange?.(this.state);
@@ -278,7 +341,25 @@ export class CrdtEditorBridge {
         if (this.startPromise !== null) {
             await this.startPromise;
         }
-        await this.reconcileTransaction(editor);
+        await this.serializeMutation(() => this.reconcileTransaction(editor));
+    }
+
+    private serializeMutation<T>(work: () => Promise<T>): Promise<T> {
+        const run = this.mutationTail.then(work);
+        this.mutationTail = run.catch(() => {});
+        return run;
+    }
+
+    /** Local diffs and remote integration share one lane. A peer cannot
+     * shift stream indices between exporting a local diff and committing it. */
+    async applyRemote(ops: Uint8Array[], cursor?: string): Promise<{ applied: number; duplicates: number }> {
+        await this.startPromise;
+        return this.serializeMutation(async () => {
+            await this.reconcileTransaction(this.init.editor);
+            const result = await this.init.client.applyRemote(ops, cursor);
+            if (result.applied > 0) await this.renderRemote();
+            return result;
+        });
     }
 
     /** Wait until the latest editor document has been durably reconciled. */
@@ -346,10 +427,10 @@ export class CrdtEditorBridge {
                     return;
                 }
 
-                const stream = (await this.streamEntries()) as StreamEntryJson[];
+                const stream = this.viewStream;
                 const ops = reconcile(lastBlocks, parsed.blocks, stream);
                 if (ops.length > 0) {
-                    await this.applyOps(ops);
+                    this.viewStream = await this.applyOps(ops, stream) ?? await this.streamEntries();
                 }
                 this.state = { mode: "crdt", lastBlocks: parsed.blocks };
                 lastBlocks = parsed.blocks;
@@ -363,7 +444,10 @@ export class CrdtEditorBridge {
     }
 
     /** Applies reconcile ops through the worker in order. */
-    private async applyOps(ops: ReconcileOp[]): Promise<void> {
+    private async applyOps(ops: ReconcileOp[], baseStream: StreamEntryJson[]): Promise<StreamEntryJson[] | undefined> {
+        if (typeof this.init.client.reconcile === "function") {
+            return this.init.client.reconcile(ops, baseStream);
+        }
         for (const op of ops) {
             switch (op.kind) {
                 case "insertText":
@@ -414,6 +498,8 @@ export class CrdtEditorBridge {
      * dead one cannot wedge the pipeline.
      */
     async renderRemote(): Promise<void> {
+        // Preserve a keystroke/formatting transaction still being persisted.
+        await this.reconcilePromise;
         if (this.state.mode !== "crdt") {
             return;
         }
@@ -426,16 +512,37 @@ export class CrdtEditorBridge {
         try {
             do {
                 this.renderRequested = false;
+                await this.reconcileTransaction(this.init.editor);
+                const priorDoc = this.init.editor.getJSON() as PmNode;
+                const priorJson = JSON.stringify(priorDoc);
+                const selection = this.init.editor.state?.selection;
+                const caret = selection?.from === selection?.to;
+                const anchor = selection ? anchorSelection(priorDoc, this.viewStream, caret ? Math.max(0, selection.from - 1) : selection.from, selection.to) : null;
+                const view = await this.withRenderTimeout(typeof this.init.client.readView === "function" ? this.init.client.readView()
+                    : Promise.all([this.init.client.visibleJson(), this.streamEntries()]).then(([json, stream]) => ({ json, stream })));
+                if (JSON.stringify(this.init.editor.getJSON()) !== priorJson || this.reconciling) {
+                    // A key arrived during the RPC. Rebase it by item ID before
+                    // reading again; a stale render must never overwrite it.
+                    this.renderRequested = true;
+                    continue;
+                }
                 const blocks = CrdtEditorBridge.toCanonicalBlocks(
-                    await this.withRenderTimeout(this.init.client.visibleJson()),
+                    view.json,
                 );
                 if (this.state.mode !== "crdt") {
                     return; // degraded mid-render: stop rendering
                 }
-                this.state = { mode: "crdt", lastBlocks: blocks };
                 this.init.editor.commands.setContent(blocksToPmDoc(blocks), {
                     emitUpdate: false,
                 });
+                // Schema/projection normalization (orphan depths, TipTap's
+                // trailing paragraph) is a view, never an implicit local edit.
+                this.state = { mode: "crdt", lastBlocks: pmDocToBlocks(this.init.editor.getJSON() as PmNode).blocks };
+                this.viewStream = view.stream;
+                if (anchor) {
+                    const resolved = resolveAnchor(this.init.editor.getJSON() as PmNode, view.stream, anchor);
+                    if (resolved.status === "attached") this.init.editor.commands.setTextSelection(caret ? resolved.to : { from: resolved.from, to: resolved.to });
+                }
             } while (this.renderRequested);
         } catch (error) {
             // Never let a render failure kill the render pipeline: the
