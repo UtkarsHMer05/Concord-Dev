@@ -108,6 +108,35 @@ impl GatewayRepo {
         )
     }
 
+    /// Recheck all live recipients in one SQL snapshot before delivering new data.
+    pub async fn readable_users(
+        &self,
+        document: Uuid,
+        recipients: &[Uuid],
+    ) -> Result<Vec<Uuid>, RepoError> {
+        let client = self.db.get().await?;
+        let rows = client.query(
+            "SELECT r.user_id, (d.owner_user_id = r.user_id) AS is_owner,
+                    p.role::text AS direct_role, (m.organization_id IS NOT NULL) AS org_member
+             FROM unnest($1::uuid[]) AS r(user_id)
+             JOIN documents d ON d.id = $2::uuid
+             LEFT JOIN document_user_permissions p ON p.document_id = d.id AND p.user_id = r.user_id
+             LEFT JOIN organization_memberships m ON m.organization_id = d.organization_id AND m.user_id = r.user_id",
+            &[&recipients, &document],
+        ).await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                EffectiveRole::resolve(
+                    row.get("is_owner"),
+                    row.get::<_, Option<String>>("direct_role").as_deref(),
+                    row.get("org_member"),
+                )
+                .map(|_| row.get("user_id"))
+            })
+            .collect())
+    }
+
     /// Current durable high-water mark for a document (server sequence).
     pub async fn durable_cursor(&self, document: Uuid) -> Result<i64, RepoError> {
         let client = self.db.get().await?;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { DocumentSummaryDto } from "@/server/services/documents";
@@ -12,6 +12,7 @@ interface DocumentsViewProps {
   initialHasMore: boolean;
   search: string;
   pageSize: number;
+  scope: "workspace" | "shared";
 }
 
 /**
@@ -24,6 +25,7 @@ export const DocumentsView = ({
   initialHasMore,
   search,
   pageSize,
+  scope,
 }: DocumentsViewProps) => {
   const router = useRouter();
   const [documents, setDocuments] = useState(initialDocuments);
@@ -41,12 +43,20 @@ export const DocumentsView = ({
     setHasMore(initialHasMore);
   }
 
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") router.refresh(); };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    return () => { window.removeEventListener("focus", refresh); window.removeEventListener("online", refresh); };
+  }, [router]);
+
   const loadMore = async () => {
     setIsLoadingMore(true);
     setError(null);
     try {
       const params = new URLSearchParams({
         search,
+        scope,
         offset: String(documents.length),
         limit: String(pageSize),
       });
@@ -79,6 +89,8 @@ export const DocumentsView = ({
       isLoadingMore={isLoadingMore}
       error={error}
       search={search}
+      scope={scope}
+      onRefresh={() => router.refresh()}
       onLoadMore={() => void loadMore()}
       onMutated={removeLocal}
     />

@@ -31,10 +31,12 @@ interface DocumentsTableProps {
   /** Human-readable fetch failure shown with a retry button. */
   error: string | null;
   onLoadMore: () => void;
+  onRefresh: () => void;
   /** Called after a local mutation (delete) so the row drops immediately. */
   onMutated: (documentId: string) => void;
   /** Current search query (empty string when browsing). */
   search?: string;
+  scope: "workspace" | "shared";
 }
 
 /** Column span covered by the table (icon, name, scope, created, actions). */
@@ -46,21 +48,24 @@ export const DocumentsTable = ({
   isLoadingMore,
   error,
   onLoadMore,
+  onRefresh,
   onMutated,
   search,
+  scope,
 }: DocumentsTableProps) => {
   const emptyStateText = search
     ? `No documents matching “${search}”`
-    : "No documents yet — create one from a template above";
+    : scope === "shared" ? "No shared documents yet. Ask an owner to share a document with your verified email." : "No documents yet — create one from a template above";
 
   return (
     <div className="max-w-screen-xl mx-auto px-4 md:px-16 py-6 flex flex-col gap-5">
+      <div className="flex justify-end"><Button type="button" variant="outline" size="sm" onClick={onRefresh}>Refresh documents</Button></div>
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent border-none">
             <TableHead>Name</TableHead>
             <TableHead>&nbsp;</TableHead>
-            <TableHead className="hidden md:table-cell">Shared</TableHead>
+            <TableHead className="hidden md:table-cell">Access</TableHead>
             <TableHead className="hidden md:table-cell">Created at</TableHead>
             <TableHead><span className="sr-only">Actions</span></TableHead>
           </TableRow>

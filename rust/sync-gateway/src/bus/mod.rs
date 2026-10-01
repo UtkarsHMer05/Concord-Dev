@@ -96,11 +96,20 @@ impl EventPublisher for LocalOnlyPublisher {
 pub struct NatsSubscriber {
     broker: Arc<Broker>,
     registry: Arc<SessionRegistry>,
+    repo: Arc<crate::db::repo::GatewayRepo>,
 }
 
 impl NatsSubscriber {
-    pub fn new(broker: Arc<Broker>, registry: Arc<SessionRegistry>) -> Self {
-        Self { broker, registry }
+    pub fn new(
+        broker: Arc<Broker>,
+        registry: Arc<SessionRegistry>,
+        repo: Arc<crate::db::repo::GatewayRepo>,
+    ) -> Self {
+        Self {
+            broker,
+            registry,
+            repo,
+        }
     }
 
     /// Runs the consumer loop until the process exits. One bounded pull at
@@ -190,6 +199,9 @@ impl NatsSubscriber {
                         );
                         if let Ok(bytes) = frame.encode() {
                             let mut slow = Vec::new();
+                            self.registry
+                                .reauthorize(event.document_id, &self.repo)
+                                .await;
                             self.registry
                                 .fanout(
                                     event.document_id,

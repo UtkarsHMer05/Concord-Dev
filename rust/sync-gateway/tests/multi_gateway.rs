@@ -127,6 +127,12 @@ impl GatewayProcess {
     }
 }
 
+impl Drop for GatewayProcess {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
 async fn wait_ready(port: u16, timeout_ms: u64) -> bool {
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
     while std::time::Instant::now() < deadline {
@@ -299,10 +305,6 @@ async fn db_count(doc: &Uuid, replica: i64) -> i64 {
 
 #[tokio::test]
 async fn cross_gateway_collaboration_and_durable_singularity() {
-    let _ = std::process::Command::new("pkill")
-        .args(["-9", "-f", "target/release/sync-gateway"])
-        .output();
-    tokio::time::sleep(Duration::from_millis(400)).await;
     if !deps_available().await {
         eprintln!("SKIP: db or nats down");
         return;
@@ -508,10 +510,6 @@ async fn gateway_crash_isolation_and_client_recovery() {
         eprintln!("SKIP: db or nats down");
         return;
     }
-    let _ = std::process::Command::new("pkill")
-        .args(["-9", "-f", "target/release/sync-gateway"])
-        .output();
-    tokio::time::sleep(Duration::from_millis(400)).await;
     let fixture = seed().await;
 
     let mut gw1 = GatewayProcess::spawn(9331, 131, Some(NATS_URL));
@@ -589,10 +587,6 @@ async fn reconnect_storm_is_contained_by_admission_control() {
         eprintln!("SKIP: db or nats down");
         return;
     }
-    let _ = std::process::Command::new("pkill")
-        .args(["-9", "-f", "target/release/sync-gateway"])
-        .output();
-    tokio::time::sleep(Duration::from_millis(400)).await;
     let fixture = seed().await;
 
     let mut gw = GatewayProcess::spawn(9341, 141, Some(NATS_URL));
@@ -647,10 +641,6 @@ async fn slow_consumer_does_not_stall_global_collaboration() {
         eprintln!("SKIP: db or nats down");
         return;
     }
-    let _ = std::process::Command::new("pkill")
-        .args(["-9", "-f", "target/release/sync-gateway"])
-        .output();
-    tokio::time::sleep(Duration::from_millis(400)).await;
     let fixture = seed().await;
 
     let mut gw1 = GatewayProcess::spawn(9351, 151, Some(NATS_URL));
@@ -737,10 +727,6 @@ async fn lagging_gateway_drains_backlog_without_duplication() {
         eprintln!("SKIP: db or nats down");
         return;
     }
-    let _ = std::process::Command::new("pkill")
-        .args(["-9", "-f", "target/release/sync-gateway"])
-        .output();
-    tokio::time::sleep(Duration::from_millis(400)).await;
     let fixture = seed().await;
 
     // gw1 publishes; gw2 starts WITHOUT a reader (its subscriber consumes
@@ -818,10 +804,6 @@ async fn nats_restart_preserves_delivery_and_durable_state() {
         eprintln!("SKIP: db or nats down");
         return;
     }
-    let _ = std::process::Command::new("pkill")
-        .args(["-9", "-f", "target/release/sync-gateway"])
-        .output();
-    tokio::time::sleep(Duration::from_millis(400)).await;
     let fixture = seed().await;
 
     let mut gw1 = GatewayProcess::spawn(9371, 171, Some(NATS_URL));
@@ -920,10 +902,6 @@ async fn compound_gateway_and_broker_failure_recovers_completely() {
         eprintln!("SKIP: db or nats down");
         return;
     }
-    let _ = std::process::Command::new("pkill")
-        .args(["-9", "-f", "target/release/sync-gateway"])
-        .output();
-    tokio::time::sleep(Duration::from_millis(400)).await;
     let fixture = seed().await;
 
     let mut gw1 = GatewayProcess::spawn(9381, 181, Some(NATS_URL));

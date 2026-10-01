@@ -171,7 +171,8 @@ async fn main() {
 
     // Broker subscription task: cross-gateway events → local fanout.
     if let Some(broker) = broker_handle {
-        let subscriber = sync_gateway::bus::NatsSubscriber::new(broker, registry.clone());
+        let subscriber =
+            sync_gateway::bus::NatsSubscriber::new(broker, registry.clone(), state.repo.clone());
         tokio::spawn(async move {
             subscriber.run().await;
         });

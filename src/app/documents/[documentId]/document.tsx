@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 
 import type { DocumentDetailDto } from "@/server/services/documents";
@@ -20,6 +21,7 @@ interface DocumentProps {
 
 export const Document = ({ document }: DocumentProps) => {
   const { isLoaded, userId } = useAuth();
+  const router = useRouter();
   const documentId = document.id;
   // Transitional content loading: stored TipTap JSON (versioned envelope) if
   // present, otherwise the template's initial HTML content.
@@ -29,6 +31,28 @@ export const Document = ({ document }: DocumentProps) => {
   );
 
   const canEdit = document.effectiveRole === "OWNER" || document.effectiveRole === "EDITOR";
+  // Refresh role changes in an open editor; server authorization remains authoritative.
+  useEffect(() => {
+    if (document.effectiveRole === "OWNER") return;
+    const controller = new AbortController();
+    let inFlight = false;
+    const check = async () => {
+      if (inFlight || window.document.visibilityState !== "visible") return;
+      inFlight = true;
+      try {
+        const response = await fetch(`/api/documents/${documentId}/permissions?status=1`, { cache: "no-store", signal: controller.signal });
+        if (response.status === 401 || response.status === 404) router.refresh();
+        else if (response.ok && (await response.json()).effectiveRole !== document.effectiveRole) router.refresh();
+      } catch { /* Offline replicas stay available; a failed poll cannot grant access. */ }
+      finally { inFlight = false; }
+    };
+    const timer = setInterval(() => void check(), 10_000);
+    const refresh = () => void check();
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    window.document.addEventListener("visibilitychange", refresh);
+    return () => { controller.abort(); clearInterval(timer); window.removeEventListener("focus", refresh); window.removeEventListener("online", refresh); window.document.removeEventListener("visibilitychange", refresh); };
+  }, [document.effectiveRole, documentId, router]);
   const [catchupBriefing, setCatchupBriefing] = useState<CatchupBriefing | null>(null);
   const [syncNow, setSyncNow] = useState<() => void>(() => () => {});
 

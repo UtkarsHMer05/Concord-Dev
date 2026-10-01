@@ -6,6 +6,7 @@ import { UnauthenticatedError } from "@/server/errors";
 import { documentsService } from "@/server/services/documents";
 
 const querySchema = z.object({
+  scope: z.enum(["workspace", "shared"]).default("workspace"),
   search: z.string().max(200).default(""),
   // Preserve exact offsets because deleting a loaded row can make the next
   // request non-aligned with the page size.
@@ -17,6 +18,7 @@ const querySchema = z.object({
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const parsed = querySchema.safeParse({
+    scope: url.searchParams.get("scope") ?? undefined,
     search: url.searchParams.get("search") ?? undefined,
     offset: url.searchParams.get("offset") ?? undefined,
     limit: url.searchParams.get("limit") ?? undefined,
@@ -28,16 +30,17 @@ export async function GET(request: Request) {
     );
   }
 
-  const { search, offset, limit } = parsed.data;
+  const { scope, search, offset, limit } = parsed.data;
 
   try {
     const actor = await buildActorContext();
     const result = await documentsService.listDocuments(actor, {
       search,
+      scope,
       offset,
       pageSize: limit,
     });
-    return NextResponse.json(result);
+    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof UnauthenticatedError) {
       return NextResponse.json(

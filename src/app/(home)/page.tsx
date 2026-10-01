@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { UnauthenticatedError } from "@/server/errors";
 import { buildActorContext } from "@/server/auth/actor-context";
 import { documentsService } from "@/server/services/documents";
@@ -9,14 +10,15 @@ import { Navbar } from "./navbar";
 import { TemplatesGallery } from "./templates-gallery";
 
 interface HomePageProps {
-  searchParams: Promise<{ search?: string }>;
+  searchParams: Promise<{ search?: string; scope?: string }>;
 }
 
 // Page size for the initial server-rendered chunk and each "Load more" step.
 const PAGE_SIZE = 5;
 
 const Home = async ({ searchParams }: HomePageProps) => {
-  const { search = "" } = await searchParams;
+  const { search = "", scope: requestedScope } = await searchParams;
+  const scope = requestedScope === "shared" ? "shared" : "workspace";
 
   let initial: DocumentListResult | null = null;
   let unauthenticated = false;
@@ -24,6 +26,7 @@ const Home = async ({ searchParams }: HomePageProps) => {
     const actor = await buildActorContext();
     initial = await documentsService.listDocuments(actor, {
       search,
+      scope,
       page: 1,
       pageSize: PAGE_SIZE,
     });
@@ -46,8 +49,17 @@ const Home = async ({ searchParams }: HomePageProps) => {
         ) : (
           <>
             <TemplatesGallery />
+            <div className="mx-auto max-w-screen-xl px-4 pt-6 md:px-16">
+              <nav aria-label="Document collections" className="flex gap-6 border-b">
+                {[{ scope: "workspace", label: "My workspace" }, { scope: "shared", label: "Shared with me" }].map((item) => <Link key={item.scope} href={`/?${new URLSearchParams({ scope: item.scope, ...(search ? { search } : {}) })}`} aria-current={scope === item.scope ? "page" : undefined} className="border-b-2 border-transparent pb-3 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[current=page]:border-primary aria-[current=page]:font-medium aria-[current=page]:text-foreground">{item.label}</Link>)}
+              </nav>
+              <div className="flex flex-wrap items-start justify-between gap-2 pt-5">
+                <div><h1 className="text-xl font-semibold">{scope === "shared" ? "Shared with me" : "Workspace documents"}</h1><p className="mt-1 text-sm text-muted-foreground">{scope === "shared" ? "Documents people have invited you to. Your role appears beside each title." : "Your documents in the current personal or organization workspace."}</p></div>
+              </div>
+            </div>
             <DocumentsView
-              key={search}
+              key={`${scope}:${search}`}
+              scope={scope}
               initialDocuments={initial!.documents}
               initialHasMore={initial!.hasMore}
               search={search}

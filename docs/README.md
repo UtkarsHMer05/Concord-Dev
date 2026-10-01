@@ -53,6 +53,7 @@ The secret-free v1.0.0 evidence index remains preserved at
 | Document | What it answers |
 |---|---|
 | [SECURITY.md](SECURITY.md) | The full security model: trust boundaries, RBAC, input hardening, the 32-row threat model (each threat mapped to executable evidence or an explicitly documented posture limitation), scanning tooling, production configuration |
+| [SHARING.md](SHARING.md) | Share by verified email, manage roles, discover invitations, and understand revocation and organization access |
 | [AUTHORIZATION.md](AUTHORIZATION.md) | The deny-by-default role model (OWNER/EDITOR/COMMENTER/VIEWER), live revocation, and IDOR masking |
 | [PROVENANCE.md](PROVENANCE.md) | What was retained, replaced, and independently built relative to the tutorial baseline — and the CI gate that enforces it |
 
@@ -100,6 +101,7 @@ The secret-free v1.0.0 evidence index remains preserved at
 | [audits/V1_HARDENING_FINAL_REPORT.md](audits/V1_HARDENING_FINAL_REPORT.md) | The final 22-section remediation, reproducibility, browser, provenance, CI, release, and residual-risk report |
 | [audits/CANONICAL_RELEASE_REPORT.md](audits/CANONICAL_RELEASE_REPORT.md) | Current `1.0.1` candidate verdict, exact local evidence, unresolved blockers, and owner actions |
 | [audits/CANONICAL_FRESH_EVIDENCE.md](audits/CANONICAL_FRESH_EVIDENCE.md) | Candidate-bound local gate results and limitations |
+| [audits/SHARING_REPORT.md](audits/SHARING_REPORT.md) | Sharing implementation, production browser acceptance, roles, revocation, and scope limits |
 | [audits/CONCORDPACK_REPORT.md](audits/CONCORDPACK_REPORT.md) | Signed-history implementation and browser/native/database acceptance evidence |
 | [audits/PERFORMANCE_COMPARISON_REPORT.md](audits/PERFORMANCE_COMPARISON_REPORT.md) | Full browser campaign, measured costs, correctness checks, reproduction details, and scope limits |
 | [audits/CANONICAL_RELEASE_LEDGER.json](audits/CANONICAL_RELEASE_LEDGER.json) | Machine-readable current findings/evidence/owner-action ledger |

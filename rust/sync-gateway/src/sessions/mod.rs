@@ -125,6 +125,47 @@ impl SessionRegistry {
         }
     }
 
+    /// Remove revoked readers before local or broker delivery. Database failure
+    /// closes affected sessions too: a cached join role cannot authorize reads.
+    pub async fn reauthorize(&self, document: Uuid, repo: &crate::db::repo::GatewayRepo) {
+        let recipients: Vec<Uuid> = self
+            .rooms
+            .lock()
+            .await
+            .get(&document)
+            .map(|room| {
+                room.connections
+                    .values()
+                    .map(|handle| handle.user_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if recipients.is_empty() {
+            return;
+        }
+        let queried: HashSet<Uuid> = recipients.iter().copied().collect();
+        let allowed: HashSet<Uuid> = repo
+            .readable_users(document, &recipients)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let mut rooms = self.rooms.lock().await;
+        if let Some(room) = rooms.get_mut(&document) {
+            room.connections.retain(|_, handle| {
+                // A new join after the snapshot already passed its own fresh check.
+                if !queried.contains(&handle.user_id) || allowed.contains(&handle.user_id) {
+                    return true;
+                }
+                handle.close.send_replace(true);
+                false
+            });
+            if room.connections.is_empty() {
+                rooms.remove(&document);
+            }
+        }
+    }
+
     /// Fan out an accepted durable operation batch to every OTHER member
     /// of the document room (P3-M028): the sender receives its `durable_ack`
     /// separately and is deliberately not echoed the ops (CRDT idempotency

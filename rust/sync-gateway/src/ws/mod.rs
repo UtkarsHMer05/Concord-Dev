@@ -339,6 +339,7 @@ async fn handle_socket(
     // BEFORE awaiting the writer — the writer exits only when every sender
     // is gone.
     if let Some(doc) = conn.document {
+        registry.reauthorize(doc, &repo).await;
         // Tell the room this caret is gone (best-effort; peers also expire it
         // on a client-side TTL if a sender simply goes silent). Sent BEFORE
         // leaving so the still-registered peers receive it.
@@ -796,7 +797,7 @@ async fn handle_text(
         }
         // Ephemeral live-cursor presence (Feature 2): relay-only, non-durable.
         Frame::Presence(state) => {
-            handle_presence(conn, state, registry, rate_limiter).await?;
+            handle_presence(conn, state, registry, rate_limiter, repo).await?;
         }
         // Server->client frames are illegal inbound.
         Frame::HelloAck(_)
@@ -1090,6 +1091,7 @@ async fn handle_presence(
     state: PresenceState,
     registry: &Arc<SessionRegistry>,
     rate_limiter: &Arc<crate::ephemeral::ratelimit::RateLimiter>,
+    repo: &Arc<GatewayRepo>,
 ) -> Result<(), FlowError> {
     let (Some(document), Some(user)) = (conn.document, conn.user) else {
         return Ok(());
@@ -1131,6 +1133,7 @@ async fn handle_presence(
         frame: update,
     }
     .encode();
+    registry.reauthorize(document, repo).await;
     registry
         .relay_ephemeral(document, conn.id, OutboundFrame::Text(text))
         .await;
@@ -1569,6 +1572,7 @@ async fn handle_binary(
             if !ingest.newly_inserted.is_empty() {
                 let fanout_frame = OutboundFrame::Binary(bytes.to_vec());
                 let mut slow = Vec::new();
+                registry.reauthorize(document, repo).await;
                 registry
                     .fanout(document, conn.id, fanout_frame, &mut slow)
                     .await;

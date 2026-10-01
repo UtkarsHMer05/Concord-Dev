@@ -348,12 +348,13 @@ async fn main() {
             )),
             presence: None,
         };
+        let subscriber =
+            sync_gateway::bus::NatsSubscriber::new(broker, registry, state.repo.clone());
         let app = http::router(state);
         let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", addr.port()))
             .await
             .expect("bind");
         started.push(addr.port());
-        let subscriber = sync_gateway::bus::NatsSubscriber::new(broker, registry);
         tokio::spawn(async move {
             subscriber.run().await;
         });

@@ -1,9 +1,9 @@
 import "server-only";
 
-import { and, eq, ilike, sql } from "drizzle-orm";
+import { and, eq, ilike, ne, sql } from "drizzle-orm";
 
 import { getDb, type Executor } from "../db/client";
-import { documents, type DocumentRow } from "../db/schema";
+import { documents, documentUserPermissions, type DocumentRow, type DocumentRole } from "../db/schema";
 
 /** Escapes SQL LIKE wildcards so user input matches literally. */
 export function escapeLikePattern(input: string): string {
@@ -63,50 +63,23 @@ export const documentsRepository = {
     return rows[0];
   },
 
-  /** Personal workspace listing (optionally filtered by title substring). */
-  async listByOwner(
-    ownerUserId: string,
+  /** Scope and roles are selected together, using only the verified actor. */
+  async listAccessible(
+    userId: string,
+    organizationId: string | null,
+    scope: "workspace" | "shared",
     { limit, offset, titlePattern }: ListOptions,
-    executor?: Executor,
-  ): Promise<DocumentRow[]> {
-    const db = executor ?? getDb();
-    return db
-      .select(DOCUMENT_COLUMNS)
-      .from(documents)
-      .where(
-        titlePattern
-          ? and(
-              eq(documents.ownerUserId, ownerUserId),
-              ilike(documents.title, `%${titlePattern}%`),
-            )
-          : eq(documents.ownerUserId, ownerUserId),
-      )
+  ) {
+    const scopeFilter = scope === "shared"
+      ? and(eq(documentUserPermissions.userId, userId), ne(documents.ownerUserId, userId))
+      : organizationId ? eq(documents.organizationId, organizationId) : eq(documents.ownerUserId, userId);
+    return getDb().select({ ...DOCUMENT_COLUMNS,
+      effectiveRole: sql<DocumentRole | "OWNER">`CASE WHEN ${documents.ownerUserId} = ${userId}::uuid THEN 'OWNER' ELSE COALESCE(${documentUserPermissions.role}::text, 'EDITOR') END`,
+    }).from(documents)
+      .leftJoin(documentUserPermissions, and(eq(documentUserPermissions.documentId, documents.id), eq(documentUserPermissions.userId, userId)))
+      .where(titlePattern ? and(scopeFilter, ilike(documents.title, `%${titlePattern}%`)) : scopeFilter)
       .orderBy(sql`${documents.updatedAt} DESC`, sql`${documents.id} DESC`)
-      .limit(limit)
-      .offset(offset);
-  },
-
-  /** Organization workspace listing (optionally filtered by title substring). */
-  async listByOrganization(
-    organizationId: string,
-    { limit, offset, titlePattern }: ListOptions,
-    executor?: Executor,
-  ): Promise<DocumentRow[]> {
-    const db = executor ?? getDb();
-    return db
-      .select(DOCUMENT_COLUMNS)
-      .from(documents)
-      .where(
-        titlePattern
-          ? and(
-              eq(documents.organizationId, organizationId),
-              ilike(documents.title, `%${titlePattern}%`),
-            )
-          : eq(documents.organizationId, organizationId),
-      )
-      .orderBy(sql`${documents.updatedAt} DESC`, sql`${documents.id} DESC`)
-      .limit(limit)
-      .offset(offset);
+      .limit(limit).offset(offset);
   },
 
   /**

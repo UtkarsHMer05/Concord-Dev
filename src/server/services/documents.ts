@@ -48,6 +48,7 @@ export interface DocumentSummaryDto {
   title: string;
   organizationId: string | null;
   metadataVersion: number;
+  effectiveRole: EffectiveRole;
   createdAt: string;
   updatedAt: string;
 }
@@ -137,9 +138,10 @@ async function requireAccess(
   return { document, effectiveRole };
 }
 
-function toSummaryDto(row: DocumentRow): DocumentSummaryDto {
+function toSummaryDto(row: DocumentRow, effectiveRole: EffectiveRole): DocumentSummaryDto {
   return {
     id: row.id,
+    effectiveRole,
     title: row.title,
     organizationId: row.organizationId,
     metadataVersion: row.metadataVersion,
@@ -195,7 +197,7 @@ export const documentsService = {
     const id = parseDocumentId(documentId);
     const { document, effectiveRole } = await requireAccess(actor, id, "read");
     return {
-      ...toSummaryDto(document),
+      ...toSummaryDto(document, effectiveRole),
       initialContent: document.initialContent,
       content: (document.content as StoredContentEnvelope | null) ?? null,
       contentVersion: document.contentVersion,
@@ -211,7 +213,7 @@ export const documentsService = {
    */
   async listDocuments(
     actor: ActorContext,
-    input: { search?: unknown; page?: unknown; pageSize?: unknown; offset?: unknown } = {},
+    input: { search?: unknown; page?: unknown; pageSize?: unknown; offset?: unknown; scope?: unknown } = {},
   ): Promise<DocumentListResult> {
     const page = (() => {
       const parsed = z.coerce.number().int().min(1).default(1).safeParse(
@@ -246,19 +248,14 @@ export const documentsService = {
     })();
     const limit = pageSize + 1; // fetch one extra to compute hasMore
 
-    const rows = actor.organization
-      ? await documentsRepository.listByOrganization(
-          actor.organization.id,
-          { limit, offset, titlePattern },
-        )
-      : await documentsRepository.listByOwner(
-          actor.userId,
-          { limit, offset, titlePattern },
-        );
+    const scope = z.enum(["workspace", "shared"]).default("workspace").safeParse(input.scope);
+    if (!scope.success) throw new ValidationError("Invalid document scope");
+    const rows = await documentsRepository.listAccessible(actor.userId, actor.organization?.id ?? null,
+      scope.data, { limit, offset, titlePattern });
 
     const hasMore = rows.length > pageSize;
     return {
-      documents: rows.slice(0, pageSize).map(toSummaryDto),
+      documents: rows.slice(0, pageSize).map((row) => toSummaryDto(row, row.effectiveRole)),
       hasMore,
     };
   },

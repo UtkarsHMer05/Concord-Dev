@@ -176,7 +176,8 @@ across real gateway processes with shared PostgreSQL + NATS):
   batch on every gateway the session is connected to, without any
   reconnect.
 - A denied write is a non-fatal `forbidden` error frame: the session
-  stays alive for reads (catch-up/ping continue on the same socket).
+  stays alive when a read role remains. Total read revocation closes the
+  session at the next room delivery, and catch-up independently rechecks access.
 - Upgrades are live in the same direction: a VIEWER promoted to EDITOR
   may write the next batch without reconnecting.
 - Ordering semantics: a batch whose ingest transaction begins before
@@ -185,3 +186,31 @@ across real gateway processes with shared PostgreSQL + NATS):
   window, no stale-cache bypass.
 - The web (HTTP/server-action) surface reauthorizes every request
   identically (`tests/db/idor-matrix.test.ts`, P6-M021).
+
+
+## 9. Sharing UI and broadcast revocation
+
+The editor Share dialog accepts verified account email or an existing local
+collaboration ID. Exact email lookup is owner-gated; the same transactional
+permission service applies grants, changes roles, and records removal. The
+owner's role remains intrinsic. Other roles cannot read the full collaborator
+profile list or manage access.
+
+`Shared with me` queries direct grants for the verified actor across active
+workspaces, excluding documents they own. SQL filters before pagination and
+returns the current role. Organization-wide documents remain in the workspace
+collection; direct roles override default organization editor access.
+
+Gateway local and broker delivery now rechecks recipients against PostgreSQL
+in one query per room delivery, using the same effective-role resolver as
+single-user reads. Revoked recipients are removed and their sockets closed
+before new content or presence is queued. Query failure closes recipients
+rather than authorizing through their join-time roles. An in-flight delivery authorized before the revoke commit may finish;
+content already received cannot be withdrawn. UI role polling
+updates open non-owner editors at ten-second intervals while visible, and on
+focus/online events; it does not enforce the server's authorization boundary.
+
+See [sharing](SHARING.md), `tests/db/sharing.test.ts`,
+`tests/sharing-route.test.ts`,
+`rust/sync-gateway/tests/db_integration.rs::revoked_readers_are_closed_before_any_new_room_delivery`,
+and `scripts/e2e/sharing.mjs` for scope and executable evidence.

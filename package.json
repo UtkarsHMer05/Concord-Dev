@@ -36,7 +36,8 @@
     "failure-lab": "node scripts/failure-lab.mjs",
     "test:browser:smoke:chromium": "playwright test --project=chromium tests/browser/smoke.spec.ts",
     "test:browser:smoke:firefox": "playwright test --project=firefox tests/browser/smoke.spec.ts",
-    "test:browser:smoke:webkit": "playwright test --project=webkit tests/browser/smoke.spec.ts"
+    "test:browser:smoke:webkit": "playwright test --project=webkit tests/browser/smoke.spec.ts",
+    "test:sharing:browser": "node scripts/e2e/sharing.mjs"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.2",

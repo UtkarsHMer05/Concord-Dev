@@ -55,12 +55,32 @@ project's core engineering.
 | **Review branches** | Create a proposal from a named revision, give reviewers access, compare the original base with the current document and proposal, and merge selected changes while retaining unrelated edits. |
 | **Comments and suggestions** | Attach discussions to document ranges, resolve threads, and propose text changes for acceptance or rejection. Pending comment actions have an offline outbox. |
 | **History and restore** | Save named checkpoints, preview durable revisions, and restore an earlier version as new edits. A local replay inspector lets you step through the browser's operation log. |
-| **Sharing and permissions** | Grant owner, editor, commenter, or viewer access. The server checks document permissions for requests and sync batches, including revocation. |
+| **Sharing and permissions** | Share by verified account email, change editor/commenter/viewer roles, and find invitations in **Shared with me**. Owners manage access; the server checks requests, sync batches, and live broadcasts. |
 | **Signed history archives** | Export retained operations, snapshots, and revision provenance; verify them locally or with the standalone offline CLI using a separately trusted key; restore them into a new private document. |
 | **Markdown and content bundles** | Import/export the supported Markdown subset, inspect a local content bundle, or apply supported visible content as new edits. |
 | **Installable workspace** | Install the production PWA and reopen previously cached documents and editor assets offline. |
 | **Collaboration failure lab** | Replay disconnections, duplicate delivery, lost acknowledgements, and recovery; inspect replica states, download traces, and reduce a known failure to a smaller reproduction. |
 | **Reproducible performance comparison** | Run identical edits through Concord and Yjs in real Chromium; inspect input/render latency, durability, memory, retained bytes, and offline recovery, with raw results and charts. |
+
+### Bring your team into a document
+
+Choose **Share**, enter a collaborator's verified email, and give them view,
+comment, or edit access. They can find the document in **Shared with me**
+without exchanging internal IDs. The dialog lists collaborators, lets owners
+change roles or remove access, and copies a link that respects those permissions.
+Open editors refresh role changes; revoked readers stop receiving new broadcasts.
+
+![Share dialog showing an owner's collaborators, roles, and copy-link control](docs/assets/sharing/share-dialog.png)
+
+<details>
+<summary><strong>See the recipient's shared documents</strong></summary>
+
+Explicit invitations are collected across workspaces, with title search,
+pagination, and a role beside each document:
+
+![Shared with me listing with an invited document and commenter access](docs/assets/sharing/shared-with-me.png)
+
+</details>
 
 ### Review changes before merging
 
@@ -112,7 +132,8 @@ An older worker receives an explicit upgrade path while local data is retained:
 
 </details>
 
-Feature guides: [rich-text collaboration](docs/RICH_TEXT_COLLABORATION.md),
+Feature guides: [sharing and discovery](docs/SHARING.md),
+[rich-text collaboration](docs/RICH_TEXT_COLLABORATION.md),
 [review branches](docs/REVIEW_BRANCHES.md),
 [signed history archives](docs/CONCORDPACK.md),
 [failure lab](docs/FAILURE_LAB.md), and
@@ -325,10 +346,20 @@ the [archive guide](docs/CONCORDPACK.md#verification) lists its prerequisites.
 The [performance acceptance report](docs/audits/PERFORMANCE_COMPARISON_REPORT.md)
 adds 64 paired editor cases and three authenticated app trials, plus report
 controls, zero automated accessibility violations, and a mobile overflow
-check. Routine checks now record **314 web tests passed**, with 2 intentional
-skips, and **2 comparison publication checks passed**. The browser workload
+check, with **2 comparison publication checks passed**. The browser workload
 also exposed and verified a fix for a stale sync error after the last pending
 write was acknowledged.
+
+The [sharing acceptance report](docs/audits/SHARING_REPORT.md) covers verified
+email invitations, shared discovery, real comments, live role changes, and
+revocation with browser access polling deliberately interrupted. Routine
+verification records **315 web tests passed** with 2 intentional skips and
+**83 database tests passed**. The sharing journey also checks keyboard focus,
+mobile layout, accessibility, and service failure/retry.
+
+```bash
+CONCORD_E2E_MODE=production npm run test:sharing:browser -- --headed
+```
 
 ## Getting started
 

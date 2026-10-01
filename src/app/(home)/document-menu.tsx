@@ -26,6 +26,7 @@ interface DocumentMenuProps {
   title: string;
   /** Server version the caller last observed (rename conflict check). */
   metadataVersion: number;
+  role: "OWNER" | "EDITOR" | "COMMENTER" | "VIEWER";
   onNewTab: (id: string) => void;
   /** Row-level removal callback so the list can drop the entry instantly. */
   onRemoved: (documentId: string) => void;
@@ -35,6 +36,7 @@ export const DocumentMenu = ({
   documentId,
   title,
   metadataVersion,
+  role,
   onNewTab,
   onRemoved,
 }: DocumentMenuProps) => {
@@ -60,7 +62,7 @@ export const DocumentMenu = ({
       <DropdownMenuContent>
         {/* Rename + remove rows are dialog hosts: they must not close this
             dropdown, or Radix would unmount the dialog mid-open. */}
-        <RenameDialog
+        {(role === "OWNER" || role === "EDITOR") && <RenameDialog
           documentId={documentId}
           initialTitle={title}
           expectedMetadataVersion={metadataVersion}
@@ -69,13 +71,13 @@ export const DocumentMenu = ({
             <FilePenIcon className="size-4 mr-2" />
             Rename
           </DropdownMenuItem>
-        </RenameDialog>
-        <RemoveDialog documentId={documentId} onRemoved={onRemoved}>
+        </RenameDialog>}
+        {role === "OWNER" && <RemoveDialog documentId={documentId} onRemoved={onRemoved}>
           <DropdownMenuItem {...keepMenuOpen}>
             <TrashIcon className="size-4 mr-2" />
             Remove
           </DropdownMenuItem>
-        </RemoveDialog>
+        </RemoveDialog>}
         <NewTabItem documentId={documentId} onNewTab={onNewTab} />
       </DropdownMenuContent>
     </DropdownMenu>

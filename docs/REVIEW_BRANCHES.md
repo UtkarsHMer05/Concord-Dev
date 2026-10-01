@@ -9,9 +9,10 @@ Portfolio proposal **feature #2**, implemented on 2026-09-30. See the
 1. Open **Review & history → History** and save a named checkpoint.
 2. In **Branches**, choose that saved version, enter a proposal name, and
    create the branch. Open it to use the full collaborative rich-text editor.
-3. Use **Share** to grant a collaborator Edit, Review and comment, or View
-   access. Their collaboration ID is shown in their own Share tab. Copy the
-   document link and send it through your usual channel.
+3. Use **Share** to grant a collaborator **Can edit**, **Can comment**, or
+   **Can view** access by verified account email. They find the invitation in
+   **Shared with me**. Copy the link when you want to pass it through your
+   usual channel. See [sharing](SHARING.md) for role and revocation rules.
 4. Add feedback in **Comments** by selecting a passage. A branch has its own
    comments and permissions. Comparing requires access to main as well;
    its owner can grant that separately.

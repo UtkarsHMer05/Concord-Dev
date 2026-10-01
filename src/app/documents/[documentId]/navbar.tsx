@@ -43,6 +43,7 @@ import {
 import { RenameDialog } from "@/components/rename-dialog";
 import { RemoveDialog } from "@/components/remove-dialog";
 import { CollaborativeModeIndicator } from "@/components/collaborative-mode-indicator";
+import { ShareDialog } from "@/components/sharing-panel";
 import { DocumentTools } from "@/components/document-tools";
 import type { CrdtClient } from "@/lib/crdt/worker/client";
 import {
@@ -330,6 +331,7 @@ export const Navbar = ({ data, crdtClient, syncNow }: NavbarProps) => {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        <ShareDialog documentId={data.id} title={data.title} />
         <DocumentTools document={data} crdtClient={crdtClient} syncNow={syncNow} />
         <AccountControls />
       </div>

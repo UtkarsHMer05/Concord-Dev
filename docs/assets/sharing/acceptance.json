@@ -1,0 +1,28 @@
+{
+  "passed": true,
+  "webMode": "production",
+  "browser": "153.0.8010.12",
+  "stages": [
+    "owner shares by verified email before recipient first visit; unknown account preserves input; clipboard, keyboard, desktop/mobile and accessible dialog pass",
+    "recipient discovers explicit invitation across workspaces; commenter reads and can comment; unrelated account cannot discover/open; non-owner cannot grant",
+    "live commenter-to-editor promotion enables real edits and fanout; editor-to-viewer downgrade disables editor and comment form",
+    "revoked open viewer receives no new content even with web polling unavailable; HTTP is denied; open page and Shared with me remove access",
+    "service failure preserves invite input and creates no phantom access; retry succeeds"
+  ],
+  "dialogAxeViolations": 0,
+  "collectionAxeViolations": 0,
+  "mobileDialogOverflow": false,
+  "pageErrors": [],
+  "expectedHttpErrors": [
+    "400: unknown verified email",
+    "404: non-owner or inaccessible document",
+    "503: deliberately interrupted service/status polling"
+  ],
+  "manualLiveBrowser": [
+    "Refreshed Shared with me and observed the new viewer invitation",
+    "Opened the invited document and inspected viewer-only Share controls",
+    "Inspected the owner Share dialog, expanded link and collaboration ID",
+    "Copied the link and observed success",
+    "Changed the disposable recipient from viewer to commenter and observed the saved role"
+  ]
+}

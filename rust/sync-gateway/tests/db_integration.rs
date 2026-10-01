@@ -1148,3 +1148,87 @@ async fn resolve_user_maps_clerk_sub_to_uuid() {
 fn _uuid_from_str(s: &str) -> Uuid {
     Uuid::from_str(s).unwrap()
 }
+
+#[tokio::test]
+async fn revoked_readers_are_closed_before_any_new_room_delivery() {
+    use sync_gateway::sessions::{ConnectionHandle, OutboundFrame, SessionRegistry};
+    use tokio::sync::{mpsc, watch};
+    let db = test_db()
+        .await
+        .expect("concord_test must be available for read revocation");
+    let repo = GatewayRepo::new(db.clone());
+    let owner = seed_user(&db, &format!("sharing-owner-{}", Uuid::new_v4()), None).await;
+    let viewer = seed_user(&db, &format!("sharing-viewer-{}", Uuid::new_v4()), None).await;
+    let stranger = seed_user(&db, &format!("sharing-stranger-{}", Uuid::new_v4()), None).await;
+    let document = seed_document(&db, owner, None).await;
+    seed_acl(&db, document, viewer, "VIEWER").await;
+    let mut readers = repo
+        .readable_users(document, &[owner, viewer, stranger])
+        .await
+        .expect("read roles");
+    readers.sort();
+    let mut expected = vec![owner, viewer];
+    expected.sort();
+    assert_eq!(readers, expected);
+    let registry = SessionRegistry::new();
+    let connection = Uuid::new_v4();
+    let (outbound, mut received) = mpsc::channel(4);
+    let (close, closed) = watch::channel(false);
+    registry
+        .join(
+            document,
+            ConnectionHandle {
+                connection_id: connection,
+                user_id: viewer,
+                join_role: EffectiveRole::Viewer,
+                outbound,
+                close,
+            },
+        )
+        .await;
+    registry.reauthorize(document, &repo).await;
+    assert!(!*closed.borrow());
+    db.get()
+        .await
+        .expect("pool")
+        .execute(
+            "DELETE FROM document_user_permissions WHERE document_id=$1 AND user_id=$2",
+            &[&document, &viewer],
+        )
+        .await
+        .expect("revoke");
+    registry.reauthorize(document, &repo).await;
+    assert!(
+        *closed.borrow(),
+        "revoked reader must be closed without a client request"
+    );
+    assert!(registry.room_members(document).await.is_empty());
+    registry
+        .fanout(
+            document,
+            Uuid::nil(),
+            OutboundFrame::Binary(vec![1]),
+            &mut vec![],
+        )
+        .await;
+    assert!(
+        received.try_recv().is_err(),
+        "revoked reader must receive no future bytes"
+    );
+    cleanup(
+        &db,
+        &Fixture {
+            user: owner,
+            document,
+        },
+    )
+    .await;
+    for user in [viewer, stranger] {
+        db.get()
+            .await
+            .expect("pool")
+            .execute("DELETE FROM users WHERE id=$1", &[&user])
+            .await
+            .expect("clean user");
+    }
+}

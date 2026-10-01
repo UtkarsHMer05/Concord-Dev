@@ -304,6 +304,30 @@ release gate. Clean up the exact local E2E compose project when finished:
 docker compose -p concord-e2e-local -f docker-compose.e2e.yml down --volumes
 ```
 
+### Sharing acceptance
+
+Use the existing authenticated stack and disposable Clerk development
+identities for the production sharing journey:
+
+```bash
+CONCORD_E2E_MODE=production npm run test:sharing:browser -- --headed
+```
+
+The driver covers verified email grants before a recipient's first visit,
+unknown-account errors, copy-link and keyboard interaction, a narrow viewport,
+accessible dialog/collection controls, discovery across workspaces, real
+comments, live promotion and downgrade, unrelated-account denials, server
+broadcast revocation with HTTP status polling deliberately unavailable, and
+service failure/retry. It writes screenshots and a stage report under ignored
+`output/playwright/sharing/`. Add `--hold` for a bounded manual inspection
+window; creating `output/playwright/sharing/finish-live` ends it early.
+
+The production run uses PostgreSQL, the current release gateway, WASM, the
+native worker, real Clerk/JWKS, and the configured NATS/Redis services. The
+[sharing guide](SHARING.md) explains the role and organization semantics; the
+[acceptance report](audits/SHARING_REPORT.md) records verified coverage and
+limits. Remote anonymous CI does not replace this authenticated journey.
+
 ## Strict release verification and traceability
 
 Developer mode may report a missing optional prerequisite as `SKIP`. The

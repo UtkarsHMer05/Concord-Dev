@@ -38,6 +38,7 @@ export const DocumentRow = ({ document, onRemoved }: DocumentRowProps) => {
   const router = useRouter();
   const openDocument = () => router.push(`/documents/${document.id}`);
   const { Icon: ScopeIcon, text: scopeText } = scopeBadge(document.organizationId);
+  const roleText = { OWNER: "Owner", EDITOR: "Can edit", COMMENTER: "Can comment", VIEWER: "Can view" }[document.effectiveRole];
   const href = `/documents/${document.id}`;
 
   return (
@@ -48,15 +49,17 @@ export const DocumentRow = ({ document, onRemoved }: DocumentRowProps) => {
       <TableCell className="font-medium md:w-[45%]">
         <Link
           href={href}
+          prefetch={false}
           className="hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm px-1 -mx-1"
           onClick={(event) => event.stopPropagation()}
         >
           {document.title}
         </Link>
+        <p className="mt-1 text-xs text-muted-foreground md:hidden">{roleText}</p>
       </TableCell>
       <TableCell className="text-muted-foreground hidden md:flex items-center gap-2">
         <ScopeIcon className="size-4" aria-hidden="true" />
-        {scopeText}
+        <span>{roleText}<span className="block text-xs">{scopeText}</span></span>
       </TableCell>
       <TableCell className="text-muted-foreground hidden md:table-cell">
         {/* machine-readable timestamp for the semantic <time> element */}
@@ -69,6 +72,7 @@ export const DocumentRow = ({ document, onRemoved }: DocumentRowProps) => {
           documentId={document.id}
           title={document.title}
           metadataVersion={document.metadataVersion}
+          role={document.effectiveRole}
           onNewTab={(id) => window.open(`/documents/${id}`, "_blank")}
           onRemoved={onRemoved}
         />

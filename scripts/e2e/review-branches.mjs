@@ -57,14 +57,15 @@ try {
         for (let i = 0; i < [...text].length; i++) await page.keyboard.press('Shift+ArrowLeft');
     };
     const replace = async (page, before, after) => { await selectLine(page, before); await page.keyboard.insertText(after); await expect(surface(page)).toContainText(after); };
-    const identity = async (page) => { await tools(page, 'Share'); return page.getByRole('textbox', { name: 'Your collaboration ID' }).inputValue(); };
+    const identity = async (page) => { await tools(page, 'Share'); await page.getByText('Link and your collaboration ID', { exact: true }).click(); return page.getByRole('textbox', { name: 'Your collaboration ID' }).inputValue(); };
     const grant = async (page, id, role) => {
         await tools(page, 'Share');
+        await page.getByLabel('Identify collaborator by').selectOption('id');
         await page.getByRole('textbox', { name: 'Collaborator ID', exact: true }).fill(id);
         await page.getByLabel('Access', { exact: true }).selectOption(role);
         await page.getByRole('button', { name: 'Grant access' }).click();
         await expect(page.getByRole('textbox', { name: 'Collaborator ID', exact: true })).toHaveValue('');
-        await expect(panel(page).getByText(id, { exact: true })).toBeVisible();
+        await expect(panel(page).getByRole('button', { name: /^Remove access for/ }).first()).toBeVisible();
     };
     await createDocument(alice, 'Author identity'); await waitForEditor(alice); const aliceId = await identity(alice);
     await createDocument(reviewer, 'Reviewer identity'); await waitForEditor(reviewer); const reviewerId = await identity(reviewer);
