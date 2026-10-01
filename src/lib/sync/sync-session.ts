@@ -119,6 +119,7 @@ export class SyncSession {
    * `syncNow()` pulls still summarise the delta.
    */
   private initialCatchupPending = true;
+  private suppressCatchupBriefing = false;
   /**
    * Snapshot resync (P5-M031): the signal the server last sent while the
    * fetch was in flight. A payload that does not match the outstanding
@@ -147,6 +148,7 @@ export class SyncSession {
         // Reconnect flow (M034): authenticated → join(state summary) →
         // catch-up from the persisted cursor → sync_done → READY → resend.
         onAuthenticated: () => {
+          this.suppressCatchupBriefing = false;
           this.catchupFailed = false;
           this.catchupComplete = false;
           this.serverConfirmed = false;
@@ -249,8 +251,9 @@ export class SyncSession {
 
   /** Pull durable operations written outside this browser session through the
    * normal catch-up path (for example an owner restore). */
-  syncNow(): void {
+  syncNow(showBriefing = true): void {
     if (this.disposed || this.transport.currentStatus !== "ready") return;
+    this.suppressCatchupBriefing = !showBriefing;
     this.catchupFailed = false;
     this.catchupComplete = false;
     this.catchupStartCursor = this.lastCursor;
@@ -555,7 +558,7 @@ export class SyncSession {
     // A fresh replica's first catch-up is an initial load, not an absence.
     const isInitialFreshLoad = this.initialCatchupPending && this.catchupStartCursor === "0";
     this.initialCatchupPending = false;
-    if (briefing !== null && !isInitialFreshLoad) {
+    if (briefing !== null && !isInitialFreshLoad && !this.suppressCatchupBriefing) {
       try {
         this.options.onCatchupBriefing?.(briefing);
       } catch (error) {
@@ -577,6 +580,12 @@ export class SyncSession {
     // Once durably acked AND the cursor persisted past them, records are
     // safe to compact — but keep them until the next catch-up confirms.
     // Continue flushing any ops generated while the batch was in flight.
-    void this.flushOutbox().catch((error: unknown) => this.reportLocalError(error));
+    await this.flushOutbox();
+    if (typeof store.stateCounts === "function") {
+      const counts = await store.stateCounts();
+      // The last ACK does not advance our durable cursor. Pull its coverage
+      // so recovered sessions can compact ACK rows and clear stale errors.
+      if (counts.pending === 0 && counts.sent === 0) this.syncNow(false);
+    }
   }
 }

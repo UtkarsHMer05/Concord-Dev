@@ -399,8 +399,9 @@ describe("SyncSession durability recovery over the real worker core", () => {
         expect(h.persistence.logs.get(DOC)?.[0].coveredAtCursor).toBeUndefined();
     });
 
-    it("keeps durable ACK rows until a later completed catch-up compacts them", async () => {
+    it("requests catch-up after the last ACK and retains rows until durable cursor coverage", async () => {
         const h = await newHarness(4242n);
+        const briefings: unknown[] = [];
         await h.client.localInsertText(0, 0x78);
         const localId = identityFromOpBytes((await h.client.localOpsSince("0")).ops[0])!;
         const outboxStates: Array<{
@@ -418,6 +419,7 @@ describe("SyncSession durability recovery over the real worker core", () => {
             setCursor: () => {},
             store: h.store as unknown as PendingOpStore,
             onOutboxState: (state) => outboxStates.push(state),
+            onCatchupBriefing: (briefing) => briefings.push(briefing),
         });
         vi.stubGlobal("WebSocket", MockSessionSocket);
         MockSessionSocket.instances.length = 0;
@@ -436,6 +438,7 @@ describe("SyncSession durability recovery over the real worker core", () => {
                 expect((await h.store.stateCounts()).sent).toBe(1);
             });
 
+            const syncRequests = socket.texts().filter((frame) => frame.includes('"sync_request"')).length;
             socket.serverSend(JSON.stringify({
                 v: 1,
                 type: "durable_ack",
@@ -444,6 +447,9 @@ describe("SyncSession durability recovery over the real worker core", () => {
             await vi.waitFor(async () => {
                 expect((await h.store.stateCounts()).durably_acked).toBe(1);
             });
+            await vi.waitFor(() => expect(
+                socket.texts().filter((frame) => frame.includes('"sync_request"')).length,
+            ).toBeGreaterThan(syncRequests));
             expect(await h.store.ackedIds()).toHaveLength(1);
 
             // A new sync_done stands in for a reconnect catch-up that has
@@ -466,6 +472,7 @@ describe("SyncSession durability recovery over the real worker core", () => {
                 expect((await h.store.stateCounts()).durably_acked).toBe(0);
             });
             expect(await h.store.ackedIds()).toHaveLength(0);
+            expect(briefings).toHaveLength(0);
             expect(outboxStates.at(-1)).toEqual({
                 pending: 0,
                 sent: 0,

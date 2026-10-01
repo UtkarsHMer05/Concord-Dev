@@ -41,6 +41,10 @@ their own licenses as summarized below.
   class-variance-authority, clsx, tailwind-merge** — consumed from npm
   under their own licenses; the full machine-readable inventory is the
   SBOM set at `scripts/sbom/web.cdx.json`.
+- **Yjs and y-prosemirror** — MIT-licensed development dependencies used
+  by the reproducible browser benchmark; they are not part of Concord's
+  production editor bundle. Their package licenses remain in npm's installed
+  dependency tree.
 - **Rust crate set** (tokio, axum, tokio-postgres, deadpool, reqwest,
   jsonwebtoken, async-nats, redis, opentelemetry, and transitive
   dependencies) — mixed permissive licenses (MIT/Apache-2.0/BSD/ISC/

@@ -71,6 +71,8 @@ The secret-free v1.0.0 evidence index remains preserved at
 | Document | What it answers |
 |---|---|
 | [BENCHMARKS.md](BENCHMARKS.md) | Every measured number with its methodology, environment, and run count — and what is explicitly not claimed |
+| [PERFORMANCE_COMPARISON.md](PERFORMANCE_COMPARISON.md) | One-command browser comparison with Yjs, actual-app measurements, raw evidence, and shared persistence assumptions |
+| [assets/performance/report.html](assets/performance/report.html) | Downloadable interactive comparison with metric controls, distributions, and the separate production-app profile |
 
 ## Operations
 
@@ -99,6 +101,7 @@ The secret-free v1.0.0 evidence index remains preserved at
 | [audits/CANONICAL_RELEASE_REPORT.md](audits/CANONICAL_RELEASE_REPORT.md) | Current `1.0.1` candidate verdict, exact local evidence, unresolved blockers, and owner actions |
 | [audits/CANONICAL_FRESH_EVIDENCE.md](audits/CANONICAL_FRESH_EVIDENCE.md) | Candidate-bound local gate results and limitations |
 | [audits/CONCORDPACK_REPORT.md](audits/CONCORDPACK_REPORT.md) | Signed-history implementation and browser/native/database acceptance evidence |
+| [audits/PERFORMANCE_COMPARISON_REPORT.md](audits/PERFORMANCE_COMPARISON_REPORT.md) | Full browser campaign, measured costs, correctness checks, reproduction details, and scope limits |
 | [audits/CANONICAL_RELEASE_LEDGER.json](audits/CANONICAL_RELEASE_LEDGER.json) | Machine-readable current findings/evidence/owner-action ledger |
 | [../evidence/v1.0.1/README.md](../evidence/v1.0.1/README.md) | Secret-free evidence bundle for implementation candidate `42dcb17…` |
 | [../evidence/v1.0.0/README.md](../evidence/v1.0.0/README.md) | Secret-free machine-readable CI, security, reproducibility, and performance evidence for v1.0.0 |

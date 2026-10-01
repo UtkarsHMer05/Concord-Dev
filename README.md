@@ -60,6 +60,7 @@ project's core engineering.
 | **Markdown and content bundles** | Import/export the supported Markdown subset, inspect a local content bundle, or apply supported visible content as new edits. |
 | **Installable workspace** | Install the production PWA and reopen previously cached documents and editor assets offline. |
 | **Collaboration failure lab** | Replay disconnections, duplicate delivery, lost acknowledgements, and recovery; inspect replica states, download traces, and reduce a known failure to a smaller reproduction. |
+| **Reproducible performance comparison** | Run identical edits through Concord and Yjs in real Chromium; inspect input/render latency, durability, memory, retained bytes, and offline recovery, with raw results and charts. |
 
 ### Review changes before merging
 
@@ -112,8 +113,10 @@ An older worker receives an explicit upgrade path while local data is retained:
 </details>
 
 Feature guides: [rich-text collaboration](docs/RICH_TEXT_COLLABORATION.md),
-[review branches](docs/REVIEW_BRANCHES.md), and
-[signed history archives](docs/CONCORDPACK.md). See
+[review branches](docs/REVIEW_BRANCHES.md),
+[signed history archives](docs/CONCORDPACK.md),
+[failure lab](docs/FAILURE_LAB.md), and
+[performance comparison](docs/PERFORMANCE_COMPARISON.md). See
 [review tools](docs/REVIEW_TOOLS.md) for comments, replay, and local bundles.
 
 ## Architecture
@@ -165,6 +168,54 @@ mutations share their database transaction. See the
 
 ## Benchmarks
 
+### Browser editing: Concord and Yjs
+
+Run the same user edits through real TipTap editors backed by Concord's
+production bridge/WASM worker and the official Yjs binding. Both use the
+same durable IndexedDB outbox and PostgreSQL commit boundary. The campaign
+covers typing, middle edits, large pastes, deletes, formatting, four writers
+on one document, eight independent documents, and offline recovery.
+
+The recorded comparison uses **three measured runs plus one excluded
+warmup**, **5,364 measured user edits**, Chromium 153.0.8010.12, and an
+**Apple M2 with 8 GB RAM**. Yjs 13.6.33 and y-prosemirror 1.3.7 are pinned.
+
+| Shared workload / measurement | Concord | Yjs |
+|---|---:|---:|
+| Append input → rendering opportunity, p95 | 34.40 ms | 33.20 ms |
+| Large paste → local durability, p95; four 4,224-character pastes per run | 2,315.40 ms | 4.90 ms |
+| Four concurrent writers → committed ACK, p95 | 62.20 ms | 5.90 ms |
+| Offline backlog catch-up after a 60-second disconnection, median | 5,216.04 ms | 564.19 ms |
+| Retained PostgreSQL payload after the paste workload, median | 962.0 KiB | 18.7 KiB |
+
+The result exposes current costs: Concord retains larger binary histories
+and takes longer to persist large pastes. The rendering boundary measures
+two animation frames; an edit can appear before its durable write completes.
+These observations cover one machine, a defined rich-text subset, and one
+edit in flight per writer. They do not establish maximum throughput or a
+universal ranking of the engines.
+
+![Concord and Yjs charts showing rendering, local durability, committed acknowledgement, and retained payload costs across eight workloads](docs/assets/performance/charts.svg)
+
+```bash
+npm run bench:compare
+```
+
+See the [setup and measurement guide](docs/PERFORMANCE_COMPARISON.md),
+[interactive report](docs/assets/performance/report.html),
+[raw results and environment](docs/assets/performance/raw.json), and
+[acceptance report](docs/audits/PERFORMANCE_COMPARISON_REPORT.md).
+Memory includes the page and dedicated workers; local storage, exported
+state size, reload recovery, and sample counts are available in the report.
+The authenticated Concord app is measured in a separate lane with its real
+Rust gateway, PostgreSQL, NATS, Redis, and Clerk authentication.
+All **64 paired cases** (48 measured, 16 warmups) and **three authenticated
+app trials** passed convergence, durability, and reload checks. The app
+trials retained and synchronized 250 offline edits each; default gateway
+rate limits remained active and their retry costs are included.
+
+### Historical gateway and recovery measurements
+
 The recorded measurements below show the effect of batching durable writes
 and recovering from snapshots. They are historical local results for commit
 `eee94b9`, captured on **2026-09-10** on an **Apple M2, 8 cores, 8 GB RAM**,
@@ -191,7 +242,9 @@ These measurements cover different workloads: the ingest microbenchmark is
 not end-to-end typing latency. They were not rerun for later editor features.
 [Benchmark methodology and campaign records](docs/BENCHMARKS.md) include
 commands, environments, and run counts; raw distributed campaign logs are
-private. There is no measured Yjs or Automerge comparison.
+private. The current [browser comparison with Yjs](docs/PERFORMANCE_COMPARISON.md)
+uses its own shared workload and persistence contract. Automerge is not part
+of that campaign.
 
 <details>
 <summary><strong>Native CRDT baseline</strong></summary>
@@ -268,6 +321,14 @@ matching saved revisions, private ownership, retry after response loss,
 continued editing and history restore, plus keyboard and mobile checks.
 Run it with `CONCORD_E2E_MODE=production npm run test:concordpack:browser`;
 the [archive guide](docs/CONCORDPACK.md#verification) lists its prerequisites.
+
+The [performance acceptance report](docs/audits/PERFORMANCE_COMPARISON_REPORT.md)
+adds 64 paired editor cases and three authenticated app trials, plus report
+controls, zero automated accessibility violations, and a mobile overflow
+check. Routine checks now record **314 web tests passed**, with 2 intentional
+skips, and **2 comparison publication checks passed**. The browser workload
+also exposed and verified a fix for a stale sync error after the last pending
+write was acknowledged.
 
 ## Getting started
 
@@ -348,14 +409,16 @@ public/    Editor assets, CRDT worker, and bundled WASM
 | Portable document history | [Signed archives and offline verification](docs/CONCORDPACK.md) · [Acceptance report](docs/audits/CONCORDPACK_REPORT.md) |
 | Security and permissions | [Security](docs/SECURITY.md) · [Authorization](docs/AUTHORIZATION.md) |
 | Measurements and validation | [Benchmarks](docs/BENCHMARKS.md) · [Testing](docs/TESTING.md) · [Verification](docs/VERIFICATION.md) |
+| Browser performance and comparison | [Method and reproduction](docs/PERFORMANCE_COMPARISON.md) · [Interactive report](docs/assets/performance/report.html) · [Acceptance report](docs/audits/PERFORMANCE_COMPARISON_REPORT.md) |
 | Running and operating the stack | [Configuration](docs/CONFIGURATION.md) · [Operations](docs/OPERATIONS.md) · [Deployment](docs/DEPLOYMENT.md) |
 | Full reference and release evidence | [Documentation index](docs/README.md) · [Release report](docs/audits/CANONICAL_RELEASE_REPORT.md) |
 
 Detailed implementation evidence is preserved in the
 [rich-text report](docs/audits/RICH_TEXT_COLLABORATION_REPORT.md),
 [review-branches report](docs/audits/REVIEW_BRANCHES_REPORT.md), and
-[failure-lab report](docs/audits/FAILURE_LAB_REPORT.md), and
-[signed-history report](docs/audits/CONCORDPACK_REPORT.md).
+[failure-lab report](docs/audits/FAILURE_LAB_REPORT.md), alongside the
+[signed-history report](docs/audits/CONCORDPACK_REPORT.md) and
+[performance report](docs/audits/PERFORMANCE_COMPARISON_REPORT.md).
 
 ## Attribution and license
 

@@ -15,14 +15,10 @@ import { ConcordEngine } from "@/lib/crdt/runtime";
  *
  *   CONCORD_PERF_GATE=1 npx vitest run tests/perf/big-doc-gate.test.ts --project unit
  *
- * The point is TREND detection with deliberately loose bounds (the
- * measurement harness scripts/bench/big-doc-bench.mjs records precise
- * p50/p95 against .agent/bench/baselines/). These asserts pin the
- * asymptotics: a change that turns the O(n) fold into something worse, or
- * O(1) snapshot import into an O(n) replay, fails here long before users
- * feel it. Current headroom (2026-09-25 baseline): fold ~39ms p50 at
- * 100k ops (2.6M ops/s), snapshot import ~37ms — the 30s/5s bounds are
- * ~750x/100x headroom.
+ * These loose 30s/5s budgets detect severe regressions for one workload.
+ * They do not prove asymptotic complexity or responsive browser editing.
+ * scripts/bench/big-doc-bench.mjs measures engine timings; bench:compare
+ * separately measures actual browser input, persistence and recovery.
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -69,7 +65,7 @@ async function buildSourceOps(): Promise<Uint8Array[]> {
 }
 
 describe.skipIf(!process.env.CONCORD_PERF_GATE)("100k-op perf gate (CONCORD_PERF_GATE=1)", () => {
-  it("folds 100k ops well inside the budget and keeps snapshot import O(snapshot)", async () => {
+  it("folds and imports within broad time budgets while preserving state", async () => {
     const ops = await buildSourceOps();
     expect(ops.length).toBe(OP_COUNT);
 

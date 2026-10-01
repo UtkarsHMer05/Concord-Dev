@@ -31,6 +31,8 @@
     "test:rich-text:browser": "node scripts/e2e/rich-text.mjs",
     "test:review-branches:browser": "node scripts/e2e/review-branches.mjs",
     "test:concordpack:browser": "node scripts/e2e/concordpack.mjs",
+    "bench:compare": "node scripts/bench/performance-compare.mjs",
+    "test:bench:compare": "node --test scripts/bench/comparison.test.mjs",
     "failure-lab": "node scripts/failure-lab.mjs",
     "test:browser:smoke:chromium": "playwright test --project=chromium tests/browser/smoke.spec.ts",
     "test:browser:smoke:firefox": "playwright test --project=firefox tests/browser/smoke.spec.ts",
@@ -94,7 +96,9 @@
     "tailwindcss": "^4.3.3",
     "tw-animate-css": "^1.4.0",
     "typescript": "~5.9.3",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.0",
+    "y-prosemirror": "1.3.7",
+    "yjs": "13.6.33"
   },
   "overrides": {
     "@esbuild-kit/core-utils": {
